@@ -9,7 +9,7 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@reins/core": "*"
+    "@reins/core": "file:../reins-core"
   },
   "devDependencies": {
     "typescript": "^5.7.0",
