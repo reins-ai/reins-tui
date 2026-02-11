@@ -1,8 +1,13 @@
-import type { DisplayMessage } from "../store";
+import { useReducer, useCallback } from "react";
+
+import type { DisplayMessage, DisplayToolCall } from "../store";
 import { useConversation } from "../hooks";
 import { useThemeTokens } from "../theme";
+import type { ToolCall, ToolCallStatus } from "../tools/tool-lifecycle";
+import { createInitialToolDetailState, toolDetailReducer } from "../tools/tool-detail-store";
 import { Box, ScrollBox, Text } from "../ui";
 import { Message } from "./message";
+import { ToolInline } from "./tool-inline";
 
 export const EXCHANGE_SEPARATOR = "─ ─ ─";
 
@@ -30,6 +35,24 @@ export function shouldShowSeparator(messages: readonly DisplayMessage[], index: 
   return false;
 }
 
+const DISPLAY_TO_LIFECYCLE_STATUS: Record<DisplayToolCall["status"], ToolCallStatus> = {
+  pending: "queued",
+  running: "running",
+  complete: "success",
+  error: "error",
+};
+
+export function displayToolCallToToolCall(dtc: DisplayToolCall): ToolCall {
+  const status = DISPLAY_TO_LIFECYCLE_STATUS[dtc.status];
+  return {
+    id: dtc.id,
+    toolName: dtc.name,
+    status,
+    error: dtc.isError && dtc.result ? dtc.result : undefined,
+    result: !dtc.isError && dtc.result ? dtc.result : undefined,
+  };
+}
+
 function ExchangeSeparator() {
   const { tokens } = useThemeTokens();
 
@@ -37,6 +60,39 @@ function ExchangeSeparator() {
     <Box style={{ flexDirection: "row", justifyContent: "center", marginTop: 1, marginBottom: 1 }}>
       <Text style={{ color: tokens["border.subtle"] }}>{EXCHANGE_SEPARATOR}</Text>
     </Box>
+  );
+}
+
+interface InlineToolCallsProps {
+  toolCalls: DisplayToolCall[];
+}
+
+function InlineToolCalls({ toolCalls }: InlineToolCallsProps) {
+  const [detailState, dispatch] = useReducer(toolDetailReducer, createInitialToolDetailState());
+
+  const handleToggle = useCallback(
+    (toolCallId: string) => {
+      dispatch({ type: "toggle-collapse", toolCallId });
+    },
+    [],
+  );
+
+  return (
+    <>
+      {toolCalls.map((dtc) => {
+        const call = displayToolCallToToolCall(dtc);
+        const isCollapsed = detailState.collapsed.has(dtc.id);
+
+        return (
+          <ToolInline
+            key={dtc.id}
+            call={call}
+            collapsed={isCollapsed}
+            onToggle={() => handleToggle(dtc.id)}
+          />
+        );
+      })}
+    </>
   );
 }
 
@@ -69,6 +125,9 @@ export function ConversationPanel({ isFocused, borderColor }: ConversationPanelP
             <Box key={message.id} style={{ flexDirection: "column" }}>
               {shouldShowSeparator(messages, index) ? <ExchangeSeparator /> : null}
               <Message message={message} />
+              {message.toolCalls && message.toolCalls.length > 0 ? (
+                <InlineToolCalls toolCalls={message.toolCalls} />
+              ) : null}
             </Box>
           ))
         )}

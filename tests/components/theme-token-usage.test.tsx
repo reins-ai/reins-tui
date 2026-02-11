@@ -20,6 +20,7 @@ const COMPONENT_FILES = [
   "model-selector.tsx",
   "help-screen.tsx",
   "error-boundary.tsx",
+  "tool-inline.tsx",
 ];
 
 const HEX_COLOR_LITERAL = /#[0-9a-fA-F]{6}(?:[0-9a-fA-F]{2})?/g;
