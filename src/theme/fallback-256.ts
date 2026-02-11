@@ -26,7 +26,7 @@ function distance(a: RgbColor, b: RgbColor): number {
 }
 
 function nearestCubeLevel(value: number): number {
-  let bestLevel = ANSI_CUBE_LEVELS[0];
+  let bestLevel: number = ANSI_CUBE_LEVELS[0];
   let bestDistance = Number.POSITIVE_INFINITY;
 
   for (const level of ANSI_CUBE_LEVELS) {
