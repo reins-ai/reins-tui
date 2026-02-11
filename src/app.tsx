@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useReducer, useRef, useState } from "react";
 
-import { CommandPalette, ErrorBoundary, getNextModel, HelpScreen, Layout } from "./components";
+import { CommandPalette, type CommandPaletteDataSources, ErrorBoundary, getNextModel, HelpScreen, Layout } from "./components";
 import { useConversations, useFocus } from "./hooks";
-import { DEFAULT_COMMANDS, type Command } from "./lib";
+import type { PaletteAction } from "./palette/fuzzy-index";
 import { AppContext, DEFAULT_STATE, appReducer, useApp } from "./store";
 import { ThemeProvider, useThemeTokens } from "./theme";
 import { type KeyEvent, type TerminalDimensions, useKeyboard, useRenderer, useTerminalDimensions } from "./ui";
@@ -156,50 +156,63 @@ function AppView({ version, dimensions }: AppViewProps) {
     dispatch({ type: "SET_COMMAND_PALETTE_OPEN", payload: isOpen });
   };
 
-  const executeCommand = (command: Command) => {
-    switch (command.action) {
-      case "NEW_CONVERSATION":
-        conversationManager.createConversation();
-        dispatch({ type: "SET_STATUS", payload: "Started a new conversation" });
+  const paletteSources = useMemo<CommandPaletteDataSources>(() => ({
+    conversations: state.conversations.map((conversation) => ({
+      id: conversation.id,
+      title: conversation.title,
+      updatedAt: conversation.updatedAt,
+    })),
+    notes: [],
+  }), [state.conversations]);
+
+  const executePaletteAction = useCallback((action: PaletteAction) => {
+    switch (action.type) {
+      case "command":
+        handlePaletteCommand(action.command);
         break;
-      case "CLEAR_MESSAGES":
-        dispatch({ type: "CLEAR_MESSAGES" });
-        dispatch({ type: "SET_STATUS", payload: "Cleared messages" });
+      case "conversation":
+        dispatch({ type: "SET_ACTIVE_CONVERSATION", payload: action.conversationId });
+        dispatch({ type: "SET_STATUS", payload: "Switched conversation" });
         break;
-      case "SWITCH_MODEL": {
-        const nextModel = getNextModel(state.currentModel);
-        dispatch({ type: "SET_MODEL", payload: nextModel });
-        dispatch({ type: "SET_STATUS", payload: `Model set to ${nextModel}` });
+      case "note":
+        dispatch({ type: "SET_STATUS", payload: `Opening note ${action.noteId}` });
         break;
-      }
-      case "TOGGLE_HELP": {
+      case "action":
+        dispatch({ type: "SET_STATUS", payload: `Executed action: ${action.key}` });
+        break;
+    }
+    setCommandPaletteOpen(false);
+  }, [dispatch]);
+
+  const handlePaletteCommand = (commandName: string) => {
+    switch (commandName) {
+      case "help":
         setShowHelp((current) => {
           const next = !current;
           dispatch({ type: "SET_STATUS", payload: next ? "Help enabled" : "Help disabled" });
           return next;
         });
         break;
+      case "new":
+        conversationManager.createConversation();
+        dispatch({ type: "SET_STATUS", payload: "Started a new conversation" });
+        break;
+      case "clear":
+        dispatch({ type: "CLEAR_MESSAGES" });
+        dispatch({ type: "SET_STATUS", payload: "Cleared messages" });
+        break;
+      case "model": {
+        const nextModel = getNextModel(state.currentModel);
+        dispatch({ type: "SET_MODEL", payload: nextModel });
+        dispatch({ type: "SET_STATUS", payload: `Model set to ${nextModel}` });
+        break;
       }
-      case "FOCUS_SIDEBAR":
-        focus.focusPanel("sidebar");
-        dispatch({ type: "SET_STATUS", payload: "Focused sidebar" });
-        break;
-      case "FOCUS_CONVERSATION":
-        focus.focusPanel("conversation");
-        dispatch({ type: "SET_STATUS", payload: "Focused conversation" });
-        break;
-      case "FOCUS_INPUT":
-        focus.focusPanel("input");
-        dispatch({ type: "SET_STATUS", payload: "Focused input" });
-        break;
-      case "QUIT":
+      case "quit":
         exitApp();
         break;
       default:
-        dispatch({ type: "SET_STATUS", payload: `Executed ${command.label}` });
+        dispatch({ type: "SET_STATUS", payload: `Executed /${commandName}` });
     }
-
-    setCommandPaletteOpen(false);
   };
 
   useKeyboard((event) => {
@@ -286,9 +299,9 @@ function AppView({ version, dimensions }: AppViewProps) {
       />
       <CommandPalette
         isOpen={state.isCommandPaletteOpen}
-        commands={DEFAULT_COMMANDS}
+        sources={paletteSources}
         onClose={() => setCommandPaletteOpen(false)}
-        onExecute={executeCommand}
+        onExecute={executePaletteAction}
       />
       <HelpScreen isOpen={showHelp} />
     </>
