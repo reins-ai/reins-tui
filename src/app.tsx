@@ -52,6 +52,14 @@ function isCommandPaletteToggleEvent(event: KeyEvent): boolean {
   return event.ctrl === true && (event.name === "k" || event.sequence === "k");
 }
 
+function isToggleActivityEvent(event: KeyEvent): boolean {
+  return event.ctrl === true && (event.name === "a" || event.sequence === "\x01");
+}
+
+function isToggleZenEvent(event: KeyEvent): boolean {
+  return event.ctrl === true && (event.name === "z" || event.sequence === "\x1a");
+}
+
 function isFocusForwardEvent(event: KeyEvent): boolean {
   return event.name === "tab" && event.shift !== true;
 }
@@ -212,6 +220,20 @@ function AppView({ version, dimensions }: AppViewProps) {
       return;
     }
 
+    if (isToggleActivityEvent(event)) {
+      dispatch({ type: "TOGGLE_ACTIVITY" });
+      const nextMode = state.layoutMode === "activity" ? "Normal" : "Activity";
+      dispatch({ type: "SET_STATUS", payload: `${nextMode} layout` });
+      return;
+    }
+
+    if (isToggleZenEvent(event)) {
+      dispatch({ type: "TOGGLE_ZEN" });
+      const nextMode = state.layoutMode === "zen" ? "Normal" : "Zen";
+      dispatch({ type: "SET_STATUS", payload: `${nextMode} layout` });
+      return;
+    }
+
     if (isNewConversationEvent(event)) {
       conversationManager.createConversation();
       dispatch({ type: "SET_STATUS", payload: "Started a new conversation" });
@@ -230,6 +252,9 @@ function AppView({ version, dimensions }: AppViewProps) {
 
     const directFocusTarget = resolveDirectPanelFocus(event);
     if (directFocusTarget) {
+      if (directFocusTarget === "sidebar" && state.layoutMode === "zen") {
+        return;
+      }
       focus.focusPanel(directFocusTarget);
       return;
     }

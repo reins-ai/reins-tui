@@ -1,7 +1,7 @@
 import type { FocusedPanel } from "../store";
-import { useApp } from "../store";
+import { useApp, getLayoutVisibility } from "../store";
 import { useThemeTokens } from "../theme";
-import { Box, type TerminalDimensions } from "../ui";
+import { Box, Text, type TerminalDimensions } from "../ui";
 import { ConversationPanel } from "./conversation-panel";
 import { InputArea } from "./input-area";
 import { Sidebar } from "./sidebar";
@@ -36,13 +36,16 @@ export function Layout({ version, dimensions, showHelp, onSubmitMessage }: Layou
   const { state } = useApp();
   const { tokens } = useThemeTokens();
   const panelBorders = getPanelBorderColors(state.focusedPanel, tokens["border.focus"], tokens["border.subtle"]);
+  const visibility = getLayoutVisibility(state.layoutMode);
 
   return (
     <Box style={{ flexDirection: "column", height: "100%" }}>
       <Box style={{ flexDirection: "row", flexGrow: 1 }}>
-        <Sidebar isFocused={state.focusedPanel === "sidebar"} borderColor={panelBorders.sidebar} />
+        {visibility.showSidebar ? (
+          <Sidebar isFocused={state.focusedPanel === "sidebar"} borderColor={panelBorders.sidebar} />
+        ) : null}
 
-        <Box style={{ flexGrow: 1, marginLeft: 1, flexDirection: "column" }}>
+        <Box style={{ flexGrow: 1, marginLeft: visibility.showSidebar ? 1 : 0, flexDirection: "column" }}>
           <ConversationPanel
             isFocused={state.focusedPanel === "conversation"}
             borderColor={panelBorders.conversation}
@@ -53,6 +56,22 @@ export function Layout({ version, dimensions, showHelp, onSubmitMessage }: Layou
             onSubmit={onSubmitMessage}
           />
         </Box>
+
+        {visibility.showActivityPanel ? (
+          <Box
+            style={{
+              width: 32,
+              marginLeft: 1,
+              border: true,
+              borderColor: tokens["border.subtle"],
+              padding: 1,
+              flexDirection: "column",
+            }}
+          >
+            <Text content="Activity" style={{ color: tokens["text.secondary"] }} />
+            <Text content="Tool calls and events" style={{ color: tokens["text.muted"] }} />
+          </Box>
+        ) : null}
       </Box>
 
       <StatusBar version={version} dimensions={dimensions} showHelp={showHelp} />
