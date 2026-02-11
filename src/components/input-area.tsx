@@ -1,8 +1,14 @@
 import { useRef, useState } from "react";
 
+import { dispatchCommand, type CommandResult } from "../commands/handlers";
+import { parseSlashCommand } from "../commands/parser";
+import { SLASH_COMMANDS } from "../commands/registry";
+import { AVAILABLE_MODELS } from "./model-selector";
+import { useApp } from "../store";
 import { InputHistory } from "../lib";
-import { useThemeTokens } from "../theme";
-import { Box, Input, Text, useKeyboard } from "../ui";
+import { useThemeContext, useThemeTokens } from "../theme";
+import { Box, Input, Text, useKeyboard, useRenderer } from "../ui";
+import { useConversations } from "../hooks";
 
 export interface InputAreaProps {
   isFocused: boolean;
@@ -58,11 +64,137 @@ function clampText(text: string): string {
   return text.slice(0, MAX_INPUT_LENGTH);
 }
 
+export function classifyInputSubmission(text: string): "empty" | "command" | "message" {
+  const trimmed = text.trim();
+
+  if (trimmed.length === 0) {
+    return "empty";
+  }
+
+  if (text.trimStart().startsWith("/")) {
+    return "command";
+  }
+
+  return "message";
+}
+
+function destroyRenderer(renderer: unknown): void {
+  if (
+    typeof renderer === "object" &&
+    renderer !== null &&
+    "destroy" in renderer &&
+    typeof renderer.destroy === "function"
+  ) {
+    renderer.destroy();
+  }
+}
+
+function toDate(value: Date | string | number): Date {
+  if (value instanceof Date) {
+    return value;
+  }
+
+  const asDate = new Date(value);
+  if (Number.isNaN(asDate.getTime())) {
+    return new Date();
+  }
+
+  return asDate;
+}
+
 export function InputArea({ isFocused, borderColor, onSubmit }: InputAreaProps) {
+  const { state, dispatch } = useApp();
+  const conversations = useConversations();
   const { tokens } = useThemeTokens();
+  const { registry, setTheme } = useThemeContext();
+  const renderer = useRenderer();
   const history = useRef(new InputHistory());
   const [input, setInput] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [compactMode, setCompactMode] = useState(false);
+
+  const appendCommandResponse = (text: string) => {
+    dispatch({
+      type: "ADD_MESSAGE",
+      payload: {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: text,
+        createdAt: new Date(),
+      },
+    });
+  };
+
+  const applyCommandResult = (result: CommandResult) => {
+    dispatch({ type: "SET_STATUS", payload: result.statusMessage });
+
+    if (result.responseText) {
+      appendCommandResponse(result.responseText);
+    }
+
+    for (const signal of result.signals ?? []) {
+      if (signal.type === "QUIT_TUI") {
+        destroyRenderer(renderer);
+        process.exit(0);
+      }
+    }
+  };
+
+  const handleCommand = (commandInput: string): void => {
+    const parseResult = parseSlashCommand(commandInput);
+    if (!parseResult.ok) {
+      const message = parseResult.error.message;
+      dispatch({ type: "SET_STATUS", payload: message });
+      setValidationError(message);
+      return;
+    }
+
+    const commandResult = dispatchCommand(parseResult.value, {
+      catalog: SLASH_COMMANDS,
+      model: {
+        availableModels: AVAILABLE_MODELS,
+        currentModel: state.currentModel,
+        setModel(model: string) {
+          dispatch({ type: "SET_MODEL", payload: model });
+        },
+      },
+      theme: {
+        activeTheme: registry.getActiveThemeName(),
+        listThemes() {
+          return registry.listThemes();
+        },
+        setTheme,
+      },
+      session: {
+        activeConversationId: state.activeConversationId,
+        messages: state.messages.map((message) => ({
+          role: message.role === "assistant" || message.role === "system" ? message.role : "user",
+          content: message.content,
+          createdAt: toDate(message.createdAt),
+        })),
+        createConversation(title?: string) {
+          return conversations.createConversation(title);
+        },
+        clearConversation() {
+          dispatch({ type: "CLEAR_MESSAGES" });
+        },
+      },
+      view: {
+        compactMode,
+        setCompactMode,
+      },
+      daemonClient: null,
+    });
+
+    if (!commandResult.ok) {
+      dispatch({ type: "SET_STATUS", payload: commandResult.error.message });
+      setValidationError(commandResult.error.message);
+      return;
+    }
+
+    setValidationError(null);
+    applyCommandResult(commandResult.value);
+  };
 
   useKeyboard((event) => {
     if (!isFocused) {
@@ -105,9 +237,22 @@ export function InputArea({ isFocused, borderColor, onSubmit }: InputAreaProps) 
   };
 
   const handleSubmit = () => {
+    const kind = classifyInputSubmission(input);
+    if (kind === "empty") {
+      setValidationError("Message cannot be empty");
+      return;
+    }
+
     const error = validateMessage(input);
     if (error) {
       setValidationError(error);
+      return;
+    }
+
+    if (kind === "command") {
+      handleCommand(input);
+      history.current.push(input);
+      setInput("");
       return;
     }
 
