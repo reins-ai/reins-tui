@@ -30,6 +30,7 @@ export interface AppState {
   streamingMessageId: string | null;
   isStreaming: boolean;
   isCommandPaletteOpen: boolean;
+  isConnectFlowOpen: boolean;
   currentModel: string;
   status: string;
   focusedPanel: FocusedPanel;
@@ -45,6 +46,7 @@ export const DEFAULT_STATE: AppState = {
   streamingMessageId: null,
   isStreaming: false,
   isCommandPaletteOpen: false,
+  isConnectFlowOpen: false,
   currentModel: "default",
   status: "Ready",
   focusedPanel: "conversation",

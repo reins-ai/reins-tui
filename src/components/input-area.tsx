@@ -137,6 +137,9 @@ export function InputArea({ isFocused, borderColor, onSubmit }: InputAreaProps) 
         destroyRenderer(renderer);
         process.exit(0);
       }
+      if (signal.type === "OPEN_CONNECT_FLOW") {
+        dispatch({ type: "SET_CONNECT_FLOW_OPEN", payload: true });
+      }
     }
   };
 

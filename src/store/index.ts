@@ -52,6 +52,7 @@ export type AppAction =
   | { type: "FOCUS_PREV" }
   | { type: "SET_STREAMING"; payload: boolean }
   | { type: "SET_COMMAND_PALETTE_OPEN"; payload: boolean }
+  | { type: "SET_CONNECT_FLOW_OPEN"; payload: boolean }
   | { type: "SET_MODEL"; payload: string }
   | { type: "ADD_MESSAGE"; payload: DisplayMessage }
   | { type: "APPEND_TOKEN"; payload: { messageId: string; token: string } }
@@ -130,6 +131,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "SET_COMMAND_PALETTE_OPEN":
       return typeof action.payload === "boolean"
         ? { ...state, isCommandPaletteOpen: action.payload }
+        : state;
+    case "SET_CONNECT_FLOW_OPEN":
+      return typeof action.payload === "boolean"
+        ? { ...state, isConnectFlowOpen: action.payload }
         : state;
     case "SET_MODEL":
       return typeof action.payload === "string"

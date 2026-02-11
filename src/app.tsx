@@ -1,6 +1,8 @@
 import { useCallback, useMemo, useReducer, useRef, useState } from "react";
 
 import { CommandPalette, type CommandPaletteDataSources, ErrorBoundary, getNextModel, HelpScreen, Layout } from "./components";
+import { ConnectFlow, type ConnectResult } from "./components/connect-flow";
+import { ConnectService } from "./providers/connect-service";
 import { useConversations, useFocus } from "./hooks";
 import type { PaletteAction } from "./palette/fuzzy-index";
 import { AppContext, DEFAULT_STATE, appReducer, useApp } from "./store";
@@ -156,6 +158,40 @@ function AppView({ version, dimensions }: AppViewProps) {
     dispatch({ type: "SET_COMMAND_PALETTE_OPEN", payload: isOpen });
   };
 
+  const connectService = useMemo(() => new ConnectService(), []);
+
+  const handleConnectComplete = useCallback((result: ConnectResult) => {
+    dispatch({ type: "SET_CONNECT_FLOW_OPEN", payload: false });
+    if (result.success && result.connection) {
+      dispatch({
+        type: "ADD_MESSAGE",
+        payload: {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: `✦ ${result.connection.providerName} connected. Models: ${result.connection.models.join(", ") || "Available"}`,
+          createdAt: new Date(),
+        },
+      });
+      dispatch({ type: "SET_STATUS", payload: `Connected to ${result.connection.providerName}` });
+    } else if (result.error) {
+      dispatch({
+        type: "ADD_MESSAGE",
+        payload: {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: `✧ Connection failed: ${result.error.message}`,
+          createdAt: new Date(),
+        },
+      });
+      dispatch({ type: "SET_STATUS", payload: "Connection failed" });
+    }
+  }, [dispatch]);
+
+  const handleConnectCancel = useCallback(() => {
+    dispatch({ type: "SET_CONNECT_FLOW_OPEN", payload: false });
+    dispatch({ type: "SET_STATUS", payload: "Ready" });
+  }, [dispatch]);
+
   const paletteSources = useMemo<CommandPaletteDataSources>(() => ({
     conversations: state.conversations.map((conversation) => ({
       id: conversation.id,
@@ -229,7 +265,7 @@ function AppView({ version, dimensions }: AppViewProps) {
       return;
     }
 
-    if (state.isCommandPaletteOpen) {
+    if (state.isCommandPaletteOpen || state.isConnectFlowOpen) {
       return;
     }
 
@@ -304,6 +340,13 @@ function AppView({ version, dimensions }: AppViewProps) {
         onExecute={executePaletteAction}
       />
       <HelpScreen isOpen={showHelp} />
+      {state.isConnectFlowOpen ? (
+        <ConnectFlow
+          connectService={connectService}
+          onComplete={handleConnectComplete}
+          onCancel={handleConnectCancel}
+        />
+      ) : null}
     </>
   );
 }
