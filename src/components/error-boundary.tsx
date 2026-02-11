@@ -1,5 +1,6 @@
 import React from "react";
 
+import type { DaemonConnectionStatus } from "../daemon/contracts";
 import type { ThemeTokens } from "../theme/theme-schema";
 import { Box, Text } from "../ui";
 
@@ -76,4 +77,77 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
 
     return this.props.children;
   }
+}
+
+export interface DaemonOfflineBannerProps {
+  connectionStatus: DaemonConnectionStatus;
+  lastErrorMessage?: string;
+  onRetry?: () => void;
+  themeTokens?: Readonly<ThemeTokens>;
+}
+
+export function getDaemonOfflineBannerText(
+  connectionStatus: DaemonConnectionStatus,
+  lastErrorMessage?: string,
+): { visible: boolean; title: string; hint: string } {
+  switch (connectionStatus) {
+    case "connected":
+    case "connecting":
+      return { visible: false, title: "", hint: "" };
+    case "disconnected":
+      return {
+        visible: true,
+        title: lastErrorMessage ?? "Daemon is unavailable",
+        hint: "Press Ctrl+R to retry connection. Conversation history is still available.",
+      };
+    case "reconnecting":
+      return {
+        visible: true,
+        title: "Reconnecting to daemon...",
+        hint: "Attempting to restore connection. Conversation history is still available.",
+      };
+  }
+}
+
+export function DaemonOfflineBanner({
+  connectionStatus,
+  lastErrorMessage,
+  onRetry,
+  themeTokens: t,
+}: DaemonOfflineBannerProps) {
+  const banner = getDaemonOfflineBannerText(connectionStatus, lastErrorMessage);
+
+  if (!banner.visible) {
+    return null;
+  }
+
+  const isDisconnected = connectionStatus === "disconnected";
+  const borderColor = isDisconnected
+    ? (t?.["status.error"] ?? "#f7768e")
+    : (t?.["status.warning"] ?? "#e0af68");
+  const titleColor = borderColor;
+  const hintColor = t?.["text.muted"] ?? "#9aa5ce";
+  const bgColor = t?.["surface.secondary"] ?? "#1f2335";
+
+  return (
+    <Box
+      style={{
+        border: true,
+        borderColor,
+        backgroundColor: bgColor,
+        paddingLeft: 1,
+        paddingRight: 1,
+        flexDirection: "column",
+        height: isDisconnected ? 3 : 2,
+      }}
+    >
+      <Text style={{ color: titleColor }}>
+        {isDisconnected ? `○ ${banner.title}` : `◌ ${banner.title}`}
+      </Text>
+      <Text style={{ color: hintColor }}>{banner.hint}</Text>
+      {isDisconnected && onRetry ? (
+        <Text style={{ color: hintColor }}>{"Ctrl+R retry"}</Text>
+      ) : null}
+    </Box>
+  );
 }
