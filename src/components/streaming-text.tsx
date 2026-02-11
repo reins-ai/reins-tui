@@ -78,15 +78,17 @@ export function StreamingText({ content, isStreaming = false, lifecycleStatus }:
 
   if (!lifecycleStatus) {
     return (
-      <Box>
-        <Text>{buildStreamingText(content, isStreaming)}</Text>
+      <Box style={{ flexDirection: "row" }}>
+        <Text style={{ color: tokens["conversation.assistant.text"] }}>
+          {buildStreamingText(content, isStreaming)}
+        </Text>
       </Box>
     );
   }
 
   return (
-    <Box>
-      <Text style={{ color: tokens["text.primary"] }}>{content}</Text>
+    <Box style={{ flexDirection: "row" }}>
+      <Text style={{ color: tokens["conversation.assistant.text"] }}>{content}</Text>
       {cursor ? <Text style={{ color: tokens["accent.primary"] }}>{cursor}</Text> : null}
     </Box>
   );
