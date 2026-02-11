@@ -1,3 +1,4 @@
+import type { StartupContent } from "../personalization/greeting-service";
 import { useThemeTokens } from "../theme";
 import { Box, Text } from "../ui";
 
@@ -51,11 +52,50 @@ function formatShortcutRow(shortcut: HelpShortcut): string {
   return `${shortcut.key.padEnd(12, " ")}${shortcut.description}`;
 }
 
-export interface HelpScreenProps {
-  isOpen: boolean;
+export function formatGreetingLines(startup: StartupContent): string[] {
+  const lines: string[] = [startup.greeting];
+
+  if (startup.contextSummary) {
+    lines.push("");
+    for (const line of startup.contextSummary.split("\n")) {
+      lines.push(line);
+    }
+  }
+
+  return lines;
 }
 
-export function HelpScreen({ isOpen }: HelpScreenProps) {
+export interface WelcomeGreetingProps {
+  startup: StartupContent | null;
+}
+
+export function WelcomeGreeting({ startup }: WelcomeGreetingProps) {
+  const { tokens } = useThemeTokens();
+
+  if (!startup) {
+    return null;
+  }
+
+  const lines = formatGreetingLines(startup);
+
+  return (
+    <Box style={{ flexDirection: "column", marginBottom: 1 }}>
+      <Text style={{ color: tokens["text.primary"] }}>{lines[0]}</Text>
+      {lines.slice(1).map((line, index) => (
+        <Text key={`greeting-${index}`} style={{ color: tokens["text.muted"] }}>
+          {line}
+        </Text>
+      ))}
+    </Box>
+  );
+}
+
+export interface HelpScreenProps {
+  isOpen: boolean;
+  startup?: StartupContent | null;
+}
+
+export function HelpScreen({ isOpen, startup = null }: HelpScreenProps) {
   const { tokens } = useThemeTokens();
 
   if (!isOpen) {
@@ -77,6 +117,7 @@ export function HelpScreen({ isOpen }: HelpScreenProps) {
         paddingRight: 8,
       }}
     >
+      {startup && <WelcomeGreeting startup={startup} />}
       <Box
         style={{
           border: true,
