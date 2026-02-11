@@ -1,7 +1,9 @@
+import { adaptToolOutput } from "../cards/card-adapters";
 import type { DisplayMessage, DisplayToolCall } from "../store";
 import { useThemeTokens } from "../theme";
 import type { ThemeTokens } from "../theme/theme-schema";
 import { Box, Text } from "../ui";
+import { CardRenderer } from "./cards";
 import { StreamingText } from "./streaming-text";
 
 // Prose-style glyph vocabulary
@@ -61,6 +63,14 @@ interface ToolCallAnchorProps {
   toolCall: DisplayToolCall;
 }
 
+function tryParseToolResult(result: string): unknown {
+  try {
+    return JSON.parse(result);
+  } catch {
+    return result;
+  }
+}
+
 export function ToolCallAnchor({ toolCall }: ToolCallAnchorProps) {
   const { tokens } = useThemeTokens();
   const glyph = getToolGlyph(toolCall.status);
@@ -68,6 +78,12 @@ export function ToolCallAnchor({ toolCall }: ToolCallAnchorProps) {
   const labelColor = toolCall.status === "error" || toolCall.isError
     ? tokens["glyph.tool.error"]
     : tokens["text.secondary"];
+
+  const card = toolCall.status === "complete" && toolCall.result && !toolCall.isError
+    ? adaptToolOutput(toolCall.name, tryParseToolResult(toolCall.result))
+    : null;
+
+  const showCard = card !== null && card.type !== "plain-text";
 
   return (
     <Box style={{ flexDirection: "column", marginLeft: 2 }}>
@@ -78,6 +94,11 @@ export function ToolCallAnchor({ toolCall }: ToolCallAnchorProps) {
           <Text style={{ color: tokens["text.muted"] }}>{" ..."}</Text>
         ) : null}
       </Box>
+      {showCard && card ? (
+        <Box style={{ marginLeft: 2, marginTop: 0 }}>
+          <CardRenderer card={card} />
+        </Box>
+      ) : null}
       {toolCall.result && toolCall.status === "error" ? (
         <Box style={{ marginLeft: 2 }}>
           <Text style={{ color: tokens["glyph.tool.error"] }}>{toolCall.result}</Text>
