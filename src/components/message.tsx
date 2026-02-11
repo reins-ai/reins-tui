@@ -122,7 +122,7 @@ export function Message({ message }: MessageProps) {
   return (
     <Box style={{ flexDirection: "column", marginBottom: 0 }}>
       {isUser ? (
-        <Box style={{ flexDirection: "row", justifyContent: "flex-end" }}>
+        <Box style={{ flexDirection: "row" }}>
           <Text style={{ color: tokens["conversation.user.text"] }}>{message.content}</Text>
           <Text>{" "}</Text>
           <Text style={{ color: glyphColor }}>{glyph}</Text>

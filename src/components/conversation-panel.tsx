@@ -1,4 +1,4 @@
-import { useReducer, useCallback } from "react";
+import { useReducer } from "react";
 
 import type { DisplayMessage, DisplayToolCall } from "../store";
 import { useConversation } from "../hooks";
@@ -57,7 +57,7 @@ function ExchangeSeparator() {
   const { tokens } = useThemeTokens();
 
   return (
-    <Box style={{ flexDirection: "row", justifyContent: "center", marginTop: 1, marginBottom: 1 }}>
+    <Box style={{ flexDirection: "row", marginTop: 1, marginBottom: 1 }}>
       <Text style={{ color: tokens["border.subtle"] }}>{EXCHANGE_SEPARATOR}</Text>
     </Box>
   );
@@ -68,14 +68,7 @@ interface InlineToolCallsProps {
 }
 
 function InlineToolCalls({ toolCalls }: InlineToolCallsProps) {
-  const [detailState, dispatch] = useReducer(toolDetailReducer, createInitialToolDetailState());
-
-  const handleToggle = useCallback(
-    (toolCallId: string) => {
-      dispatch({ type: "toggle-collapse", toolCallId });
-    },
-    [],
-  );
+  const [detailState] = useReducer(toolDetailReducer, createInitialToolDetailState());
 
   return (
     <>
@@ -88,7 +81,6 @@ function InlineToolCalls({ toolCalls }: InlineToolCallsProps) {
             key={dtc.id}
             call={call}
             collapsed={isCollapsed}
-            onToggle={() => handleToggle(dtc.id)}
           />
         );
       })}

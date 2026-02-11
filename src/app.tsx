@@ -196,7 +196,7 @@ function AppView({ version, dimensions }: AppViewProps) {
     conversations: state.conversations.map((conversation) => ({
       id: conversation.id,
       title: conversation.title,
-      updatedAt: conversation.updatedAt,
+      updatedAt: conversation.lastMessageAt,
     })),
     notes: [],
   }), [state.conversations]);

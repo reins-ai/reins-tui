@@ -186,7 +186,6 @@ function HighlightedText({ text, ranges, matchedField, highlightColor, baseColor
           content={segment.text}
           style={{
             color: segment.highlighted ? highlightColor : baseColor,
-            bold: segment.highlighted,
           }}
         />
       ))}
@@ -243,7 +242,7 @@ function CategoryHeader({ label, glyph, tokens }: CategoryHeaderProps) {
     <Box style={{ paddingLeft: 1, marginTop: 1 }}>
       <Text
         content={`${glyph}  ${label}`}
-        style={{ color: tokens["text.secondary"], bold: true }}
+        style={{ color: tokens["text.secondary"] }}
       />
     </Box>
   );
@@ -393,7 +392,7 @@ export function CommandPalette({ isOpen, sources, onClose, onExecute }: CommandP
       >
         <Box style={{ flexDirection: "row", marginBottom: 1 }}>
           <Text content="🔮 " />
-          <Text content="Command Palette" style={{ color: tokens["text.primary"], bold: true }} />
+          <Text content="Command Palette" style={{ color: tokens["text.primary"] }} />
           <Text content="  Esc close · ↑↓ navigate · Enter select" style={{ color: tokens["text.muted"] }} />
         </Box>
 

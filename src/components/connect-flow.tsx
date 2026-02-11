@@ -256,7 +256,7 @@ function OverlayFrame({ title, hint, tokens, children }: OverlayFrameProps) {
         }}
       >
         <Box style={{ flexDirection: "row", marginBottom: 1 }}>
-          <Text content={`◆ ${title}`} style={{ color: tokens["accent.primary"], bold: true }} />
+          <Text content={`◆ ${title}`} style={{ color: tokens["accent.primary"] }} />
         </Box>
         {children}
         <Box style={{ marginTop: 1 }}>

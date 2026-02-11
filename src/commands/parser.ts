@@ -29,7 +29,15 @@ export type ParseCommandResult =
   | { ok: true; value: ParsedCommand }
   | { ok: false; error: ParseCommandError };
 
-function parseTokens(input: string): ParseCommandResult | { ok: true; value: string[] } {
+type ParseTokensResult =
+  | { ok: true; value: string[] }
+  | { ok: false; error: ParseCommandError };
+
+type ParseFlagTokenResult =
+  | { ok: true; value: Record<string, ParsedFlagValue> }
+  | { ok: false; error: ParseCommandError };
+
+function parseTokens(input: string): ParseTokensResult {
   const tokens: string[] = [];
   let current = "";
   let quote: '"' | "'" | null = null;
@@ -93,7 +101,7 @@ function parseTokens(input: string): ParseCommandResult | { ok: true; value: str
   return { ok: true, value: tokens };
 }
 
-function parseFlagToken(token: string): ParseCommandResult | { ok: true; value: Record<string, ParsedFlagValue> } {
+function parseFlagToken(token: string): ParseFlagTokenResult {
   const output: Record<string, ParsedFlagValue> = {};
 
   if (token.startsWith("--")) {

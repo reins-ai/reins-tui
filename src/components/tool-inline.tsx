@@ -7,7 +7,6 @@ import { Box, Text } from "../ui";
 export interface ToolInlineProps {
   call: ToolCall;
   collapsed: boolean;
-  onToggle: () => void;
 }
 
 export function getStatusColor(status: ToolCallStatus, tokens: Readonly<ThemeTokens>): string {
@@ -61,7 +60,7 @@ function compactStringify(value: unknown): string {
   }
 }
 
-export function ToolInline({ call, collapsed, onToggle }: ToolInlineProps) {
+export function ToolInline({ call, collapsed }: ToolInlineProps) {
   const { tokens } = useThemeTokens();
   const content = toolCallToMessageContent(call);
   const statusColor = getStatusColor(call.status, tokens);
@@ -84,8 +83,6 @@ export function ToolInline({ call, collapsed, onToggle }: ToolInlineProps) {
             flexDirection: "column",
             marginLeft: 3,
             marginTop: 0,
-            borderLeft: true,
-            borderColor: tokens["border.subtle"],
             paddingLeft: 1,
           }}
         >

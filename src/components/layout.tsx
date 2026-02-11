@@ -8,8 +8,6 @@ import {
   resolveBreakpointState,
   createResizeDebouncer,
   didBandChange,
-  BAND_LABELS,
-  type BreakpointBand,
   type BreakpointState,
 } from "../layout/breakpoints";
 import { ConversationPanel } from "./conversation-panel";

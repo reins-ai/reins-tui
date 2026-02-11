@@ -377,6 +377,15 @@ function createMockServiceInstaller(): ServiceInstaller {
 
       return { ok: true, value: serviceState.running ? "running" : "stopped" };
     },
+    async start() {
+      serviceState.installed = true;
+      serviceState.running = true;
+      return { ok: true, value: undefined };
+    },
+    async stop() {
+      serviceState.running = false;
+      return { ok: true, value: undefined };
+    },
   };
 
   return new ServiceInstaller({
