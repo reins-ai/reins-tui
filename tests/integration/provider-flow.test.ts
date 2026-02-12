@@ -253,6 +253,31 @@ describe("provider flow integration", () => {
     expect(state.connection?.providerName).toBe("Anthropic");
   });
 
+  test("surfaces daemon re-auth guidance when Anthropic credentials expire", async () => {
+    const transport = new MockProviderTransport();
+    transport.onGet("/api/providers/auth/status/anthropic", () =>
+      ok({
+        provider: "anthropic",
+        providerName: "Anthropic",
+        requiresAuth: true,
+        authModes: ["api_key", "oauth"],
+        configured: true,
+        connectionState: "requires_reauth",
+      }),
+    );
+
+    const connectService = new ConnectService({ transport });
+    const result = await connectService.getProviderAuthStatus("anthropic");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.providerId).toBe("anthropic");
+    expect(result.value.connectionState).toBe("requires_reauth");
+    expect(result.value.displayStatus).toBe("Reconnect required");
+    expect(result.value.authMethods).toEqual(["api_key", "oauth"]);
+  });
+
   test("completes gateway flow end-to-end", async () => {
     const transport = new MockProviderTransport();
     transport.onPost("/api/gateway/validate", () => ok({ valid: true, providerName: "Reins Gateway", models: ["gateway-model"] }));
