@@ -603,6 +603,8 @@ function AppView({ version, dimensions }: AppViewProps) {
   }), [state.conversations]);
 
   const executePaletteAction = useCallback((action: PaletteAction) => {
+    setCommandPaletteOpen(false);
+
     switch (action.type) {
       case "command":
         handlePaletteCommand(action.command);
@@ -615,10 +617,9 @@ function AppView({ version, dimensions }: AppViewProps) {
         dispatch({ type: "SET_STATUS", payload: `Opening note ${action.noteId}` });
         break;
       case "action":
-        dispatch({ type: "SET_STATUS", payload: `Executed action: ${action.key}` });
+        handlePaletteAction(action.key);
         break;
     }
-    setCommandPaletteOpen(false);
   }, [dispatch]);
 
   const handlePaletteCommand = (commandName: string) => {
@@ -642,11 +643,78 @@ function AppView({ version, dimensions }: AppViewProps) {
         dispatch({ type: "SET_STATUS", payload: "Model selector" });
         break;
       }
+      case "theme":
+        dispatch({ type: "SET_STATUS", payload: "Theme selector" });
+        break;
+      case "settings":
+        dispatch({ type: "SET_STATUS", payload: "Settings" });
+        break;
+      case "connect":
+        dispatch({ type: "SET_CONNECT_FLOW_OPEN", payload: true });
+        dispatch({ type: "SET_STATUS", payload: "Connect provider" });
+        break;
       case "quit":
         exitApp();
         break;
       default:
         dispatch({ type: "SET_STATUS", payload: `Executed /${commandName}` });
+    }
+  };
+
+  const handlePaletteAction = (actionKey: string) => {
+    switch (actionKey) {
+      case "new-chat":
+        void createNewConversation();
+        break;
+      case "switch-conversation":
+        dispatch({ type: "TOGGLE_PANEL", payload: "drawer" });
+        focus.focusPanel("sidebar");
+        dispatch({ type: "SET_STATUS", payload: "Drawer opened" });
+        break;
+      case "search-conversations":
+        dispatch({ type: "TOGGLE_PANEL", payload: "drawer" });
+        focus.focusPanel("sidebar");
+        dispatch({ type: "SET_STATUS", payload: "Search conversations" });
+        break;
+      case "switch-model":
+        dispatch({ type: "SET_MODEL_SELECTOR_OPEN", payload: true });
+        dispatch({ type: "SET_STATUS", payload: "Model selector" });
+        break;
+      case "switch-theme":
+        dispatch({ type: "SET_STATUS", payload: "Theme selector" });
+        break;
+      case "toggle-drawer":
+        dispatch({ type: "TOGGLE_PANEL", payload: "drawer" });
+        dispatch({ type: "SET_STATUS", payload: "Drawer toggled" });
+        break;
+      case "toggle-today":
+        dispatch({ type: "TOGGLE_PANEL", payload: "today" });
+        dispatch({ type: "SET_STATUS", payload: "Today panel toggled" });
+        break;
+      case "open-help":
+        setShowHelp(true);
+        dispatch({ type: "SET_STATUS", payload: "Help enabled" });
+        break;
+      case "open-settings":
+        dispatch({ type: "SET_STATUS", payload: "Settings" });
+        break;
+      case "clear-chat":
+        dispatch({ type: "CLEAR_MESSAGES" });
+        dispatch({ type: "SET_STATUS", payload: "Cleared messages" });
+        break;
+      case "copy-last-response": {
+        const lastAssistant = state.messages
+          .filter((m) => m.role === "assistant")
+          .pop();
+        if (lastAssistant) {
+          dispatch({ type: "SET_STATUS", payload: "Copied last response" });
+        } else {
+          dispatch({ type: "SET_STATUS", payload: "No response to copy" });
+        }
+        break;
+      }
+      default:
+        dispatch({ type: "SET_STATUS", payload: `Action: ${actionKey}` });
     }
   };
 
@@ -658,10 +726,32 @@ function AppView({ version, dimensions }: AppViewProps) {
       return;
     }
 
+    // Ctrl+K opens palette globally — from any primary screen
     if (isCommandPaletteToggleEvent(event)) {
+      // If another overlay is active, dismiss it first then open palette
+      if (!state.isCommandPaletteOpen) {
+        if (state.isModelSelectorOpen) {
+          dispatch({ type: "SET_MODEL_SELECTOR_OPEN", payload: false });
+        }
+        if (state.isConnectFlowOpen) {
+          dispatch({ type: "SET_CONNECT_FLOW_OPEN", payload: false });
+        }
+      }
       setCommandPaletteOpen(!state.isCommandPaletteOpen);
       dispatch({ type: "SET_STATUS", payload: state.isCommandPaletteOpen ? "Ready" : "Command palette" });
       return;
+    }
+
+    // Palette-closes-first rule: if palette is open and another shortcut fires,
+    // close palette first then let the shortcut through
+    if (state.isCommandPaletteOpen) {
+      if (isToggleModelSelectorEvent(event) || isToggleDrawerEvent(event) || isToggleTodayEvent(event)) {
+        setCommandPaletteOpen(false);
+        // Fall through to let the shortcut execute below
+      } else {
+        // All other keys are consumed by the palette
+        return;
+      }
     }
 
     if (isToggleModelSelectorEvent(event)) {
@@ -670,7 +760,7 @@ function AppView({ version, dimensions }: AppViewProps) {
       return;
     }
 
-    if (state.isCommandPaletteOpen || state.isConnectFlowOpen || state.isModelSelectorOpen) {
+    if (state.isConnectFlowOpen || state.isModelSelectorOpen) {
       return;
     }
 

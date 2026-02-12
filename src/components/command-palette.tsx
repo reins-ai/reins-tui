@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
+  createActionSearchItems,
   createCommandSearchItems,
   createConversationSearchItems,
   createFuzzySearchIndex,
@@ -12,7 +13,7 @@ import {
   type PaletteAction,
   type SearchCategory,
 } from "../palette/fuzzy-index";
-import { rankSearchResults, type RankedSearchResult } from "../palette/ranking";
+import { rankSearchResults, RecencyTracker, type RankedSearchResult } from "../palette/ranking";
 import { SLASH_COMMANDS } from "../commands/registry";
 import { useThemeTokens } from "../theme";
 import { Box, Input, Text, useKeyboard } from "../ui";
@@ -102,9 +103,10 @@ function flattenGroupedResults(
 
 function buildSearchIndex(sources: CommandPaletteDataSources): FuzzySearchIndex<PaletteAction> {
   const commandItems = createCommandSearchItems(SLASH_COMMANDS);
+  const actionItems = createActionSearchItems();
   const conversationItems = createConversationSearchItems(sources.conversations ?? []);
   const noteItems = createNoteSearchItems(sources.notes ?? []);
-  const allItems = [...commandItems, ...conversationItems, ...noteItems];
+  const allItems = [...commandItems, ...actionItems, ...conversationItems, ...noteItems];
   return createFuzzySearchIndex(allItems);
 }
 
@@ -126,18 +128,31 @@ function extractInputValue(value: unknown): string {
   return "";
 }
 
+const COMMAND_SHORTCUT_MAP: Readonly<Record<string, string>> = Object.freeze({
+  help: "?",
+  new: "Ctrl+N",
+  quit: "q",
+  model: "Ctrl+M",
+});
+
+const ACTION_SHORTCUT_MAP: Readonly<Record<string, string>> = Object.freeze({
+  "new-chat": "Ctrl+N",
+  "switch-model": "Ctrl+M",
+  "toggle-drawer": "Ctrl+1",
+  "toggle-today": "Ctrl+2",
+  "open-help": "?",
+});
+
 function resolveShortcutHint(action: PaletteAction): string | null {
-  if (action.type !== "command") {
-    return null;
+  if (action.type === "command") {
+    return COMMAND_SHORTCUT_MAP[action.command] ?? null;
   }
 
-  const shortcutMap: Record<string, string> = {
-    help: "?",
-    new: "Ctrl+N",
-    quit: "q",
-  };
+  if (action.type === "action") {
+    return ACTION_SHORTCUT_MAP[action.key] ?? null;
+  }
 
-  return shortcutMap[action.command] ?? null;
+  return null;
 }
 
 interface HighlightedTextProps {
@@ -265,6 +280,9 @@ function EmptyState({ query, tokens }: EmptyStateProps) {
           <Text content="  /model    Switch the active model" style={{ color: tokens["text.muted"] }} />
           <Text content="  /theme    Change the visual theme" style={{ color: tokens["text.muted"] }} />
         </Box>
+        <Box style={{ marginTop: 1, flexDirection: "column" }}>
+          <Text content="Type / to browse slash commands" style={{ color: tokens["text.secondary"] }} />
+        </Box>
       </Box>
     );
   }
@@ -276,6 +294,8 @@ function EmptyState({ query, tokens }: EmptyStateProps) {
   );
 }
 
+const sessionRecencyTracker = new RecencyTracker();
+
 export function CommandPalette({ isOpen, sources, onClose, onExecute }: CommandPaletteProps) {
   const { tokens } = useThemeTokens();
   const [query, setQuery] = useState("");
@@ -284,7 +304,7 @@ export function CommandPalette({ isOpen, sources, onClose, onExecute }: CommandP
   const searchIndex = useMemo(() => buildSearchIndex(sources), [sources]);
 
   const rankedResults = useMemo(
-    () => rankSearchResults(searchIndex, query),
+    () => rankSearchResults(searchIndex, query, { recencyTracker: sessionRecencyTracker }),
     [searchIndex, query],
   );
 
@@ -322,6 +342,7 @@ export function CommandPalette({ isOpen, sources, onClose, onExecute }: CommandP
 
     const selected = flatResults[selectedIndex];
     if (selected) {
+      sessionRecencyTracker.recordUsage(selected.item.id);
       onExecute(selected.item.action);
     }
   }, [flatResults, selectedIndex, totalResults, onExecute]);

@@ -87,10 +87,17 @@ describe("search adapters", () => {
       ],
     });
 
-    expect(items.map((item) => item.category)).toEqual(["command", "conversation", "note"]);
+    // Commands, conversations, notes, plus default palette actions
+    const categories = items.map((item) => item.category);
+    expect(categories).toContain("command");
+    expect(categories).toContain("conversation");
+    expect(categories).toContain("note");
+    expect(categories).toContain("action");
     expect(items[0]?.label).toBe("/help");
-    expect(items[1]?.action).toEqual({ type: "conversation", conversationId: "conv-1" });
-    expect(items[2]?.action).toEqual({ type: "note", noteId: "note-1" });
+    const convItem = items.find((item) => item.category === "conversation");
+    expect(convItem?.action).toEqual({ type: "conversation", conversationId: "conv-1" });
+    const noteItem = items.find((item) => item.category === "note");
+    expect(noteItem?.action).toEqual({ type: "note", noteId: "note-1" });
   });
 
   test("creates command items from slash registry metadata", () => {
