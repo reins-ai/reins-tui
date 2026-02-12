@@ -23,7 +23,13 @@ import * as themeRegistryModule from "../../src/theme/theme-registry";
 import * as toolLifecycleModule from "../../src/tools/tool-lifecycle";
 
 function expectRepoFile(relativePath: string): void {
-  expect(existsSync(join(process.cwd(), relativePath))).toBe(true);
+  // Support running from either the monorepo root or the reins-tui/ submodule root
+  const fromCwd = join(process.cwd(), relativePath);
+  const stripped = relativePath.startsWith("reins-tui/")
+    ? relativePath.slice("reins-tui/".length)
+    : relativePath;
+  const fromSubmodule = join(process.cwd(), stripped);
+  expect(existsSync(fromCwd) || existsSync(fromSubmodule)).toBe(true);
 }
 
 describe("Contract Traceability: MH1-MH17", () => {
