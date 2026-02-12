@@ -3,6 +3,7 @@ import { createContext, useContext, useMemo, useState, type ReactNode } from "re
 import type { ThemeTokens256 } from "./fallback-256";
 import { createThemeRegistry, type ResolvedTheme, type ThemeRegistry } from "./theme-registry";
 import type { ThemeTokens } from "./theme-schema";
+import { loadThemePreferences, saveThemePreferences } from "../state/theme-persistence";
 
 export type ColorMode = "truecolor" | "256";
 
@@ -39,7 +40,8 @@ export interface ThemeProviderProps {
 
 export function ThemeProvider({ children, initialColorMode }: ThemeProviderProps) {
   const registry = useMemo(() => {
-    const result = createThemeRegistry();
+    const prefs = loadThemePreferences();
+    const result = createThemeRegistry(prefs.themeName);
     if (!result.ok) {
       throw new Error(`Failed to initialize theme registry: ${result.error.map((e) => e.message).join(", ")}`);
     }
@@ -55,6 +57,7 @@ export function ThemeProvider({ children, initialColorMode }: ThemeProviderProps
       return false;
     }
     setThemeState(result.value);
+    saveThemePreferences({ themeName: name });
     return true;
   };
 

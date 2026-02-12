@@ -70,12 +70,10 @@ describe("ThemeProvider initialization", () => {
     if (!result.ok) return;
 
     const registry = result.value;
-    expect(registry.getActiveThemeName()).toBe("hearthstone");
-    expect(registry.listThemes()).toContain("hearthstone");
-    expect(registry.listThemes()).toContain("daylight");
-    expect(registry.listThemes()).toContain("solarized-warm");
-    expect(registry.listThemes()).toContain("nord-frost");
-    expect(registry.listThemes()).toContain("rose-pine");
+    expect(registry.getActiveThemeName()).toBe("reins-dark");
+    expect(registry.listThemes()).toContain("reins-dark");
+    expect(registry.listThemes()).toContain("reins-light");
+    expect(registry.listThemes()).toContain("tokyonight");
   });
 
   test("resolved theme contains all expected token names", () => {
@@ -111,12 +109,12 @@ describe("ThemeProvider initialization", () => {
     if (!result.ok) return;
 
     const registry = result.value;
-    const switchResult = registry.setTheme("daylight");
+    const switchResult = registry.setTheme("reins-light");
     expect(switchResult.ok).toBe(true);
     if (!switchResult.ok) return;
 
-    expect(registry.getActiveThemeName()).toBe("daylight");
-    expect(switchResult.value.name).toBe("daylight");
+    expect(registry.getActiveThemeName()).toBe("reins-light");
+    expect(switchResult.value.name).toBe("reins-light");
   });
 });
 

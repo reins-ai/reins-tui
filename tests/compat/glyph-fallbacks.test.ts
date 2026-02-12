@@ -15,11 +15,9 @@ import { EXCHANGE_SEPARATOR, shouldShowSeparator } from "../../src/components/co
 import type { ThemeTokens } from "../../src/theme/theme-schema";
 import { THEME_TOKEN_NAMES } from "../../src/theme/theme-schema";
 
-import hearthstoneSource from "../../src/theme/builtins/hearthstone.json";
-import daylightSource from "../../src/theme/builtins/daylight.json";
-import nordFrostSource from "../../src/theme/builtins/nord-frost.json";
-import rosePineSource from "../../src/theme/builtins/rose-pine.json";
-import solarizedWarmSource from "../../src/theme/builtins/solarized-warm.json";
+import reinsDarkSource from "../../src/theme/builtins/reins-dark.json";
+import reinsLightSource from "../../src/theme/builtins/reins-light.json";
+import tokyonightSource from "../../src/theme/builtins/tokyonight.json";
 
 // ---------------------------------------------------------------------------
 // Glyph vocabulary definition and character assertions
@@ -179,11 +177,9 @@ describe("ASCII fallback mapping", () => {
 
 describe("glyph consistency across themes", () => {
   const ALL_THEMES = [
-    { name: "hearthstone", source: hearthstoneSource },
-    { name: "daylight", source: daylightSource },
-    { name: "solarized-warm", source: solarizedWarmSource },
-    { name: "nord-frost", source: nordFrostSource },
-    { name: "rose-pine", source: rosePineSource },
+    { name: "reins-dark", source: reinsDarkSource },
+    { name: "reins-light", source: reinsLightSource },
+    { name: "tokyonight", source: tokyonightSource },
   ];
 
   test("role glyphs are theme-independent", () => {
@@ -369,11 +365,9 @@ describe("exchange separator rendering", () => {
 
 describe("tool glyph color mapping per theme", () => {
   const ALL_THEMES = [
-    { name: "hearthstone", source: hearthstoneSource },
-    { name: "daylight", source: daylightSource },
-    { name: "solarized-warm", source: solarizedWarmSource },
-    { name: "nord-frost", source: nordFrostSource },
-    { name: "rose-pine", source: rosePineSource },
+    { name: "reins-dark", source: reinsDarkSource },
+    { name: "reins-light", source: reinsLightSource },
+    { name: "tokyonight", source: tokyonightSource },
   ];
 
   for (const { name, source } of ALL_THEMES) {

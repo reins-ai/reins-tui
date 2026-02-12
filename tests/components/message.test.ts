@@ -14,9 +14,9 @@ import {
 } from "../../src/components";
 import type { ThemeTokens } from "../../src/theme/theme-schema";
 
-import hearthstoneSource from "../../src/theme/builtins/hearthstone.json";
+import reinsDarkSource from "../../src/theme/builtins/reins-dark.json";
 
-const tokens = hearthstoneSource as unknown as Readonly<ThemeTokens>;
+const tokens = reinsDarkSource as unknown as Readonly<ThemeTokens>;
 
 describe("message rendering helpers", () => {
   test("role label colors map by message role using theme tokens", () => {

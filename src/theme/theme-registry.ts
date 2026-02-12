@@ -3,13 +3,11 @@ import type { Result } from "@reins/core";
 import { resolveTheme256, type ThemeTokens256 } from "./fallback-256";
 import { validateThemeTokens, type ThemeTokens, type ThemeValidationError } from "./theme-schema";
 
-import daylightSource from "./builtins/daylight.json";
-import hearthstoneSource from "./builtins/hearthstone.json";
-import nordFrostSource from "./builtins/nord-frost.json";
-import rosePineSource from "./builtins/rose-pine.json";
-import solarizedWarmSource from "./builtins/solarized-warm.json";
+import reinsDarkSource from "./builtins/reins-dark.json";
+import reinsLightSource from "./builtins/reins-light.json";
+import tokyonightSource from "./builtins/tokyonight.json";
 
-export type BuiltInThemeName = "hearthstone" | "daylight" | "solarized-warm" | "nord-frost" | "rose-pine";
+export type BuiltInThemeName = "reins-dark" | "reins-light" | "tokyonight";
 
 export interface ResolvedTheme {
   name: string;
@@ -25,14 +23,18 @@ export interface ThemeRegistryError {
 }
 
 const BUILTIN_THEME_SOURCES: Record<BuiltInThemeName, unknown> = {
-  hearthstone: hearthstoneSource,
-  daylight: daylightSource,
-  "solarized-warm": solarizedWarmSource,
-  "nord-frost": nordFrostSource,
-  "rose-pine": rosePineSource,
+  "reins-dark": reinsDarkSource,
+  "reins-light": reinsLightSource,
+  tokyonight: tokyonightSource,
 };
 
-const DEFAULT_THEME_NAME: BuiltInThemeName = "hearthstone";
+export const DEFAULT_THEME_NAME: BuiltInThemeName = "reins-dark";
+
+export const BUILTIN_THEME_NAMES: readonly BuiltInThemeName[] = Object.freeze([
+  "reins-dark",
+  "reins-light",
+  "tokyonight",
+]);
 
 function freezeTokens(tokens: ThemeTokens): Readonly<ThemeTokens> {
   return Object.freeze({ ...tokens });
@@ -70,7 +72,7 @@ export class ThemeRegistry {
     this.activeTheme = buildResolvedTheme(activeThemeName, activeTokens as ThemeTokens);
   }
 
-  static create(): Result<ThemeRegistry, ThemeRegistryError[]> {
+  static create(initialTheme?: string): Result<ThemeRegistry, ThemeRegistryError[]> {
     const loadedThemes = new Map<string, Readonly<ThemeTokens>>();
     const errors: ThemeRegistryError[] = [];
 
@@ -101,9 +103,13 @@ export class ThemeRegistry {
       return { ok: false, error: errors };
     }
 
+    const startTheme = initialTheme && loadedThemes.has(initialTheme)
+      ? initialTheme
+      : DEFAULT_THEME_NAME;
+
     return {
       ok: true,
-      value: new ThemeRegistry(loadedThemes, DEFAULT_THEME_NAME),
+      value: new ThemeRegistry(loadedThemes, startTheme),
     };
   }
 
@@ -139,6 +145,6 @@ export class ThemeRegistry {
   }
 }
 
-export function createThemeRegistry(): Result<ThemeRegistry, ThemeRegistryError[]> {
-  return ThemeRegistry.create();
+export function createThemeRegistry(initialTheme?: string): Result<ThemeRegistry, ThemeRegistryError[]> {
+  return ThemeRegistry.create(initialTheme);
 }
