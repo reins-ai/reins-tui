@@ -1,6 +1,7 @@
 import type { DaemonClient, DaemonClientConfig } from "../daemon/client";
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "../daemon/client";
 import { err, ok, type DaemonClientError, type Result } from "../daemon/contracts";
+import { logger } from "../lib/debug-logger";
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 
@@ -767,6 +768,7 @@ export class ConnectService {
       return readiness;
     }
 
+    logger.connect.info("Initiating OAuth", { provider: normalizedProvider });
     const result = await this.transport.post<
       { provider: string; source: string },
       unknown
@@ -776,12 +778,15 @@ export class ConnectService {
     });
 
     if (!result.ok) {
+      logger.connect.error("OAuth initiate failed", { provider: normalizedProvider, error: result.error });
       return err(mapDaemonError(result.error));
     }
 
     const payload = result.value as DaemonOAuthInitPayload;
+    logger.connect.info("OAuth initiate response", { payload: payload as unknown as Record<string, unknown> });
     const authUrl = payload.authUrl ?? payload.url;
     if (!authUrl || typeof authUrl !== "string") {
+      logger.connect.error("OAuth no authUrl in response", { payload: payload as unknown as Record<string, unknown> });
       return err({
         code: "OAUTH_FAILED",
         message: "Daemon did not return an OAuth authorization URL.",
@@ -870,6 +875,7 @@ export class ConnectService {
       return readiness;
     }
 
+    logger.connect.info("Configuring BYOK", { provider: normalizedProvider });
     const configureResult = await this.transport.post<
       { provider: string; mode: "api_key"; key: string; source: string },
       unknown
@@ -881,8 +887,10 @@ export class ConnectService {
     });
 
     if (!configureResult.ok) {
+      logger.connect.error("BYOK configure failed", { provider: normalizedProvider, error: configureResult.error });
       return err(mapDaemonError(configureResult.error));
     }
+    logger.connect.info("BYOK configure response", { payload: configureResult.value as Record<string, unknown> });
 
     const configurePayload = normalizePayload(configureResult.value);
     if (configurePayload.configured === false || configurePayload.valid === false) {

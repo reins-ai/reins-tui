@@ -1,26 +1,37 @@
-# reins-tui
+# @reins/tui
 
-TUI application for Reins built on Bun. OpenTUI dependency will be added later.
+Terminal UI for Reins, built with Bun + OpenTUI.
+
+## Architecture Overview
+
+```text
+src/
+  app.tsx           -> root app composition
+  components/       -> layout, messages, command palette, sidebar
+  hooks/            -> conversation and focus behavior
+  store/            -> local UI/conversation state
+  ui/               -> rendering primitives and adapters
+```
 
 ## Setup
-
-1. Install Bun: https://bun.sh
-2. Install dependencies:
 
 ```bash
 bun install
 ```
 
-3. Run checks:
+## Scripts
 
-```bash
-bun run typecheck
-bun test
-```
+- `bun run start` - Run TUI app
+- `bun run typecheck` - TypeScript checks
+- `bun test` - Test suite
+- `bun run build` - TypeScript build output
 
-## Local linking workflow
+## Test Commands
 
-Link `@reins/core` for local development:
+- Full suite: `bun test`
+- Typecheck: `bun run typecheck`
+
+## Local Linking Workflow
 
 ```bash
 # in ../reins-core
