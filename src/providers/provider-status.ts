@@ -2,8 +2,10 @@ import type { DaemonClient, DaemonClientConfig } from "../daemon/client";
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "../daemon/client";
 import { err, ok, type DaemonClientError, type Result } from "../daemon/contracts";
 import {
+  connectionStateToDisplayStatus,
   HttpProviderApiTransport,
   type ProviderApiTransport,
+  type ProviderConnectionState,
   type ProviderMode,
 } from "./connect-service";
 
@@ -19,6 +21,8 @@ export interface ProviderStatusInfo {
   mode: ProviderMode | null;
   provider: string | null;
   status: "active" | "configured" | "error" | "offline";
+  connectionState: ProviderConnectionState;
+  connectionDisplayStatus: string;
   models: string[];
   activeModel: string | null;
   error?: string;
@@ -44,6 +48,7 @@ interface StatusPayload {
   mode?: string;
   provider?: string;
   status?: string;
+  connectionState?: string;
   models?: unknown;
   availableModels?: unknown;
   activeModel?: string | null | { id?: string; name?: string; provider?: string; active?: boolean };
@@ -109,6 +114,8 @@ function toOfflineStatus(message: string): ProviderStatusInfo {
     mode: null,
     provider: null,
     status: "offline",
+    connectionState: "requires_auth",
+    connectionDisplayStatus: connectionStateToDisplayStatus("requires_auth"),
     models: [],
     activeModel: null,
     error: message,
@@ -165,6 +172,38 @@ function parseModelList(payload: unknown): ModelInfo[] {
     .filter((item): item is ModelInfo => item !== null);
 }
 
+function pickConnectionState(value: unknown): ProviderConnectionState {
+  if (value === "ready" || value === "requires_auth" || value === "requires_reauth" || value === "invalid") {
+    return value;
+  }
+
+  return "requires_auth";
+}
+
+function deriveConnectionState(
+  configured: boolean,
+  status: ProviderStatusInfo["status"],
+  rawConnectionState: unknown,
+): ProviderConnectionState {
+  if (rawConnectionState !== undefined) {
+    return pickConnectionState(rawConnectionState);
+  }
+
+  if (status === "active") {
+    return "ready";
+  }
+
+  if (status === "error") {
+    return "invalid";
+  }
+
+  if (configured) {
+    return "ready";
+  }
+
+  return "requires_auth";
+}
+
 function parseStatusPayload(value: unknown): ProviderStatusInfo {
   if (!isRecord(value)) {
     return {
@@ -172,6 +211,8 @@ function parseStatusPayload(value: unknown): ProviderStatusInfo {
       mode: null,
       provider: null,
       status: "error",
+      connectionState: "requires_auth",
+      connectionDisplayStatus: connectionStateToDisplayStatus("requires_auth"),
       models: [],
       activeModel: null,
       error: "Invalid provider status response.",
@@ -196,11 +237,16 @@ function parseStatusPayload(value: unknown): ProviderStatusInfo {
         ? "configured"
         : "configured";
 
+  const status = pickStatus(payload.status) ?? derivedStatus;
+  const connectionState = deriveConnectionState(configured, status, payload.connectionState);
+
   return {
     configured,
     mode: pickMode(payload.mode),
     provider: typeof payload.provider === "string" ? payload.provider : null,
-    status: pickStatus(payload.status) ?? derivedStatus,
+    status,
+    connectionState,
+    connectionDisplayStatus: connectionStateToDisplayStatus(connectionState),
     models,
     activeModel,
     error: typeof payload.error === "string" ? payload.error : undefined,

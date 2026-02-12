@@ -7,6 +7,20 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 export type ProviderMode = "byok" | "gateway";
 export type ProviderModeOption = ProviderMode | "both";
 
+export type ProviderConnectionState = "ready" | "requires_auth" | "requires_reauth" | "invalid";
+
+export type ProviderAuthMethod = "api_key" | "oauth";
+
+export interface ProviderListEntry {
+  providerId: string;
+  providerName: string;
+  connectionState: ProviderConnectionState;
+  displayStatus: string;
+  authMethods: ProviderAuthMethod[];
+  configured: boolean;
+  requiresAuth: boolean;
+}
+
 export interface ProviderConnection {
   providerId: string;
   providerName: string;
@@ -63,6 +77,21 @@ interface DaemonProviderPayload {
   model?: string;
   error?: string;
   message?: string;
+}
+
+interface DaemonAuthStatusPayload {
+  provider?: string;
+  requiresAuth?: boolean;
+  authModes?: unknown;
+  configured?: boolean;
+  connectionState?: string;
+  credentialType?: string;
+  updatedAt?: number;
+  expiresAt?: number;
+}
+
+interface DaemonProviderListPayload {
+  providers?: unknown;
 }
 
 interface HttpProviderApiTransportOptions {
@@ -320,6 +349,80 @@ function pickValidationError(payload: DaemonProviderPayload, fallback: string): 
   return fallback;
 }
 
+function pickConnectionState(value: unknown): ProviderConnectionState {
+  if (value === "ready" || value === "requires_auth" || value === "requires_reauth" || value === "invalid") {
+    return value;
+  }
+
+  return "requires_auth";
+}
+
+function connectionStateToDisplayStatus(state: ProviderConnectionState): string {
+  switch (state) {
+    case "ready":
+      return "Connected";
+    case "requires_auth":
+      return "Not configured";
+    case "requires_reauth":
+      return "Reconnect required";
+    case "invalid":
+      return "Invalid credentials";
+  }
+}
+
+function pickAuthMethods(value: unknown): ProviderAuthMethod[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter((item): item is ProviderAuthMethod => item === "api_key" || item === "oauth");
+}
+
+function normalizeAuthStatusPayload(value: unknown): DaemonAuthStatusPayload {
+  if (!isRecord(value)) {
+    return {};
+  }
+
+  return {
+    provider: typeof value.provider === "string" ? value.provider : undefined,
+    requiresAuth: typeof value.requiresAuth === "boolean" ? value.requiresAuth : undefined,
+    authModes: value.authModes,
+    configured: typeof value.configured === "boolean" ? value.configured : undefined,
+    connectionState: typeof value.connectionState === "string" ? value.connectionState : undefined,
+    credentialType: typeof value.credentialType === "string" ? value.credentialType : undefined,
+    updatedAt: typeof value.updatedAt === "number" ? value.updatedAt : undefined,
+    expiresAt: typeof value.expiresAt === "number" ? value.expiresAt : undefined,
+  };
+}
+
+function parseProviderListEntry(value: unknown): ProviderListEntry | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const payload = normalizeAuthStatusPayload(value);
+  const providerId = payload.provider;
+  if (!providerId) {
+    return null;
+  }
+
+  const connectionState = pickConnectionState(payload.connectionState);
+  const authMethods = pickAuthMethods(payload.authModes);
+  const providerName = typeof (value as Record<string, unknown>).providerName === "string"
+    ? (value as Record<string, unknown>).providerName as string
+    : providerId;
+
+  return {
+    providerId,
+    providerName,
+    connectionState,
+    displayStatus: connectionStateToDisplayStatus(connectionState),
+    authMethods,
+    configured: payload.configured ?? false,
+    requiresAuth: payload.requiresAuth ?? authMethods.length > 0,
+  };
+}
+
 function pickBaseUrlFromConfig(config: DaemonClientConfig | null): string {
   if (!config?.httpBaseUrl || config.httpBaseUrl.trim().length === 0) {
     return DEFAULT_DAEMON_HTTP_BASE_URL;
@@ -552,6 +655,121 @@ export class ConnectService {
     return ok(undefined);
   }
 
+  public async listUserConfigurableProviders(): Promise<Result<ProviderListEntry[], ConnectError>> {
+    const readiness = await this.ensureDaemonReady();
+    if (!readiness.ok) {
+      return readiness;
+    }
+
+    const result = await this.transport.get<unknown>("/api/providers/auth/list");
+    if (!result.ok) {
+      return err(mapDaemonError(result.error));
+    }
+
+    const payload = result.value;
+    let rawProviders: unknown[];
+
+    if (Array.isArray(payload)) {
+      rawProviders = payload;
+    } else if (isRecord(payload) && Array.isArray((payload as DaemonProviderListPayload).providers)) {
+      rawProviders = (payload as DaemonProviderListPayload).providers as unknown[];
+    } else {
+      return ok([]);
+    }
+
+    const entries = rawProviders
+      .map(parseProviderListEntry)
+      .filter((entry): entry is ProviderListEntry => entry !== null);
+
+    return ok(entries);
+  }
+
+  public async getProviderAuthStatus(providerId: string): Promise<Result<ProviderListEntry, ConnectError>> {
+    const normalizedProviderId = providerId.trim();
+    if (normalizedProviderId.length === 0) {
+      return err({
+        code: "INVALID_INPUT",
+        message: "Provider ID is required.",
+        retryable: false,
+      });
+    }
+
+    const readiness = await this.ensureDaemonReady();
+    if (!readiness.ok) {
+      return readiness;
+    }
+
+    const result = await this.transport.get<unknown>(
+      `/api/providers/auth/status/${encodeURIComponent(normalizedProviderId)}`,
+    );
+    if (!result.ok) {
+      return err(mapDaemonError(result.error));
+    }
+
+    const entry = parseProviderListEntry(result.value);
+    if (!entry) {
+      return err({
+        code: "DAEMON_ERROR",
+        message: `Invalid auth status response for provider ${normalizedProviderId}.`,
+        retryable: false,
+      });
+    }
+
+    return ok(entry);
+  }
+
+  public async configureBYOK(
+    providerId: string,
+    apiKey: string,
+  ): Promise<Result<ProviderConnection, ConnectError>> {
+    const normalizedProvider = providerId.trim();
+    const normalizedApiKey = apiKey.trim();
+
+    if (normalizedProvider.length === 0 || normalizedApiKey.length === 0) {
+      return err({
+        code: "INVALID_INPUT",
+        message: "Provider and API key are required.",
+        retryable: false,
+      });
+    }
+
+    const readiness = await this.ensureDaemonReady();
+    if (!readiness.ok) {
+      return readiness;
+    }
+
+    const configureResult = await this.transport.post<
+      { provider: string; mode: "api_key"; key: string; source: string },
+      unknown
+    >("/api/providers/auth/configure", {
+      provider: normalizedProvider,
+      mode: "api_key",
+      key: normalizedApiKey,
+      source: "tui",
+    });
+
+    if (!configureResult.ok) {
+      return err(mapDaemonError(configureResult.error));
+    }
+
+    const configurePayload = normalizePayload(configureResult.value);
+    if (configurePayload.configured === false || configurePayload.valid === false) {
+      return err({
+        code: "VALIDATION_FAILED",
+        message: pickValidationError(configurePayload, "API key validation failed."),
+        retryable: false,
+      });
+    }
+
+    return ok({
+      providerId: pickProviderId(configurePayload, normalizedProvider),
+      providerName: pickProviderName(configurePayload, normalizedProvider),
+      mode: "byok",
+      models: pickModels(configurePayload),
+      configuredAt: pickConfiguredAt(configurePayload),
+    });
+  }
+
   private async ensureDaemonReady(): Promise<Result<void, ConnectError>> {
     if (!this.daemonClient) {
       return ok(undefined);
@@ -577,3 +795,5 @@ export class ConnectService {
 export function isProviderMode(value: unknown): value is ProviderMode {
   return readProviderMode(value) !== null;
 }
+
+export { connectionStateToDisplayStatus };
