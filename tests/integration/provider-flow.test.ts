@@ -13,8 +13,10 @@ interface FlowState {
   step: ConnectStep;
   selectedModeIndex: number;
   selectedProviderIndex: number;
+  selectedAuthMethodIndex: number;
   mode: "byok" | "gateway" | null;
-  provider: { id: string; label: string } | null;
+  provider: { id: string; label: string; authMethods: readonly string[] } | null;
+  authMethod: "api_key" | "oauth" | null;
   secretInput: string;
   connection: {
     providerId: string;
@@ -24,6 +26,7 @@ interface FlowState {
     configuredAt: string;
   } | null;
   error: { code: string; message: string; retryable: boolean } | null;
+  oauthUrl: string | null;
 }
 
 function daemonError(code: DaemonClientError["code"], message: string, retryable = true): DaemonClientError {
@@ -39,11 +42,14 @@ function createInitialFlowState(): FlowState {
     step: "mode-select",
     selectedModeIndex: 0,
     selectedProviderIndex: 0,
+    selectedAuthMethodIndex: 0,
     mode: null,
     provider: null,
+    authMethod: null,
     secretInput: "",
     connection: null,
     error: null,
+    oauthUrl: null,
   };
 }
 
@@ -111,22 +117,15 @@ function createNow(seed = "2026-02-11T00:00:00.000Z", stepMs = 30): () => Date {
 }
 
 describe("provider flow integration", () => {
-  test("completes BYOK flow and supports immediate message usage", async () => {
+  test("completes Anthropic BYOK flow via configureBYOK and supports immediate message usage", async () => {
     const transport = new MockProviderTransport();
-    transport.onPost("/api/providers/validate", () =>
-      ok({
-        valid: true,
-        providerId: "openai",
-        providerName: "OpenAI",
-        models: ["gpt-4o", "gpt-4o-mini"],
-      }),
-    );
-    transport.onPost("/api/providers/configure", () =>
+    transport.onPost("/api/providers/auth/configure", () =>
       ok({
         configured: true,
-        providerId: "openai",
-        providerName: "OpenAI",
-        models: ["gpt-4o"],
+        valid: true,
+        providerId: "anthropic",
+        providerName: "Anthropic",
+        models: ["claude-sonnet-4-20250514"],
         configuredAt: "2026-02-11T00:00:00.000Z",
       }),
     );
@@ -137,46 +136,121 @@ describe("provider flow integration", () => {
     const connectService = new ConnectService({ daemonClient: daemon, transport });
 
     let state = createInitialFlowState();
+
+    // Select BYOK mode
     state = connectReducer(state, { type: "SELECT_MODE" }) as FlowState;
+    expect(state.step).toBe("provider-select");
+
+    // Select Anthropic (index 0) — goes to auth method select
     state = connectReducer(state, { type: "SELECT_PROVIDER" }) as FlowState;
-    state = connectReducer(state, { type: "SET_SECRET", value: "sk-test-123" }) as FlowState;
+    expect(state.step).toBe("auth-method-select");
+
+    // Select API Key (index 0)
+    state = connectReducer(state, { type: "SELECT_AUTH_METHOD" }) as FlowState;
+    expect(state.step).toBe("api-key-entry");
+
+    // Enter key and submit
+    state = connectReducer(state, { type: "SET_SECRET", value: "sk-ant-test-123" }) as FlowState;
     state = connectReducer(state, { type: "SUBMIT_SECRET" }) as FlowState;
     expect(state.step).toBe("validating");
 
-    const connectResult = await connectService.connectBYOK("openai", "sk-test-123");
+    const connectResult = await connectService.configureBYOK("anthropic", "sk-ant-test-123");
     expect(connectResult.ok).toBe(true);
-    if (!connectResult.ok) {
-      return;
-    }
+    if (!connectResult.ok) return;
 
     state = connectReducer(state, {
       type: "VALIDATION_SUCCESS",
       connection: connectResult.value,
     }) as FlowState;
     expect(state.step).toBe("success");
-    expect(state.connection?.providerName).toBe("OpenAI");
+    expect(state.connection?.providerName).toBe("Anthropic");
 
+    // Verify immediate conversation usage
     const store = createConversationStore({ daemonClient: daemon, now: createNow(), completeDisplayMs: 5 });
     const send = await store.sendUserMessage({
-      content: "Use the newly configured provider",
+      content: "Use the newly configured Anthropic provider",
       model: connectResult.value.models[0],
     });
     expect(send.ok).toBe(true);
 
     const conversationId = store.getState().conversationId;
     expect(conversationId).toBeString();
-    if (!conversationId) {
-      return;
-    }
+    if (!conversationId) return;
 
     const conversation = await daemon.getConversation(conversationId);
     expect(conversation.ok).toBe(true);
-    if (!conversation.ok) {
-      return;
-    }
+    if (!conversation.ok) return;
 
-    expect(conversation.value.model).toBe("gpt-4o");
-    expect(conversation.value.messages[0]?.content).toBe("Use the newly configured provider");
+    expect(conversation.value.model).toBe("claude-sonnet-4-20250514");
+    expect(conversation.value.messages[0]?.content).toBe("Use the newly configured Anthropic provider");
+  });
+
+  test("completes Anthropic OAuth flow from start to finish", async () => {
+    const transport = new MockProviderTransport();
+    let oauthComplete = false;
+
+    transport.onPost("/api/providers/auth/oauth/initiate", () =>
+      ok({
+        authUrl: "https://console.anthropic.com/oauth/authorize?client_id=test&state=abc",
+        provider: "anthropic",
+        expiresAt: Date.now() + 120_000,
+      }),
+    );
+
+    transport.onGet("/api/providers/auth/oauth/status/anthropic", () => {
+      if (oauthComplete) {
+        return ok({
+          success: true,
+          provider: "anthropic",
+          providerId: "anthropic",
+          providerName: "Anthropic",
+          models: ["claude-sonnet-4-20250514", "claude-haiku-4-20250514"],
+          configuredAt: "2026-02-11T00:00:00.000Z",
+        });
+      }
+      return ok({ status: "pending", provider: "anthropic" });
+    });
+
+    const connectService = new ConnectService({ transport });
+
+    // Initiate OAuth
+    const initResult = await connectService.initiateOAuth("anthropic");
+    expect(initResult.ok).toBe(true);
+    if (!initResult.ok) return;
+
+    expect(initResult.value.authUrl).toContain("console.anthropic.com");
+    expect(initResult.value.provider).toBe("anthropic");
+
+    // Simulate browser completing OAuth
+    oauthComplete = true;
+
+    // Poll for completion
+    const pollResult = await connectService.pollOAuthCompletion("anthropic", {
+      timeoutMs: 5_000,
+      pollIntervalMs: 50,
+    });
+    expect(pollResult.ok).toBe(true);
+    if (!pollResult.ok) return;
+
+    expect(pollResult.value.providerId).toBe("anthropic");
+    expect(pollResult.value.providerName).toBe("Anthropic");
+    expect(pollResult.value.models).toContain("claude-sonnet-4-20250514");
+
+    // Verify reducer flow matches
+    let state = createInitialFlowState();
+    state = connectReducer(state, { type: "SELECT_MODE" }) as FlowState;
+    state = connectReducer(state, { type: "SELECT_PROVIDER" }) as FlowState;
+    state = connectReducer(state, { type: "NAVIGATE_DOWN" }) as FlowState;
+    state = connectReducer(state, { type: "SELECT_AUTH_METHOD" }) as FlowState;
+    expect(state.step).toBe("oauth-launching");
+
+    state = connectReducer(state, { type: "OAUTH_LAUNCHING", url: initResult.value.authUrl }) as FlowState;
+    state = connectReducer(state, { type: "OAUTH_WAITING" }) as FlowState;
+    expect(state.step).toBe("oauth-waiting");
+
+    state = connectReducer(state, { type: "OAUTH_COMPLETE", connection: pollResult.value }) as FlowState;
+    expect(state.step).toBe("success");
+    expect(state.connection?.providerName).toBe("Anthropic");
   });
 
   test("completes gateway flow end-to-end", async () => {
@@ -204,9 +278,7 @@ describe("provider flow integration", () => {
 
     const gateway = await connectService.connectGateway("gw-token");
     expect(gateway.ok).toBe(true);
-    if (!gateway.ok) {
-      return;
-    }
+    if (!gateway.ok) return;
 
     state = connectReducer(state, {
       type: "VALIDATION_SUCCESS",
@@ -216,54 +288,97 @@ describe("provider flow integration", () => {
     expect(state.connection?.providerId).toBe("gateway");
   });
 
-  test("surfaces invalid BYOK key error and allows retry", async () => {
-    let validateAttempts = 0;
+  test("surfaces invalid Anthropic BYOK key error and allows retry", async () => {
+    let configureAttempts = 0;
     const transport = new MockProviderTransport();
 
-    transport.onPost("/api/providers/validate", () => {
-      validateAttempts += 1;
-      if (validateAttempts === 1) {
-        return ok({ valid: false, error: "Invalid API key" });
+    transport.onPost("/api/providers/auth/configure", () => {
+      configureAttempts += 1;
+      if (configureAttempts === 1) {
+        return ok({ configured: false, valid: false, error: "Invalid API key" });
       }
 
-      return ok({ valid: true, providerId: "openai", providerName: "OpenAI", models: ["gpt-4o"] });
-    });
-
-    transport.onPost("/api/providers/configure", () =>
-      ok({
+      return ok({
         configured: true,
-        providerId: "openai",
-        providerName: "OpenAI",
-        models: ["gpt-4o"],
-      }),
-    );
+        valid: true,
+        providerId: "anthropic",
+        providerName: "Anthropic",
+        models: ["claude-sonnet-4-20250514"],
+      });
+    });
 
     const connectService = new ConnectService({ transport });
 
-    const first = await connectService.connectBYOK("openai", "bad-key");
+    const first = await connectService.configureBYOK("anthropic", "bad-key");
     expect(first.ok).toBe(false);
-    if (first.ok) {
-      return;
-    }
+    if (first.ok) return;
     expect(first.error.code).toBe("VALIDATION_FAILED");
 
-    const retry = await connectService.connectBYOK("openai", "good-key");
+    const retry = await connectService.configureBYOK("anthropic", "good-key");
     expect(retry.ok).toBe(true);
-    expect(validateAttempts).toBe(2);
+    expect(configureAttempts).toBe(2);
+  });
+
+  test("handles OAuth initiation failure gracefully", async () => {
+    const transport = new MockProviderTransport();
+    transport.onPost("/api/providers/auth/oauth/initiate", () =>
+      err(daemonError("DAEMON_INTERNAL_ERROR", "OAuth service unavailable", true)),
+    );
+
+    const connectService = new ConnectService({ transport });
+    const result = await connectService.initiateOAuth("anthropic");
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.retryable).toBe(true);
+  });
+
+  test("handles OAuth timeout during polling", async () => {
+    const transport = new MockProviderTransport();
+    transport.onGet("/api/providers/auth/oauth/status/anthropic", () =>
+      ok({ status: "pending", provider: "anthropic" }),
+    );
+
+    const connectService = new ConnectService({ transport });
+    const result = await connectService.pollOAuthCompletion("anthropic", {
+      timeoutMs: 200,
+      pollIntervalMs: 50,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("OAUTH_TIMEOUT");
+    expect(result.error.retryable).toBe(true);
+  });
+
+  test("handles OAuth error response during polling", async () => {
+    const transport = new MockProviderTransport();
+    transport.onGet("/api/providers/auth/oauth/status/anthropic", () =>
+      ok({ status: "error", provider: "anthropic", error: "User denied access" }),
+    );
+
+    const connectService = new ConnectService({ transport });
+    const result = await connectService.pollOAuthCompletion("anthropic", {
+      timeoutMs: 5_000,
+      pollIntervalMs: 50,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("OAUTH_FAILED");
+    expect(result.error.message).toBe("User denied access");
   });
 
   test("handles daemon offline during provider validation", async () => {
     const daemon = new MockDaemonClient({ daemonAvailable: false, now: createNow() });
     const transport = new MockProviderTransport();
-    transport.onPost("/api/providers/validate", () => ok({ valid: true }));
+    transport.onPost("/api/providers/auth/configure", () => ok({ configured: true, valid: true }));
 
     const connectService = new ConnectService({ daemonClient: daemon, transport });
-    const result = await connectService.connectBYOK("openai", "sk-offline");
+    const result = await connectService.configureBYOK("anthropic", "sk-offline");
 
     expect(result.ok).toBe(false);
-    if (result.ok) {
-      return;
-    }
+    if (result.ok) return;
 
     expect(result.error.code).toBe("DAEMON_OFFLINE");
     expect(result.error.retryable).toBe(true);
@@ -277,17 +392,22 @@ describe("provider flow integration", () => {
       ok({
         configured,
         mode: configured ? "byok" : null,
-        provider: configured ? "openai" : null,
+        provider: configured ? "anthropic" : null,
         status: configured ? "active" : "configured",
-        models: configured ? ["gpt-4o"] : [],
-        activeModel: configured ? "gpt-4o" : null,
+        models: configured ? ["claude-sonnet-4-20250514"] : [],
+        activeModel: configured ? "claude-sonnet-4-20250514" : null,
       }),
     );
 
-    transport.onPost("/api/providers/validate", () => ok({ valid: true, providerName: "OpenAI", models: ["gpt-4o"] }));
-    transport.onPost("/api/providers/configure", () => {
+    transport.onPost("/api/providers/auth/configure", () => {
       configured = true;
-      return ok({ configured: true, providerId: "openai", providerName: "OpenAI", models: ["gpt-4o"] });
+      return ok({
+        configured: true,
+        valid: true,
+        providerId: "anthropic",
+        providerName: "Anthropic",
+        models: ["claude-sonnet-4-20250514"],
+      });
     });
 
     const connectService = new ConnectService({ transport });
@@ -295,23 +415,84 @@ describe("provider flow integration", () => {
 
     const before = await statusService.getStatus();
     expect(before.ok).toBe(true);
-    if (!before.ok) {
-      return;
-    }
+    if (!before.ok) return;
     expect(before.value.configured).toBe(false);
     expect(before.value.activeModel).toBeNull();
 
-    const connect = await connectService.connectBYOK("openai", "sk-live");
+    const connect = await connectService.configureBYOK("anthropic", "sk-live");
     expect(connect.ok).toBe(true);
 
     const after = await statusService.getStatus();
     expect(after.ok).toBe(true);
-    if (!after.ok) {
-      return;
-    }
+    if (!after.ok) return;
 
     expect(after.value.configured).toBe(true);
     expect(after.value.status).toBe("active");
-    expect(after.value.activeModel).toBe("gpt-4o");
+    expect(after.value.activeModel).toBe("claude-sonnet-4-20250514");
+  });
+
+  test("cancel/back navigation through Anthropic BYOK flow", () => {
+    let state = createInitialFlowState();
+
+    // Navigate to auth method select
+    state = connectReducer(state, { type: "SELECT_MODE" }) as FlowState;
+    state = connectReducer(state, { type: "SELECT_PROVIDER" }) as FlowState;
+    expect(state.step).toBe("auth-method-select");
+
+    // Select API key
+    state = connectReducer(state, { type: "SELECT_AUTH_METHOD" }) as FlowState;
+    expect(state.step).toBe("api-key-entry");
+
+    // Go back to auth method select
+    state = connectReducer(state, { type: "GO_BACK" }) as FlowState;
+    expect(state.step).toBe("auth-method-select");
+
+    // Go back to provider select
+    state = connectReducer(state, { type: "GO_BACK" }) as FlowState;
+    expect(state.step).toBe("provider-select");
+
+    // Go back to mode select
+    state = connectReducer(state, { type: "GO_BACK" }) as FlowState;
+    expect(state.step).toBe("mode-select");
+  });
+
+  test("cancel/back navigation through OAuth flow", () => {
+    let state = createInitialFlowState();
+
+    // Navigate to OAuth launching
+    state = connectReducer(state, { type: "SELECT_MODE" }) as FlowState;
+    state = connectReducer(state, { type: "SELECT_PROVIDER" }) as FlowState;
+    state = connectReducer(state, { type: "NAVIGATE_DOWN" }) as FlowState;
+    state = connectReducer(state, { type: "SELECT_AUTH_METHOD" }) as FlowState;
+    expect(state.step).toBe("oauth-launching");
+
+    // Go back from OAuth launching
+    state = connectReducer(state, { type: "GO_BACK" }) as FlowState;
+    expect(state.step).toBe("auth-method-select");
+    expect(state.authMethod).toBeNull();
+
+    // Go back to provider select
+    state = connectReducer(state, { type: "GO_BACK" }) as FlowState;
+    expect(state.step).toBe("provider-select");
+  });
+
+  test("OAuth initiation with empty provider ID returns input error", async () => {
+    const transport = new MockProviderTransport();
+    const connectService = new ConnectService({ transport });
+
+    const result = await connectService.initiateOAuth("");
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("INVALID_INPUT");
+  });
+
+  test("OAuth polling with empty provider ID returns input error", async () => {
+    const transport = new MockProviderTransport();
+    const connectService = new ConnectService({ transport });
+
+    const result = await connectService.pollOAuthCompletion("  ");
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("INVALID_INPUT");
   });
 });

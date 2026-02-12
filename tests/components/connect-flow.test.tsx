@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import type { ThemeTokens } from "../../src/theme/theme-schema";
 import type { ConnectError, ProviderConnection } from "../../src/providers/connect-service";
 import {
+  AUTH_METHOD_OPTIONS,
   BYOK_PROVIDERS,
   connectReducer,
   maskSecret,
@@ -61,11 +62,14 @@ function createInitialState() {
     step: "mode-select" as ConnectStep,
     selectedModeIndex: 0,
     selectedProviderIndex: 0,
+    selectedAuthMethodIndex: 0,
     mode: null as "byok" | "gateway" | null,
     provider: null as typeof BYOK_PROVIDERS[number] | null,
+    authMethod: null as "api_key" | "oauth" | null,
     secretInput: "",
     connection: null as ProviderConnection | null,
     error: null as ConnectError | null,
+    oauthUrl: null as string | null,
   };
 }
 
@@ -97,6 +101,16 @@ describe("ConnectFlow initial state", () => {
   test("starts with empty secret input", () => {
     const state = createInitialState();
     expect(state.secretInput).toBe("");
+  });
+
+  test("starts with no auth method chosen", () => {
+    const state = createInitialState();
+    expect(state.authMethod).toBeNull();
+  });
+
+  test("starts with no oauth url", () => {
+    const state = createInitialState();
+    expect(state.oauthUrl).toBeNull();
   });
 });
 
@@ -151,10 +165,10 @@ describe("ConnectFlow mode selection", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Reducer tests: BYOK provider selection
+// Reducer tests: Provider selection
 // ---------------------------------------------------------------------------
 
-describe("ConnectFlow BYOK provider selection", () => {
+describe("ConnectFlow provider selection", () => {
   function providerSelectState() {
     return {
       ...createInitialState(),
@@ -182,18 +196,20 @@ describe("ConnectFlow BYOK provider selection", () => {
     expect(next.selectedProviderIndex).toBe(BYOK_PROVIDERS.length - 1);
   });
 
-  test("SELECT_PROVIDER navigates to api-key-entry", () => {
+  test("SELECT_PROVIDER for Anthropic navigates to auth-method-select", () => {
     const state = { ...providerSelectState(), selectedProviderIndex: 0 };
     const next = connectReducer(state, { type: "SELECT_PROVIDER" });
-    expect(next.step).toBe("api-key-entry");
-    expect(next.provider).toEqual(BYOK_PROVIDERS[0]);
-    expect(next.secretInput).toBe("");
+    expect(next.step).toBe("auth-method-select");
+    expect(next.provider?.id).toBe("anthropic");
   });
 
-  test("SELECT_PROVIDER captures correct provider at index 2", () => {
-    const state = { ...providerSelectState(), selectedProviderIndex: 2 };
+  test("SELECT_PROVIDER for single-auth provider navigates to api-key-entry", () => {
+    const openaiIndex = BYOK_PROVIDERS.findIndex((p) => p.id === "openai");
+    const state = { ...providerSelectState(), selectedProviderIndex: openaiIndex };
     const next = connectReducer(state, { type: "SELECT_PROVIDER" });
-    expect(next.provider).toEqual(BYOK_PROVIDERS[2]);
+    expect(next.step).toBe("api-key-entry");
+    expect(next.provider?.id).toBe("openai");
+    expect(next.authMethod).toBe("api_key");
   });
 
   test("SELECT_PROVIDER is ignored when not on provider-select step", () => {
@@ -202,12 +218,180 @@ describe("ConnectFlow BYOK provider selection", () => {
     expect(next.step).toBe("mode-select");
   });
 
-  test("BYOK_PROVIDERS contains expected providers", () => {
+  test("BYOK_PROVIDERS contains Anthropic as first option", () => {
+    expect(BYOK_PROVIDERS[0].id).toBe("anthropic");
+    expect(BYOK_PROVIDERS[0].label).toBe("Anthropic");
+  });
+
+  test("BYOK_PROVIDERS does not contain Fireworks", () => {
     const ids = BYOK_PROVIDERS.map((p) => p.id);
-    expect(ids).toContain("openai");
-    expect(ids).toContain("anthropic");
-    expect(ids).toContain("fireworks");
-    expect(ids).toContain("custom");
+    expect(ids).not.toContain("fireworks");
+  });
+
+  test("Anthropic supports both api_key and oauth auth methods", () => {
+    const anthropic = BYOK_PROVIDERS.find((p) => p.id === "anthropic");
+    expect(anthropic?.authMethods).toContain("api_key");
+    expect(anthropic?.authMethods).toContain("oauth");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reducer tests: Auth method selection
+// ---------------------------------------------------------------------------
+
+describe("ConnectFlow auth method selection", () => {
+  function authMethodState() {
+    return {
+      ...createInitialState(),
+      step: "auth-method-select" as ConnectStep,
+      mode: "byok" as const,
+      provider: BYOK_PROVIDERS[0], // Anthropic
+      selectedAuthMethodIndex: 0,
+    };
+  }
+
+  test("NAVIGATE_DOWN moves to next auth method", () => {
+    const state = authMethodState();
+    const next = connectReducer(state, { type: "NAVIGATE_DOWN" });
+    expect(next.selectedAuthMethodIndex).toBe(1);
+  });
+
+  test("NAVIGATE_DOWN wraps around from last auth method", () => {
+    const state = { ...authMethodState(), selectedAuthMethodIndex: 1 };
+    const next = connectReducer(state, { type: "NAVIGATE_DOWN" });
+    expect(next.selectedAuthMethodIndex).toBe(0);
+  });
+
+  test("NAVIGATE_UP wraps around from first auth method", () => {
+    const state = authMethodState();
+    const next = connectReducer(state, { type: "NAVIGATE_UP" });
+    expect(next.selectedAuthMethodIndex).toBe(1);
+  });
+
+  test("SELECT_AUTH_METHOD with api_key navigates to api-key-entry", () => {
+    const state = { ...authMethodState(), selectedAuthMethodIndex: 0 };
+    const next = connectReducer(state, { type: "SELECT_AUTH_METHOD" });
+    expect(next.step).toBe("api-key-entry");
+    expect(next.authMethod).toBe("api_key");
+  });
+
+  test("SELECT_AUTH_METHOD with oauth navigates to oauth-launching", () => {
+    const state = { ...authMethodState(), selectedAuthMethodIndex: 1 };
+    const next = connectReducer(state, { type: "SELECT_AUTH_METHOD" });
+    expect(next.step).toBe("oauth-launching");
+    expect(next.authMethod).toBe("oauth");
+  });
+
+  test("SELECT_AUTH_METHOD is ignored when not on auth-method-select step", () => {
+    const state = { ...authMethodState(), step: "mode-select" as ConnectStep };
+    const next = connectReducer(state, { type: "SELECT_AUTH_METHOD" });
+    expect(next.step).toBe("mode-select");
+  });
+
+  test("GO_BACK from auth-method-select returns to provider-select", () => {
+    const state = authMethodState();
+    const next = connectReducer(state, { type: "GO_BACK" });
+    expect(next.step).toBe("provider-select");
+    expect(next.provider).toBeNull();
+    expect(next.authMethod).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reducer tests: OAuth flow states
+// ---------------------------------------------------------------------------
+
+describe("ConnectFlow OAuth states", () => {
+  function oauthLaunchingState() {
+    return {
+      ...createInitialState(),
+      step: "oauth-launching" as ConnectStep,
+      mode: "byok" as const,
+      provider: BYOK_PROVIDERS[0],
+      authMethod: "oauth" as const,
+    };
+  }
+
+  test("OAUTH_LAUNCHING sets url and step", () => {
+    const state = {
+      ...createInitialState(),
+      step: "oauth-launching" as ConnectStep,
+      mode: "byok" as const,
+      provider: BYOK_PROVIDERS[0],
+      authMethod: "oauth" as const,
+    };
+    const next = connectReducer(state, { type: "OAUTH_LAUNCHING", url: "https://auth.example.com" });
+    expect(next.step).toBe("oauth-launching");
+    expect(next.oauthUrl).toBe("https://auth.example.com");
+  });
+
+  test("OAUTH_WAITING transitions to waiting state", () => {
+    const state = oauthLaunchingState();
+    const next = connectReducer(state, { type: "OAUTH_WAITING" });
+    expect(next.step).toBe("oauth-waiting");
+  });
+
+  test("OAUTH_COMPLETE transitions to success", () => {
+    const state = {
+      ...oauthLaunchingState(),
+      step: "oauth-waiting" as ConnectStep,
+    };
+    const connection: ProviderConnection = {
+      providerId: "anthropic",
+      providerName: "Anthropic",
+      mode: "byok",
+      models: ["claude-sonnet-4-20250514"],
+      configuredAt: "2026-02-11T00:00:00.000Z",
+    };
+    const next = connectReducer(state, { type: "OAUTH_COMPLETE", connection });
+    expect(next.step).toBe("success");
+    expect(next.connection?.providerName).toBe("Anthropic");
+    expect(next.oauthUrl).toBeNull();
+  });
+
+  test("GO_BACK from oauth-launching returns to auth-method-select", () => {
+    const state = oauthLaunchingState();
+    const next = connectReducer(state, { type: "GO_BACK" });
+    expect(next.step).toBe("auth-method-select");
+    expect(next.authMethod).toBeNull();
+    expect(next.oauthUrl).toBeNull();
+  });
+
+  test("GO_BACK from oauth-waiting returns to auth-method-select", () => {
+    const state = {
+      ...oauthLaunchingState(),
+      step: "oauth-waiting" as ConnectStep,
+    };
+    const next = connectReducer(state, { type: "GO_BACK" });
+    expect(next.step).toBe("auth-method-select");
+    expect(next.authMethod).toBeNull();
+  });
+
+  test("VALIDATION_ERROR from OAuth sets error step", () => {
+    const state = {
+      ...oauthLaunchingState(),
+      step: "oauth-waiting" as ConnectStep,
+    };
+    const error: ConnectError = {
+      code: "OAUTH_TIMEOUT",
+      message: "OAuth login timed out.",
+      retryable: true,
+    };
+    const next = connectReducer(state, { type: "VALIDATION_ERROR", error });
+    expect(next.step).toBe("error");
+    expect(next.error?.code).toBe("OAUTH_TIMEOUT");
+  });
+
+  test("GO_BACK from error with oauth auth method returns to auth-method-select", () => {
+    const state = {
+      ...oauthLaunchingState(),
+      step: "error" as ConnectStep,
+      error: { code: "OAUTH_FAILED" as const, message: "Failed", retryable: true },
+    };
+    const next = connectReducer(state, { type: "GO_BACK" });
+    expect(next.step).toBe("auth-method-select");
+    expect(next.error).toBeNull();
+    expect(next.authMethod).toBeNull();
   });
 });
 
@@ -222,6 +406,7 @@ describe("ConnectFlow BYOK API key entry", () => {
       step: "api-key-entry" as ConnectStep,
       mode: "byok" as const,
       provider: BYOK_PROVIDERS[0],
+      authMethod: "api_key" as const,
       secretInput: "",
     };
   }
@@ -250,8 +435,21 @@ describe("ConnectFlow BYOK API key entry", () => {
     expect(next.step).toBe("api-key-entry");
   });
 
-  test("GO_BACK from api-key-entry returns to provider-select", () => {
+  test("GO_BACK from api-key-entry with multi-auth provider returns to auth-method-select", () => {
     const state = apiKeyState();
+    const next = connectReducer(state, { type: "GO_BACK" });
+    expect(next.step).toBe("auth-method-select");
+    expect(next.secretInput).toBe("");
+    expect(next.authMethod).toBeNull();
+  });
+
+  test("GO_BACK from api-key-entry with single-auth provider returns to provider-select", () => {
+    const openai = BYOK_PROVIDERS.find((p) => p.id === "openai")!;
+    const state = {
+      ...apiKeyState(),
+      provider: openai,
+      authMethod: "api_key" as const,
+    };
     const next = connectReducer(state, { type: "GO_BACK" });
     expect(next.step).toBe("provider-select");
     expect(next.secretInput).toBe("");
@@ -306,10 +504,10 @@ describe("ConnectFlow Gateway token entry", () => {
 
 describe("ConnectFlow validation success", () => {
   const mockConnection: ProviderConnection = {
-    providerId: "openai",
-    providerName: "OpenAI",
+    providerId: "anthropic",
+    providerName: "Anthropic",
     mode: "byok",
-    models: ["gpt-4o", "gpt-4o-mini"],
+    models: ["claude-sonnet-4-20250514", "claude-haiku-4-20250514"],
     configuredAt: "2026-02-11T00:00:00.000Z",
   };
 
@@ -331,8 +529,8 @@ describe("ConnectFlow validation success", () => {
       step: "validating" as ConnectStep,
     };
     const next = connectReducer(state, { type: "VALIDATION_SUCCESS", connection: mockConnection });
-    expect(next.connection?.providerName).toBe("OpenAI");
-    expect(next.connection?.models).toEqual(["gpt-4o", "gpt-4o-mini"]);
+    expect(next.connection?.providerName).toBe("Anthropic");
+    expect(next.connection?.models).toEqual(["claude-sonnet-4-20250514", "claude-haiku-4-20250514"]);
   });
 });
 
@@ -357,11 +555,12 @@ describe("ConnectFlow validation failure", () => {
     expect(next.error).toEqual(mockError);
   });
 
-  test("GO_BACK from error returns to api-key-entry for BYOK", () => {
+  test("GO_BACK from error returns to api-key-entry for BYOK api_key", () => {
     const state = {
       ...createInitialState(),
       step: "error" as ConnectStep,
       mode: "byok" as const,
+      authMethod: "api_key" as const,
       error: mockError,
     };
     const next = connectReducer(state, { type: "GO_BACK" });
@@ -513,11 +712,11 @@ describe("ConnectFlow theme token usage", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Full BYOK flow integration (reducer only)
+// Full Anthropic BYOK flow (reducer only)
 // ---------------------------------------------------------------------------
 
-describe("ConnectFlow full BYOK flow", () => {
-  test("complete BYOK flow: mode → provider → key → validate → success", () => {
+describe("ConnectFlow full Anthropic BYOK flow", () => {
+  test("complete flow: mode → provider → auth method → key → validate → success", () => {
     let state = createInitialState();
 
     // Step 1: Select BYOK mode (index 0)
@@ -525,31 +724,81 @@ describe("ConnectFlow full BYOK flow", () => {
     expect(state.step).toBe("provider-select");
     expect(state.mode).toBe("byok");
 
-    // Step 2: Select OpenAI (index 0)
+    // Step 2: Select Anthropic (index 0)
     state = connectReducer(state, { type: "SELECT_PROVIDER" });
+    expect(state.step).toBe("auth-method-select");
+    expect(state.provider?.id).toBe("anthropic");
+
+    // Step 3: Select API Key (index 0)
+    state = connectReducer(state, { type: "SELECT_AUTH_METHOD" });
     expect(state.step).toBe("api-key-entry");
-    expect(state.provider?.id).toBe("openai");
+    expect(state.authMethod).toBe("api_key");
 
-    // Step 3: Enter API key
-    state = connectReducer(state, { type: "SET_SECRET", value: "sk-test-key-12345678" });
-    expect(state.secretInput).toBe("sk-test-key-12345678");
+    // Step 4: Enter API key
+    state = connectReducer(state, { type: "SET_SECRET", value: "sk-ant-test-key-12345678" });
+    expect(state.secretInput).toBe("sk-ant-test-key-12345678");
 
-    // Step 4: Submit
+    // Step 5: Submit
     state = connectReducer(state, { type: "SUBMIT_SECRET" });
     expect(state.step).toBe("validating");
 
-    // Step 5: Validation succeeds
+    // Step 6: Validation succeeds
     const connection: ProviderConnection = {
-      providerId: "openai",
-      providerName: "OpenAI",
+      providerId: "anthropic",
+      providerName: "Anthropic",
       mode: "byok",
-      models: ["gpt-4o", "gpt-4o-mini"],
+      models: ["claude-sonnet-4-20250514"],
       configuredAt: "2026-02-11T00:00:00.000Z",
     };
     state = connectReducer(state, { type: "VALIDATION_SUCCESS", connection });
     expect(state.step).toBe("success");
-    expect(state.connection?.providerName).toBe("OpenAI");
-    expect(state.connection?.models).toEqual(["gpt-4o", "gpt-4o-mini"]);
+    expect(state.connection?.providerName).toBe("Anthropic");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Full Anthropic OAuth flow (reducer only)
+// ---------------------------------------------------------------------------
+
+describe("ConnectFlow full Anthropic OAuth flow", () => {
+  test("complete flow: mode → provider → auth method → oauth launch → waiting → complete", () => {
+    let state = createInitialState();
+
+    // Step 1: Select BYOK mode
+    state = connectReducer(state, { type: "SELECT_MODE" });
+    expect(state.step).toBe("provider-select");
+
+    // Step 2: Select Anthropic
+    state = connectReducer(state, { type: "SELECT_PROVIDER" });
+    expect(state.step).toBe("auth-method-select");
+
+    // Step 3: Navigate to OAuth (index 1) and select
+    state = connectReducer(state, { type: "NAVIGATE_DOWN" });
+    expect(state.selectedAuthMethodIndex).toBe(1);
+    state = connectReducer(state, { type: "SELECT_AUTH_METHOD" });
+    expect(state.step).toBe("oauth-launching");
+    expect(state.authMethod).toBe("oauth");
+
+    // Step 4: OAuth URL received
+    state = connectReducer(state, { type: "OAUTH_LAUNCHING", url: "https://console.anthropic.com/oauth/authorize?..." });
+    expect(state.oauthUrl).toBe("https://console.anthropic.com/oauth/authorize?...");
+
+    // Step 5: Transition to waiting
+    state = connectReducer(state, { type: "OAUTH_WAITING" });
+    expect(state.step).toBe("oauth-waiting");
+
+    // Step 6: OAuth completes
+    const connection: ProviderConnection = {
+      providerId: "anthropic",
+      providerName: "Anthropic",
+      mode: "byok",
+      models: ["claude-sonnet-4-20250514", "claude-haiku-4-20250514"],
+      configuredAt: "2026-02-11T00:00:00.000Z",
+    };
+    state = connectReducer(state, { type: "OAUTH_COMPLETE", connection });
+    expect(state.step).toBe("success");
+    expect(state.connection?.providerName).toBe("Anthropic");
+    expect(state.oauthUrl).toBeNull();
   });
 });
 
@@ -581,7 +830,7 @@ describe("ConnectFlow full Gateway flow", () => {
       providerId: "gateway",
       providerName: "Reins Gateway",
       mode: "gateway",
-      models: ["claude-3.5-sonnet", "gpt-4o"],
+      models: ["claude-sonnet-4-20250514", "gpt-4o"],
       configuredAt: "2026-02-11T00:00:00.000Z",
     };
     state = connectReducer(state, { type: "VALIDATION_SUCCESS", connection });
@@ -601,6 +850,7 @@ describe("ConnectFlow validation failure and retry", () => {
       step: "api-key-entry",
       mode: "byok",
       provider: BYOK_PROVIDERS[0],
+      authMethod: "api_key",
     };
 
     // Enter bad key
@@ -631,13 +881,54 @@ describe("ConnectFlow validation failure and retry", () => {
 
     // Validation succeeds
     const connection: ProviderConnection = {
-      providerId: "openai",
-      providerName: "OpenAI",
+      providerId: "anthropic",
+      providerName: "Anthropic",
       mode: "byok",
-      models: ["gpt-4o"],
+      models: ["claude-sonnet-4-20250514"],
       configuredAt: "2026-02-11T00:00:00.000Z",
     };
     state = connectReducer(state, { type: "VALIDATION_SUCCESS", connection });
+    expect(state.step).toBe("success");
+  });
+
+  test("OAuth flow: launch → error → back → retry → success", () => {
+    let state: ReturnType<typeof createInitialState> = {
+      ...createInitialState(),
+      step: "oauth-waiting",
+      mode: "byok",
+      provider: BYOK_PROVIDERS[0],
+      authMethod: "oauth",
+    };
+
+    // OAuth fails
+    const error: ConnectError = {
+      code: "OAUTH_TIMEOUT",
+      message: "OAuth login timed out.",
+      retryable: true,
+    };
+    state = connectReducer(state, { type: "VALIDATION_ERROR", error });
+    expect(state.step).toBe("error");
+
+    // Go back to auth method select
+    state = connectReducer(state, { type: "GO_BACK" });
+    expect(state.step).toBe("auth-method-select");
+    expect(state.authMethod).toBeNull();
+
+    // Re-select OAuth
+    state = connectReducer(state, { type: "NAVIGATE_DOWN" });
+    state = connectReducer(state, { type: "SELECT_AUTH_METHOD" });
+    expect(state.step).toBe("oauth-launching");
+
+    // OAuth succeeds this time
+    state = connectReducer(state, { type: "OAUTH_WAITING" });
+    const connection: ProviderConnection = {
+      providerId: "anthropic",
+      providerName: "Anthropic",
+      mode: "byok",
+      models: ["claude-sonnet-4-20250514"],
+      configuredAt: "2026-02-11T00:00:00.000Z",
+    };
+    state = connectReducer(state, { type: "OAUTH_COMPLETE", connection });
     expect(state.step).toBe("success");
   });
 });
@@ -691,13 +982,23 @@ describe("ConnectFlow edge cases", () => {
     const steps: ConnectStep[] = [
       "mode-select",
       "provider-select",
+      "auth-method-select",
       "api-key-entry",
       "gateway-token-entry",
+      "oauth-launching",
+      "oauth-waiting",
+      "oauth-complete",
       "validating",
       "success",
       "error",
     ];
-    expect(steps).toHaveLength(7);
+    expect(steps).toHaveLength(11);
+  });
+
+  test("AUTH_METHOD_OPTIONS has api_key and oauth", () => {
+    const ids = AUTH_METHOD_OPTIONS.map((m) => m.id);
+    expect(ids).toContain("api_key");
+    expect(ids).toContain("oauth");
   });
 });
 
@@ -707,7 +1008,6 @@ describe("ConnectFlow edge cases", () => {
 
 describe("ConnectFlow component data contracts", () => {
   test("OverlayFrame uses surface.primary for background", () => {
-    // Verify the token exists and is a valid hex color
     expect(MOCK_TOKENS["surface.primary"]).toBeDefined();
     expect(MOCK_TOKENS["surface.primary"]).toMatch(/^#[0-9a-fA-F]{6}$/);
   });
@@ -738,7 +1038,6 @@ describe("ConnectFlow component data contracts", () => {
   });
 
   test("no hardcoded color values in token references", () => {
-    // All tokens used by the component should come from the theme
     const usedTokens = [
       "surface.primary",
       "surface.secondary",

@@ -3,6 +3,7 @@ import { useCallback, useReducer } from "react";
 import type {
   ConnectError,
   ConnectService,
+  ProviderAuthMethod,
   ProviderConnection,
   ProviderMode,
 } from "../providers/connect-service";
@@ -32,13 +33,24 @@ export interface ConnectFlowProps {
 export interface ProviderOption {
   readonly id: string;
   readonly label: string;
+  readonly authMethods: readonly ProviderAuthMethod[];
 }
 
 export const BYOK_PROVIDERS: readonly ProviderOption[] = [
-  { id: "openai", label: "OpenAI" },
-  { id: "anthropic", label: "Anthropic" },
-  { id: "fireworks", label: "Fireworks" },
-  { id: "custom", label: "Custom" },
+  { id: "anthropic", label: "Anthropic", authMethods: ["api_key", "oauth"] },
+  { id: "openai", label: "OpenAI", authMethods: ["api_key"] },
+  { id: "custom", label: "Custom", authMethods: ["api_key"] },
+];
+
+export interface AuthMethodOption {
+  readonly id: ProviderAuthMethod;
+  readonly label: string;
+  readonly description: string;
+}
+
+export const AUTH_METHOD_OPTIONS: readonly AuthMethodOption[] = [
+  { id: "api_key", label: "API Key", description: "Enter your API key directly" },
+  { id: "oauth", label: "Browser Login", description: "Sign in via browser" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -48,8 +60,12 @@ export const BYOK_PROVIDERS: readonly ProviderOption[] = [
 export type ConnectStep =
   | "mode-select"
   | "provider-select"
+  | "auth-method-select"
   | "api-key-entry"
   | "gateway-token-entry"
+  | "oauth-launching"
+  | "oauth-waiting"
+  | "oauth-complete"
   | "validating"
   | "success"
   | "error";
@@ -58,11 +74,14 @@ interface ConnectState {
   step: ConnectStep;
   selectedModeIndex: number;
   selectedProviderIndex: number;
+  selectedAuthMethodIndex: number;
   mode: ProviderMode | null;
   provider: ProviderOption | null;
+  authMethod: ProviderAuthMethod | null;
   secretInput: string;
   connection: ProviderConnection | null;
   error: ConnectError | null;
+  oauthUrl: string | null;
 }
 
 type ConnectAction =
@@ -70,9 +89,13 @@ type ConnectAction =
   | { type: "NAVIGATE_DOWN" }
   | { type: "SELECT_MODE" }
   | { type: "SELECT_PROVIDER" }
+  | { type: "SELECT_AUTH_METHOD" }
   | { type: "SET_SECRET"; value: string }
   | { type: "SUBMIT_SECRET" }
   | { type: "GO_BACK" }
+  | { type: "OAUTH_LAUNCHING"; url: string }
+  | { type: "OAUTH_WAITING" }
+  | { type: "OAUTH_COMPLETE"; connection: ProviderConnection }
   | { type: "VALIDATION_SUCCESS"; connection: ProviderConnection }
   | { type: "VALIDATION_ERROR"; error: ConnectError };
 
@@ -85,12 +108,23 @@ const INITIAL_STATE: ConnectState = {
   step: "mode-select",
   selectedModeIndex: 0,
   selectedProviderIndex: 0,
+  selectedAuthMethodIndex: 0,
   mode: null,
   provider: null,
+  authMethod: null,
   secretInput: "",
   connection: null,
   error: null,
+  oauthUrl: null,
 };
+
+function getAvailableAuthMethods(provider: ProviderOption | null): readonly AuthMethodOption[] {
+  if (!provider) {
+    return [];
+  }
+
+  return AUTH_METHOD_OPTIONS.filter((method) => provider.authMethods.includes(method.id));
+}
 
 export function connectReducer(state: ConnectState, action: ConnectAction): ConnectState {
   switch (action.type) {
@@ -111,6 +145,15 @@ export function connectReducer(state: ConnectState, action: ConnectAction): Conn
             : state.selectedProviderIndex - 1,
         };
       }
+      if (state.step === "auth-method-select") {
+        const methods = getAvailableAuthMethods(state.provider);
+        return {
+          ...state,
+          selectedAuthMethodIndex: state.selectedAuthMethodIndex <= 0
+            ? methods.length - 1
+            : state.selectedAuthMethodIndex - 1,
+        };
+      }
       return state;
     }
 
@@ -125,6 +168,13 @@ export function connectReducer(state: ConnectState, action: ConnectAction): Conn
         return {
           ...state,
           selectedProviderIndex: (state.selectedProviderIndex + 1) % BYOK_PROVIDERS.length,
+        };
+      }
+      if (state.step === "auth-method-select") {
+        const methods = getAvailableAuthMethods(state.provider);
+        return {
+          ...state,
+          selectedAuthMethodIndex: (state.selectedAuthMethodIndex + 1) % methods.length,
         };
       }
       return state;
@@ -152,10 +202,43 @@ export function connectReducer(state: ConnectState, action: ConnectAction): Conn
     case "SELECT_PROVIDER": {
       if (state.step !== "provider-select") return state;
       const provider = BYOK_PROVIDERS[state.selectedProviderIndex];
+
+      if (provider.authMethods.length > 1) {
+        return {
+          ...state,
+          step: "auth-method-select",
+          provider,
+          selectedAuthMethodIndex: 0,
+        };
+      }
+
       return {
         ...state,
         step: "api-key-entry",
         provider,
+        authMethod: "api_key",
+        secretInput: "",
+      };
+    }
+
+    case "SELECT_AUTH_METHOD": {
+      if (state.step !== "auth-method-select") return state;
+      const methods = getAvailableAuthMethods(state.provider);
+      const selected = methods[state.selectedAuthMethodIndex];
+      if (!selected) return state;
+
+      if (selected.id === "oauth") {
+        return {
+          ...state,
+          step: "oauth-launching",
+          authMethod: "oauth",
+        };
+      }
+
+      return {
+        ...state,
+        step: "api-key-entry",
+        authMethod: "api_key",
         secretInput: "",
       };
     }
@@ -173,20 +256,41 @@ export function connectReducer(state: ConnectState, action: ConnectAction): Conn
       if (state.step === "provider-select") {
         return { ...state, step: "mode-select", mode: null };
       }
+      if (state.step === "auth-method-select") {
+        return { ...state, step: "provider-select", provider: null, authMethod: null, selectedAuthMethodIndex: 0 };
+      }
       if (state.step === "api-key-entry") {
-        return { ...state, step: "provider-select", secretInput: "", provider: null };
+        if (state.provider && state.provider.authMethods.length > 1) {
+          return { ...state, step: "auth-method-select", secretInput: "", authMethod: null };
+        }
+        return { ...state, step: "provider-select", secretInput: "", provider: null, authMethod: null };
       }
       if (state.step === "gateway-token-entry") {
         return { ...state, step: "mode-select", mode: null, secretInput: "" };
+      }
+      if (state.step === "oauth-launching" || state.step === "oauth-waiting") {
+        return { ...state, step: "auth-method-select", authMethod: null, oauthUrl: null };
       }
       if (state.step === "error") {
         if (state.mode === "gateway") {
           return { ...state, step: "gateway-token-entry", secretInput: "", error: null };
         }
+        if (state.authMethod === "oauth") {
+          return { ...state, step: "auth-method-select", error: null, authMethod: null, oauthUrl: null };
+        }
         return { ...state, step: "api-key-entry", secretInput: "", error: null };
       }
       return state;
     }
+
+    case "OAUTH_LAUNCHING":
+      return { ...state, step: "oauth-launching", oauthUrl: action.url };
+
+    case "OAUTH_WAITING":
+      return { ...state, step: "oauth-waiting" };
+
+    case "OAUTH_COMPLETE":
+      return { ...state, step: "success", connection: action.connection, error: null, oauthUrl: null };
 
     case "VALIDATION_SUCCESS":
       return { ...state, step: "success", connection: action.connection, error: null };
@@ -268,7 +372,7 @@ function OverlayFrame({ title, hint, tokens, children }: OverlayFrameProps) {
 }
 
 interface SelectionListProps {
-  items: readonly { id: string; label: string }[];
+  items: readonly { id: string; label: string; description?: string }[];
   selectedIndex: number;
   tokens: Record<string, string>;
 }
@@ -295,6 +399,12 @@ function SelectionList({ items, selectedIndex, tokens }: SelectionListProps) {
               content={item.label}
               style={{ color: isSelected ? tokens["text.primary"] : tokens["text.secondary"] }}
             />
+            {item.description ? (
+              <Text
+                content={` — ${item.description}`}
+                style={{ color: tokens["text.muted"] }}
+              />
+            ) : null}
           </Box>
         );
       })}
@@ -330,14 +440,32 @@ function ModeSelectStep({ state, tokens }: StepProps) {
 function ProviderSelectStep({ state, tokens }: StepProps) {
   return (
     <OverlayFrame
-      title="BYOK Setup"
+      title="Select Provider"
       hint="↑↓ select · Enter confirm · Esc back"
       tokens={tokens}
     >
       <Box style={{ marginBottom: 1 }}>
-        <Text content="Select provider:" style={{ color: tokens["text.primary"] }} />
+        <Text content="Choose a provider:" style={{ color: tokens["text.primary"] }} />
       </Box>
       <SelectionList items={BYOK_PROVIDERS} selectedIndex={state.selectedProviderIndex} tokens={tokens} />
+    </OverlayFrame>
+  );
+}
+
+function AuthMethodSelectStep({ state, tokens }: StepProps) {
+  const providerLabel = state.provider?.label ?? "Provider";
+  const methods = getAvailableAuthMethods(state.provider);
+
+  return (
+    <OverlayFrame
+      title={`${providerLabel} — Authentication`}
+      hint="↑↓ select · Enter confirm · Esc back"
+      tokens={tokens}
+    >
+      <Box style={{ marginBottom: 1 }}>
+        <Text content="Choose how to authenticate:" style={{ color: tokens["text.primary"] }} />
+      </Box>
+      <SelectionList items={methods} selectedIndex={state.selectedAuthMethodIndex} tokens={tokens} />
     </OverlayFrame>
   );
 }
@@ -393,6 +521,40 @@ function GatewayTokenEntryStep({ state, tokens, onSecretInput }: StepProps) {
   );
 }
 
+function OAuthLaunchingStep({ state, tokens }: { state: ConnectState; tokens: Record<string, string> }) {
+  const providerLabel = state.provider?.label ?? "Provider";
+
+  return (
+    <OverlayFrame title={`${providerLabel} — Browser Login`} hint="Esc to cancel" tokens={tokens}>
+      <Box style={{ flexDirection: "row" }}>
+        <Text content="◎ " style={{ color: tokens["glyph.tool.running"] }} />
+        <Text content="Opening browser for login..." style={{ color: tokens["text.secondary"] }} />
+      </Box>
+    </OverlayFrame>
+  );
+}
+
+function OAuthWaitingStep({ state, tokens }: { state: ConnectState; tokens: Record<string, string> }) {
+  const providerLabel = state.provider?.label ?? "Provider";
+
+  return (
+    <OverlayFrame title={`${providerLabel} — Browser Login`} hint="Esc to cancel" tokens={tokens}>
+      <Box style={{ flexDirection: "column" }}>
+        <Box style={{ flexDirection: "row" }}>
+          <Text content="◎ " style={{ color: tokens["glyph.tool.running"] }} />
+          <Text content="Waiting for OAuth callback..." style={{ color: tokens["text.secondary"] }} />
+        </Box>
+        <Box style={{ marginTop: 1 }}>
+          <Text
+            content="Complete the login in your browser. This page will update automatically."
+            style={{ color: tokens["text.muted"] }}
+          />
+        </Box>
+      </Box>
+    </OverlayFrame>
+  );
+}
+
 function ValidatingStep({ tokens }: { tokens: Record<string, string> }) {
   return (
     <OverlayFrame title="Connecting..." hint="" tokens={tokens}>
@@ -409,12 +571,13 @@ function SuccessStep({ state, tokens }: { state: ConnectState; tokens: Record<st
   const providerName = connection?.providerName ?? "Provider";
   const models = connection?.models ?? [];
   const modelDisplay = models.length > 0 ? models.join(", ") : "Available";
+  const authLabel = state.authMethod === "oauth" ? " via OAuth" : "";
 
   return (
     <OverlayFrame title="Connected!" hint="Press any key to continue" tokens={tokens}>
       <Box style={{ flexDirection: "row" }}>
         <Text content="✦ " style={{ color: tokens["status.success"] }} />
-        <Text content={`${providerName} connected`} style={{ color: tokens["text.primary"] }} />
+        <Text content={`${providerName} connected${authLabel}`} style={{ color: tokens["text.primary"] }} />
       </Box>
       <Box style={{ flexDirection: "row", marginTop: 1 }}>
         <Text content={`Models: ${modelDisplay}`} style={{ color: tokens["text.secondary"] }} />
@@ -425,9 +588,14 @@ function SuccessStep({ state, tokens }: { state: ConnectState; tokens: Record<st
 
 function ErrorStep({ state, tokens }: { state: ConnectState; tokens: Record<string, string> }) {
   const errorMessage = state.error?.message ?? "Connection failed";
+  const isOAuthError = state.authMethod === "oauth";
 
   return (
-    <OverlayFrame title="Connection Failed" hint="Esc to go back · Press any key to retry" tokens={tokens}>
+    <OverlayFrame
+      title={isOAuthError ? "OAuth Failed" : "Connection Failed"}
+      hint="Esc to go back · Press any key to retry"
+      tokens={tokens}
+    >
       <Box style={{ flexDirection: "row" }}>
         <Text content="✧ " style={{ color: tokens["status.error"] }} />
         <Text content={errorMessage} style={{ color: tokens["text.primary"] }} />
@@ -452,7 +620,7 @@ export function ConnectFlow({ connectService, onComplete, onCancel }: ConnectFlo
   const runValidation = useCallback(
     async (currentState: ConnectState) => {
       if (currentState.mode === "byok" && currentState.provider) {
-        const result = await connectService.connectBYOK(
+        const result = await connectService.configureBYOK(
           currentState.provider.id,
           currentState.secretInput,
         );
@@ -468,6 +636,31 @@ export function ConnectFlow({ connectService, onComplete, onCancel }: ConnectFlo
         } else {
           dispatch({ type: "VALIDATION_ERROR", error: result.error });
         }
+      }
+    },
+    [connectService],
+  );
+
+  const runOAuthFlow = useCallback(
+    async (provider: ProviderOption) => {
+      const initResult = await connectService.initiateOAuth(provider.id);
+      if (!initResult.ok) {
+        dispatch({ type: "VALIDATION_ERROR", error: initResult.error });
+        return;
+      }
+
+      dispatch({ type: "OAUTH_LAUNCHING", url: initResult.value.authUrl });
+
+      // Transition to waiting after a brief moment for browser to open
+      setTimeout(() => {
+        dispatch({ type: "OAUTH_WAITING" });
+      }, 1500);
+
+      const pollResult = await connectService.pollOAuthCompletion(provider.id);
+      if (pollResult.ok) {
+        dispatch({ type: "OAUTH_COMPLETE", connection: pollResult.value });
+      } else {
+        dispatch({ type: "VALIDATION_ERROR", error: pollResult.error });
       }
     },
     [connectService],
@@ -494,6 +687,14 @@ export function ConnectFlow({ connectService, onComplete, onCancel }: ConnectFlo
       }
       // Retry: go back to entry step
       dispatch({ type: "GO_BACK" });
+      return;
+    }
+
+    // OAuth launching/waiting: only Esc to cancel
+    if (state.step === "oauth-launching" || state.step === "oauth-waiting") {
+      if (keyName === "escape" || keyName === "esc") {
+        dispatch({ type: "GO_BACK" });
+      }
       return;
     }
 
@@ -532,10 +733,18 @@ export function ConnectFlow({ connectService, onComplete, onCancel }: ConnectFlo
         dispatch({ type: "SELECT_PROVIDER" });
         return;
       }
+      if (state.step === "auth-method-select") {
+        dispatch({ type: "SELECT_AUTH_METHOD" });
+        const methods = getAvailableAuthMethods(state.provider);
+        const selected = methods[state.selectedAuthMethodIndex];
+        if (selected?.id === "oauth" && state.provider) {
+          void runOAuthFlow(state.provider);
+        }
+        return;
+      }
       if (state.step === "api-key-entry" || state.step === "gateway-token-entry") {
         if (state.secretInput.trim().length === 0) return;
         dispatch({ type: "SUBMIT_SECRET" });
-        // Trigger async validation
         const snapshot = { ...state, step: "validating" as ConnectStep };
         runValidation(snapshot);
         return;
@@ -550,10 +759,16 @@ export function ConnectFlow({ connectService, onComplete, onCancel }: ConnectFlo
       return <ModeSelectStep {...stepProps} />;
     case "provider-select":
       return <ProviderSelectStep {...stepProps} />;
+    case "auth-method-select":
+      return <AuthMethodSelectStep {...stepProps} />;
     case "api-key-entry":
       return <ApiKeyEntryStep {...stepProps} />;
     case "gateway-token-entry":
       return <GatewayTokenEntryStep {...stepProps} />;
+    case "oauth-launching":
+      return <OAuthLaunchingStep state={state} tokens={tokens} />;
+    case "oauth-waiting":
+      return <OAuthWaitingStep state={state} tokens={tokens} />;
     case "validating":
       return <ValidatingStep tokens={tokens} />;
     case "success":

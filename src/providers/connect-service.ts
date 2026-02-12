@@ -41,7 +41,9 @@ export type ConnectErrorCode =
   | "VALIDATION_FAILED"
   | "CONFIGURATION_FAILED"
   | "DAEMON_OFFLINE"
-  | "DAEMON_ERROR";
+  | "DAEMON_ERROR"
+  | "OAUTH_FAILED"
+  | "OAUTH_TIMEOUT";
 
 export interface ConnectError {
   code: ConnectErrorCode;
@@ -60,6 +62,38 @@ export interface ConnectServiceOptions {
   transport?: ProviderApiTransport;
   daemonBaseUrl?: string;
   requestTimeoutMs?: number;
+}
+
+export interface OAuthInitiation {
+  authUrl: string;
+  provider: string;
+  expiresAt?: number;
+}
+
+export interface OAuthCompletion {
+  success: boolean;
+  provider: string;
+  error?: string;
+}
+
+interface DaemonOAuthInitPayload {
+  authUrl?: string;
+  url?: string;
+  provider?: string;
+  expiresAt?: number;
+  error?: string;
+}
+
+interface DaemonOAuthStatusPayload {
+  status?: string;
+  provider?: string;
+  success?: boolean;
+  complete?: boolean;
+  error?: string;
+  providerId?: string;
+  providerName?: string;
+  models?: unknown;
+  configuredAt?: string;
 }
 
 interface DaemonProviderPayload {
@@ -716,6 +750,104 @@ export class ConnectService {
     }
 
     return ok(entry);
+  }
+
+  public async initiateOAuth(providerId: string): Promise<Result<OAuthInitiation, ConnectError>> {
+    const normalizedProvider = providerId.trim();
+    if (normalizedProvider.length === 0) {
+      return err({
+        code: "INVALID_INPUT",
+        message: "Provider ID is required.",
+        retryable: false,
+      });
+    }
+
+    const readiness = await this.ensureDaemonReady();
+    if (!readiness.ok) {
+      return readiness;
+    }
+
+    const result = await this.transport.post<
+      { provider: string; source: string },
+      unknown
+    >("/api/providers/auth/oauth/initiate", {
+      provider: normalizedProvider,
+      source: "tui",
+    });
+
+    if (!result.ok) {
+      return err(mapDaemonError(result.error));
+    }
+
+    const payload = result.value as DaemonOAuthInitPayload;
+    const authUrl = payload.authUrl ?? payload.url;
+    if (!authUrl || typeof authUrl !== "string") {
+      return err({
+        code: "OAUTH_FAILED",
+        message: "Daemon did not return an OAuth authorization URL.",
+        retryable: false,
+      });
+    }
+
+    return ok({
+      authUrl,
+      provider: payload.provider ?? normalizedProvider,
+      expiresAt: payload.expiresAt,
+    });
+  }
+
+  public async pollOAuthCompletion(
+    providerId: string,
+    options?: { timeoutMs?: number; pollIntervalMs?: number },
+  ): Promise<Result<ProviderConnection, ConnectError>> {
+    const normalizedProvider = providerId.trim();
+    if (normalizedProvider.length === 0) {
+      return err({
+        code: "INVALID_INPUT",
+        message: "Provider ID is required.",
+        retryable: false,
+      });
+    }
+
+    const timeoutMs = options?.timeoutMs ?? 120_000;
+    const pollIntervalMs = options?.pollIntervalMs ?? 2_000;
+    const deadline = Date.now() + timeoutMs;
+
+    while (Date.now() < deadline) {
+      const result = await this.transport.get<unknown>(
+        `/api/providers/auth/oauth/status/${encodeURIComponent(normalizedProvider)}`,
+      );
+
+      if (result.ok) {
+        const payload = result.value as DaemonOAuthStatusPayload;
+
+        if (payload.success === true || payload.complete === true) {
+          return ok({
+            providerId: payload.providerId ?? payload.provider ?? normalizedProvider,
+            providerName: payload.providerName ?? payload.provider ?? normalizedProvider,
+            mode: "byok",
+            models: readStringArray(payload.models),
+            configuredAt: payload.configuredAt ?? new Date().toISOString(),
+          });
+        }
+
+        if (payload.status === "error" || payload.error) {
+          return err({
+            code: "OAUTH_FAILED",
+            message: payload.error ?? "OAuth authorization failed.",
+            retryable: true,
+          });
+        }
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    }
+
+    return err({
+      code: "OAUTH_TIMEOUT",
+      message: "OAuth login timed out. Please try again.",
+      retryable: true,
+    });
   }
 
   public async configureBYOK(
