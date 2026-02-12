@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
-import { CommandPalette, type CommandPaletteDataSources, ErrorBoundary, getNextModel, Layout } from "./components";
+import { CommandPalette, type CommandPaletteDataSources, ErrorBoundary, Layout } from "./components";
+import { ModelSelectorModal, type ProviderModelGroup } from "./components/model-selector";
 import { ConnectFlow, type ConnectResult } from "./components/connect-flow";
 import { HelpScreen } from "./screens";
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "./daemon/client";
@@ -9,6 +10,7 @@ import type { DaemonMessage, DaemonResult, ConversationSummary as DaemonConversa
 import { ConnectService } from "./providers/connect-service";
 import { GreetingService, type StartupContent } from "./personalization/greeting-service";
 import { createConversationStore, type ConversationStoreState } from "./state/conversation-store";
+import { loadModelPreferences, saveModelPreferences } from "./state/model-persistence";
 import { loadPinPreferences, savePinPreferences } from "./state/pin-persistence";
 import { toPinPreferences, applyPinPreferences, DEFAULT_PANEL_STATE } from "./state/layout-mode";
 import { useConversations, useFocus } from "./hooks";
@@ -191,6 +193,10 @@ function isToggleTodayEvent(event: KeyEvent): boolean {
   return event.ctrl === true && (event.name === "2" || event.sequence === "2");
 }
 
+function isToggleModelSelectorEvent(event: KeyEvent): boolean {
+  return event.ctrl === true && (event.name === "m" || event.sequence === "\x0d" || event.sequence === "m");
+}
+
 function resolveDirectPanelFocus(event: KeyEvent) {
   if (event.ctrl !== true) {
     return null;
@@ -231,6 +237,8 @@ function AppView({ version, dimensions }: AppViewProps) {
   const activeConversationIdRef = useRef<string | null>(state.activeConversationId);
   const conversationStoreRef = useRef(createConversationStore({ daemonClient }));
 
+  const [providerGroups, setProviderGroups] = useState<ProviderModelGroup[]>([]);
+
   // Restore pin preferences on startup
   const pinPrefsLoadedRef = useRef(false);
   useEffect(() => {
@@ -242,6 +250,20 @@ function AppView({ version, dimensions }: AppViewProps) {
     if (restoredPanels.drawer.pinned) dispatch({ type: "PIN_PANEL", payload: "drawer" });
     if (restoredPanels.today.pinned) dispatch({ type: "PIN_PANEL", payload: "today" });
     if (restoredPanels.modal.pinned) dispatch({ type: "PIN_PANEL", payload: "modal" });
+  }, [dispatch]);
+
+  // Restore model preferences on startup
+  const modelPrefsLoadedRef = useRef(false);
+  useEffect(() => {
+    if (modelPrefsLoadedRef.current) return;
+    modelPrefsLoadedRef.current = true;
+    const prefs = loadModelPreferences();
+    if (prefs.modelId !== "default") {
+      dispatch({ type: "SET_MODEL", payload: prefs.modelId });
+    }
+    if (prefs.provider) {
+      dispatch({ type: "SET_PROVIDER", payload: prefs.provider });
+    }
   }, [dispatch]);
 
   // Persist pin preferences when they change
@@ -365,10 +387,59 @@ function AppView({ version, dimensions }: AppViewProps) {
       const response = await fetch(`${DEFAULT_DAEMON_HTTP_BASE_URL}/api/models`);
       if (!response.ok) return;
       const data = await response.json() as { models?: { id: string; name: string; provider: string }[] };
-      const modelIds = (data.models ?? []).map((m) => m.id);
+      const models = data.models ?? [];
+      const modelIds = models.map((m) => m.id);
       if (modelIds.length > 0) {
         dispatch({ type: "SET_AVAILABLE_MODELS", payload: modelIds });
       }
+
+      // Build provider groups from model data
+      const groupMap = new Map<string, ProviderModelGroup>();
+      for (const model of models) {
+        const providerId = model.provider || "unknown";
+        if (!groupMap.has(providerId)) {
+          groupMap.set(providerId, {
+            providerId,
+            providerName: providerId,
+            connectionState: "ready",
+            models: [],
+          });
+        }
+        groupMap.get(providerId)!.models.push(model.id);
+      }
+
+      // Also fetch provider auth list to find disconnected providers
+      try {
+        const authResponse = await fetch(`${DEFAULT_DAEMON_HTTP_BASE_URL}/api/providers/auth/list`);
+        if (authResponse.ok) {
+          const authData = await authResponse.json() as {
+            providers?: { provider?: string; providerName?: string; connectionState?: string; configured?: boolean }[];
+          } | { provider?: string; providerName?: string; connectionState?: string; configured?: boolean }[];
+          const providerList = Array.isArray(authData)
+            ? authData
+            : (authData as { providers?: unknown[] }).providers ?? [];
+
+          for (const entry of providerList) {
+            const raw = entry as Record<string, unknown>;
+            const pid = typeof raw.provider === "string" ? raw.provider : "";
+            if (!pid) continue;
+            const pname = typeof raw.providerName === "string" ? raw.providerName : pid;
+            const connState = typeof raw.connectionState === "string" ? raw.connectionState : "requires_auth";
+            if (!groupMap.has(pid)) {
+              groupMap.set(pid, {
+                providerId: pid,
+                providerName: pname,
+                connectionState: connState as ProviderModelGroup["connectionState"],
+                models: [],
+              });
+            }
+          }
+        }
+      } catch {
+        // Auth list fetch is best-effort
+      }
+
+      setProviderGroups(Array.from(groupMap.values()));
     } catch {
       // Daemon may not be available yet
     }
@@ -379,7 +450,7 @@ function AppView({ version, dimensions }: AppViewProps) {
     void fetchModels();
   }, [fetchModels]);
 
-  // Auto-select first model when available models change
+  // Auto-select first model when available models change (only if no persisted preference)
   useEffect(() => {
     if (state.availableModels.length === 0) return;
     const isCurrentValid = state.availableModels.includes(state.currentModel);
@@ -387,6 +458,30 @@ function AppView({ version, dimensions }: AppViewProps) {
       dispatch({ type: "SET_MODEL", payload: state.availableModels[0] });
     }
   }, [state.availableModels, state.currentModel, dispatch]);
+
+  // Persist model selection when it changes
+  const prevModelRef = useRef(state.currentModel);
+  useEffect(() => {
+    if (state.currentModel !== prevModelRef.current && state.currentModel !== "default") {
+      prevModelRef.current = state.currentModel;
+      saveModelPreferences({
+        modelId: state.currentModel,
+        provider: state.currentProvider,
+      });
+    }
+  }, [state.currentModel, state.currentProvider]);
+
+  const handleModelSelect = useCallback((modelId: string, providerId: string) => {
+    dispatch({ type: "SET_MODEL", payload: modelId });
+    dispatch({ type: "SET_PROVIDER", payload: providerId });
+    dispatch({ type: "SET_MODEL_SELECTOR_OPEN", payload: false });
+    dispatch({ type: "SET_STATUS", payload: `Model set to ${modelId}` });
+  }, [dispatch]);
+
+  const closeModelSelector = useCallback(() => {
+    dispatch({ type: "SET_MODEL_SELECTOR_OPEN", payload: false });
+    dispatch({ type: "SET_STATUS", payload: "Ready" });
+  }, [dispatch]);
 
   const closeHelp = useCallback(() => {
     setShowHelp(false);
@@ -543,9 +638,8 @@ function AppView({ version, dimensions }: AppViewProps) {
         dispatch({ type: "SET_STATUS", payload: "Cleared messages" });
         break;
       case "model": {
-        const nextModel = getNextModel(state.currentModel, state.availableModels);
-        dispatch({ type: "SET_MODEL", payload: nextModel });
-        dispatch({ type: "SET_STATUS", payload: `Model set to ${nextModel}` });
+        dispatch({ type: "SET_MODEL_SELECTOR_OPEN", payload: true });
+        dispatch({ type: "SET_STATUS", payload: "Model selector" });
         break;
       }
       case "quit":
@@ -570,7 +664,13 @@ function AppView({ version, dimensions }: AppViewProps) {
       return;
     }
 
-    if (state.isCommandPaletteOpen || state.isConnectFlowOpen) {
+    if (isToggleModelSelectorEvent(event)) {
+      dispatch({ type: "SET_MODEL_SELECTOR_OPEN", payload: !state.isModelSelectorOpen });
+      dispatch({ type: "SET_STATUS", payload: state.isModelSelectorOpen ? "Ready" : "Model selector" });
+      return;
+    }
+
+    if (state.isCommandPaletteOpen || state.isConnectFlowOpen || state.isModelSelectorOpen) {
       return;
     }
 
@@ -673,6 +773,13 @@ function AppView({ version, dimensions }: AppViewProps) {
         sources={paletteSources}
         onClose={() => setCommandPaletteOpen(false)}
         onExecute={executePaletteAction}
+      />
+      <ModelSelectorModal
+        visible={state.isModelSelectorOpen}
+        providerGroups={providerGroups}
+        currentModel={state.currentModel}
+        onSelect={handleModelSelect}
+        onClose={closeModelSelector}
       />
       <HelpScreen isOpen={showHelp} startup={startupContent} />
       {state.isConnectFlowOpen ? (

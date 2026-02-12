@@ -34,7 +34,9 @@ export interface AppState {
   streamingLifecycleStatus: ConversationLifecycleStatus;
   isCommandPaletteOpen: boolean;
   isConnectFlowOpen: boolean;
+  isModelSelectorOpen: boolean;
   currentModel: string;
+  currentProvider: string;
   availableModels: string[];
   status: string;
   focusedPanel: FocusedPanel;
@@ -53,7 +55,9 @@ export const DEFAULT_STATE: AppState = {
   streamingLifecycleStatus: "idle",
   isCommandPaletteOpen: false,
   isConnectFlowOpen: false,
+  isModelSelectorOpen: false,
   currentModel: "default",
+  currentProvider: "",
   availableModels: [],
   status: "Ready",
   focusedPanel: "conversation",

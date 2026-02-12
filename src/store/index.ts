@@ -62,7 +62,9 @@ export type AppAction =
   | { type: "SET_STREAMING_LIFECYCLE_STATUS"; payload: AppState["streamingLifecycleStatus"] }
   | { type: "SET_COMMAND_PALETTE_OPEN"; payload: boolean }
   | { type: "SET_CONNECT_FLOW_OPEN"; payload: boolean }
+  | { type: "SET_MODEL_SELECTOR_OPEN"; payload: boolean }
   | { type: "SET_MODEL"; payload: string }
+  | { type: "SET_PROVIDER"; payload: string }
   | { type: "SET_AVAILABLE_MODELS"; payload: string[] }
   | { type: "ADD_MESSAGE"; payload: DisplayMessage }
   | { type: "SET_MESSAGES"; payload: DisplayMessage[] }
@@ -153,9 +155,17 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return typeof action.payload === "boolean"
         ? { ...state, isConnectFlowOpen: action.payload }
         : state;
+    case "SET_MODEL_SELECTOR_OPEN":
+      return typeof action.payload === "boolean"
+        ? { ...state, isModelSelectorOpen: action.payload }
+        : state;
     case "SET_MODEL":
       return typeof action.payload === "string"
         ? { ...state, currentModel: action.payload }
+        : state;
+    case "SET_PROVIDER":
+      return typeof action.payload === "string"
+        ? { ...state, currentProvider: action.payload }
         : state;
     case "SET_AVAILABLE_MODELS":
       return Array.isArray(action.payload)
