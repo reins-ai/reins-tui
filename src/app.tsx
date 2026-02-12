@@ -227,7 +227,7 @@ interface AppViewProps {
 
 function AppView({ version, dimensions }: AppViewProps) {
   const { state, dispatch } = useApp();
-  const { client: daemonClient, connectionStatus, isConnected } = useDaemon();
+  const { client: daemonClient, connectionStatus, isConnected, mode: daemonMode } = useDaemon();
   const focus = useFocus();
   const conversationManager = useConversations();
   const [showHelp, setShowHelp] = useState(false);
@@ -856,6 +856,7 @@ function AppView({ version, dimensions }: AppViewProps) {
         dimensions={dimensions}
         showHelp={showHelp}
         connectionStatus={connectionStatus}
+        daemonMode={daemonMode}
         onSubmitMessage={handleMessageSubmit}
       />
       <CommandPalette

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { DaemonConnectionStatus } from "../daemon/contracts";
+import type { DaemonMode } from "../daemon/daemon-context";
 import { useApp } from "../store";
 import { useThemeTokens } from "../theme";
 import { Box, Text, type TerminalDimensions } from "../ui";
@@ -47,12 +48,12 @@ export function resolveHeartbeatInterval(status: DaemonConnectionStatus): number
 
 // --- Connection helpers ---
 
-export function getConnectionLabel(status: DaemonConnectionStatus): string {
+export function getConnectionLabel(status: DaemonConnectionStatus, daemonMode?: DaemonMode): string {
   switch (status) {
     case "connected":
       return "Connected";
     case "disconnected":
-      return "Offline";
+      return daemonMode === "mock" ? "⚠ Daemon disconnected" : "Offline";
     case "connecting":
       return "Connecting...";
     case "reconnecting":
@@ -122,10 +123,11 @@ export function buildSegments(
   modelName: string,
   lifecycleDisplay: LifecycleDisplay,
   compactionActive: boolean,
+  daemonMode?: DaemonMode,
 ): StatusBarSegments {
   const connectionGlyph = getConnectionGlyph(connectionStatus);
   const heartbeat = HEARTBEAT_GLYPH;
-  const connection = `${connectionGlyph} ${getConnectionLabel(connectionStatus)}`;
+  const connection = `${connectionGlyph} ${getConnectionLabel(connectionStatus, daemonMode)}`;
   const model = modelName;
   const compactionSuffix = compactionActive ? " ⚡ Compacted" : "";
   const lifecycle = `${lifecycleDisplay.glyph} ${lifecycleDisplay.label}${compactionSuffix}`;
@@ -293,6 +295,7 @@ export interface StatusBarProps {
   dimensions: TerminalDimensions;
   showHelp: boolean;
   connectionStatus?: DaemonConnectionStatus;
+  daemonMode?: DaemonMode;
   tokenCount?: number;
   cost?: string | null;
   compactionActive?: boolean;
@@ -301,6 +304,7 @@ export interface StatusBarProps {
 export function StatusBar({
   dimensions,
   connectionStatus = "disconnected",
+  daemonMode,
   tokenCount = 0,
   cost = null,
   compactionActive: compactionProp,
@@ -342,6 +346,7 @@ export function StatusBar({
     state.currentModel,
     lifecycleDisplay,
     compactionVisible,
+    daemonMode,
   );
 
   const truncation = resolveTruncation(segments, dimensions.width);

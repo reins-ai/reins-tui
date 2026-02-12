@@ -3,7 +3,6 @@ import type {
   DaemonError,
   DaemonResult,
   DaemonState,
-  PlatformServiceAdapter,
   Result,
   ServiceDefinition,
 } from "@reins/core";
@@ -45,7 +44,7 @@ const DEFAULT_SERVICE_DEFINITION: ServiceDefinition = {
 };
 
 const defaultRuntime = new DaemonRuntime();
-const defaultInstaller = createMockServiceInstaller();
+const defaultInstaller = new ServiceInstaller();
 
 export async function executeServiceCommand(
   action: string,
@@ -340,85 +339,6 @@ function platformRemediationHint(platform: NodeJS.Platform): string {
     default:
       return "Verify platform service manager health before retrying.";
   }
-}
-
-function createMockServiceInstaller(): ServiceInstaller {
-  const serviceState = {
-    installed: false,
-    running: false,
-  };
-
-  const adapter: PlatformServiceAdapter = {
-    platform: resolvePlatform(),
-    generateConfig(definition) {
-      return {
-        ok: true,
-        value: {
-          platform: resolvePlatform(),
-          filePath: `${process.cwd()}/${definition.serviceName}.mock-service`,
-          content: JSON.stringify(definition),
-        },
-      };
-    },
-    async install() {
-      serviceState.installed = true;
-      serviceState.running = true;
-      return { ok: true, value: undefined };
-    },
-    async uninstall() {
-      serviceState.installed = false;
-      serviceState.running = false;
-      return { ok: true, value: undefined };
-    },
-    async status() {
-      if (!serviceState.installed) {
-        return { ok: true, value: "not-installed" };
-      }
-
-      return { ok: true, value: serviceState.running ? "running" : "stopped" };
-    },
-    async start() {
-      serviceState.installed = true;
-      serviceState.running = true;
-      return { ok: true, value: undefined };
-    },
-    async stop() {
-      serviceState.running = false;
-      return { ok: true, value: undefined };
-    },
-  };
-
-  return new ServiceInstaller({
-    adapters: [adapter],
-    platformDetector: resolvePlatform,
-    fileSystem: {
-      async mkdir() {},
-      async writeFile() {},
-      async unlink() {},
-      async exists() {
-        return false;
-      },
-    },
-    runner: {
-      async run() {
-        return {
-          ok: true,
-          value: {
-            stdout: "",
-            stderr: "",
-          },
-        };
-      },
-    },
-  });
-}
-
-function resolvePlatform(): "darwin" | "linux" | "win32" {
-  if (process.platform === "darwin" || process.platform === "linux" || process.platform === "win32") {
-    return process.platform;
-  }
-
-  return "linux";
 }
 
 type RuntimeLike = Pick<DaemonRuntime, "getState" | "start" | "stop" | "restart">;
