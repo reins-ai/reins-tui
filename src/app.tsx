@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
-import { CommandPalette, type CommandPaletteDataSources, ErrorBoundary, getNextModel, HelpScreen, Layout } from "./components";
+import { CommandPalette, type CommandPaletteDataSources, ErrorBoundary, getNextModel, Layout } from "./components";
 import { ConnectFlow, type ConnectResult } from "./components/connect-flow";
+import { HelpScreen } from "./screens";
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "./daemon/client";
 import { DaemonProvider, useDaemon } from "./daemon/daemon-context";
 import type { DaemonMessage, DaemonResult, ConversationSummary as DaemonConversationSummary } from "./daemon/contracts";

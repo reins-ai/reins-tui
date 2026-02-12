@@ -4,15 +4,14 @@ import type { DaemonConnectionStatus } from "../daemon/contracts";
 import type { FocusedPanel } from "../store";
 import { useApp, getLayoutVisibility } from "../store";
 import { useThemeTokens } from "../theme";
-import { Box, Text, type TerminalDimensions } from "../ui";
+import { Box, type TerminalDimensions } from "../ui";
 import {
   resolveBreakpointState,
   createResizeDebouncer,
   didBandChange,
   type BreakpointState,
 } from "../layout/breakpoints";
-import { ConversationPanel } from "./conversation-panel";
-import { InputArea } from "./input-area";
+import { ChatScreen } from "../screens/chat-screen";
 import { Sidebar } from "./sidebar";
 import { StatusBar } from "./status-bar";
 
@@ -104,49 +103,15 @@ export function Layout({ version, dimensions, showHelp, connectionStatus, onSubm
           <Sidebar isFocused={state.focusedPanel === "sidebar"} borderColor={panelBorders.sidebar} />
         ) : null}
 
-        <Box style={{ flexGrow: 1, marginLeft: visibility.showSidebar ? 1 : 0, flexDirection: "column" }}>
-          <ConversationPanel
-            isFocused={state.focusedPanel === "conversation"}
-            borderColor={panelBorders.conversation}
-          />
-          <InputArea
-            isFocused={state.focusedPanel === "input"}
-            borderColor={panelBorders.input}
-            onSubmit={onSubmitMessage}
-          />
-        </Box>
-
-        {visibility.showActivityPanel ? (
-          <Box
-            style={{
-              width: breakpoint.panelWidths.activity,
-              marginLeft: 1,
-              border: true,
-              borderColor: tokens["border.subtle"],
-              padding: 1,
-              flexDirection: "column",
-            }}
-          >
-            <Text content="Activity" style={{ color: tokens["text.secondary"] }} />
-            <Text content="Tool calls and events" style={{ color: tokens["text.muted"] }} />
-          </Box>
-        ) : null}
-
-        {breakpoint.showExpandedPanel ? (
-          <Box
-            style={{
-              width: breakpoint.panelWidths.expanded,
-              marginLeft: 1,
-              border: true,
-              borderColor: tokens["border.subtle"],
-              padding: 1,
-              flexDirection: "column",
-            }}
-          >
-            <Text content="Details" style={{ color: tokens["text.secondary"] }} />
-            <Text content="Expanded view" style={{ color: tokens["text.muted"] }} />
-          </Box>
-        ) : null}
+        <ChatScreen
+          panelBorders={panelBorders}
+          focusedPanel={state.focusedPanel}
+          showSidebar={visibility.showSidebar}
+          showActivityPanel={visibility.showActivityPanel}
+          showExpandedPanel={breakpoint.showExpandedPanel}
+          breakpoint={breakpoint}
+          onSubmitMessage={onSubmitMessage}
+        />
       </Box>
 
       <StatusBar version={version} dimensions={dimensions} showHelp={showHelp} connectionStatus={connectionStatus} />

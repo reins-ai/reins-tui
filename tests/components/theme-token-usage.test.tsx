@@ -140,7 +140,10 @@ describe("no hardcoded hex color literals in component render paths", () => {
 });
 
 describe("components import theme tokens", () => {
-  const COMPONENTS_NEEDING_TOKENS = COMPONENT_FILES.filter((f) => f !== "streaming-text.tsx");
+  // Exclude streaming-text (no tokens needed) and help-screen (migrated to screens/, re-export shim)
+  const COMPONENTS_NEEDING_TOKENS = COMPONENT_FILES.filter(
+    (f) => f !== "streaming-text.tsx" && f !== "help-screen.tsx",
+  );
 
   for (const filename of COMPONENTS_NEEDING_TOKENS) {
     test(`${filename} imports useThemeTokens or receives theme tokens via props`, () => {
@@ -149,6 +152,12 @@ describe("components import theme tokens", () => {
       expect(hasThemeImport).toBe(true);
     });
   }
+
+  test("screens/help-screen.tsx imports useThemeTokens", () => {
+    const source = readFileSync(resolve(import.meta.dir, "../../src/screens/help-screen.tsx"), "utf-8");
+    const hasThemeImport = source.includes("useThemeTokens") || source.includes("ThemeTokens");
+    expect(hasThemeImport).toBe(true);
+  });
 });
 
 describe("app root wraps with ThemeProvider", () => {
