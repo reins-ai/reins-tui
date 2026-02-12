@@ -1,5 +1,6 @@
 // Migrated from components/help-screen.tsx — screen-level overlay for keyboard shortcuts and greeting.
 
+import { LogoAscii } from "../components/logo-ascii";
 import type { StartupContent } from "../personalization/greeting-service";
 import { useThemeTokens } from "../theme";
 import { Box, Text } from "../ui";
@@ -119,6 +120,9 @@ export function HelpScreen({ isOpen, startup = null }: HelpScreenProps) {
         paddingRight: 8,
       }}
     >
+      <Box style={{ flexDirection: "column", marginBottom: 1 }}>
+        <LogoAscii variant="standard" size="full" showTagline />
+      </Box>
       {startup && <WelcomeGreeting startup={startup} />}
       <Box
         style={{

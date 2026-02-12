@@ -7,6 +7,7 @@ import { useThemeTokens } from "../theme";
 import type { ToolCall, ToolCallStatus } from "../tools/tool-lifecycle";
 import { createInitialToolDetailState, toolDetailReducer } from "../tools/tool-detail-store";
 import { Box, ScrollBox, Text } from "../ui";
+import { LogoAscii } from "./logo-ascii";
 import { Message } from "./message";
 import { formatModelDisplayName } from "./model-selector";
 import { ToolInline } from "./tool-inline";
@@ -130,10 +131,11 @@ export function ConversationPanel({ isFocused, borderColor }: ConversationPanelP
       ) : null}
       <ScrollBox style={{ flexGrow: 1, flexDirection: "column" }} stickyScroll={true} stickyStart="bottom">
         {messages.length === 0 ? (
-          <Box style={{ flexDirection: "column" }}>
-            <Text>Welcome to Reins TUI.</Text>
-            <Text>{isFocused ? "Conversation panel focused" : "Press Tab to focus conversation"}</Text>
-            <Text>Messages, streaming output, and tool status will appear here.</Text>
+          <Box style={{ flexDirection: "column", paddingTop: 2 }}>
+            <LogoAscii variant="standard" size="full" showTagline />
+            <Text style={{ color: tokens["text.muted"], marginTop: 1 }}>
+              {isFocused ? "Type a message to begin" : "Press Tab to focus conversation"}
+            </Text>
           </Box>
         ) : (
           messages.map((message, index) => (

@@ -3,6 +3,7 @@ import React from "react";
 import type { DaemonConnectionStatus } from "../daemon/contracts";
 import type { ThemeTokens } from "../theme/theme-schema";
 import { Box, Text } from "../ui";
+import { LOGO_FULL_SAD } from "./logo-ascii";
 
 interface ErrorBoundaryProps {
   children: React.ReactNode;
@@ -56,6 +57,7 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
       const bgColor = t?.["surface.primary"] ?? "#1a1b26";
       const hintColor = t?.["text.muted"] ?? "#9aa5ce";
       const stackColor = t?.["text.secondary"] ?? "#a9b1d6";
+      const logoColor = t?.["glyph.reins"] ?? errorColor;
 
       return (
         <Box
@@ -67,6 +69,11 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
             flexDirection: "column",
           }}
         >
+          <Box style={{ flexDirection: "column", marginBottom: 1 }}>
+            {LOGO_FULL_SAD.map((line, index) => (
+              <Text key={`sad-logo-${index}`} style={{ color: logoColor }} content={line} />
+            ))}
+          </Box>
           <Text style={{ color: errorColor }} content={`Error: ${this.state.error.message}`} />
           <Text style={{ color: hintColor }} content="Press r to retry" />
           <Text style={{ color: hintColor }} content="Press q to quit" />
