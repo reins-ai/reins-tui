@@ -57,7 +57,7 @@ const MOCK_TOKENS: ThemeTokens = {
 // Initial state factory
 // ---------------------------------------------------------------------------
 
-function createInitialState() {
+function createInitialState(overrides?: Record<string, unknown>) {
   return {
     step: "mode-select" as ConnectStep,
     selectedModeIndex: 0,
@@ -70,6 +70,8 @@ function createInitialState() {
     connection: null as ProviderConnection | null,
     error: null as ConnectError | null,
     oauthUrl: null as string | null,
+    liveProviders: null as readonly typeof BYOK_PROVIDERS[number][] | null,
+    ...overrides,
   };
 }
 
@@ -143,8 +145,15 @@ describe("ConnectFlow mode selection", () => {
     expect(next.selectedModeIndex).toBe(1);
   });
 
-  test("SELECT_MODE with BYOK navigates to provider-select", () => {
+  test("SELECT_MODE with BYOK navigates to providers-loading when no cached providers", () => {
     const state = { ...createInitialState(), selectedModeIndex: 0 };
+    const next = connectReducer(state, { type: "SELECT_MODE" });
+    expect(next.step).toBe("providers-loading");
+    expect(next.mode).toBe("byok");
+  });
+
+  test("SELECT_MODE with BYOK navigates to provider-select when providers cached", () => {
+    const state = { ...createInitialState({ liveProviders: BYOK_PROVIDERS }), selectedModeIndex: 0 };
     const next = connectReducer(state, { type: "SELECT_MODE" });
     expect(next.step).toBe("provider-select");
     expect(next.mode).toBe("byok");
@@ -716,13 +725,17 @@ describe("ConnectFlow theme token usage", () => {
 // ---------------------------------------------------------------------------
 
 describe("ConnectFlow full Anthropic BYOK flow", () => {
-  test("complete flow: mode → provider → auth method → key → validate → success", () => {
+  test("complete flow: mode → loading → provider → auth method → key → validate → success", () => {
     let state = createInitialState();
 
-    // Step 1: Select BYOK mode (index 0)
+    // Step 1: Select BYOK mode (index 0) — triggers loading
     state = connectReducer(state, { type: "SELECT_MODE" });
-    expect(state.step).toBe("provider-select");
+    expect(state.step).toBe("providers-loading");
     expect(state.mode).toBe("byok");
+
+    // Step 1b: Providers load fails, falls back to static
+    state = connectReducer(state, { type: "PROVIDERS_LOAD_FAILED" });
+    expect(state.step).toBe("provider-select");
 
     // Step 2: Select Anthropic (index 0)
     state = connectReducer(state, { type: "SELECT_PROVIDER" });
@@ -761,11 +774,15 @@ describe("ConnectFlow full Anthropic BYOK flow", () => {
 // ---------------------------------------------------------------------------
 
 describe("ConnectFlow full Anthropic OAuth flow", () => {
-  test("complete flow: mode → provider → auth method → oauth launch → waiting → complete", () => {
+  test("complete flow: mode → loading → provider → auth method → oauth launch → waiting → complete", () => {
     let state = createInitialState();
 
-    // Step 1: Select BYOK mode
+    // Step 1: Select BYOK mode — triggers loading
     state = connectReducer(state, { type: "SELECT_MODE" });
+    expect(state.step).toBe("providers-loading");
+
+    // Step 1b: Providers load fails, falls back to static
+    state = connectReducer(state, { type: "PROVIDERS_LOAD_FAILED" });
     expect(state.step).toBe("provider-select");
 
     // Step 2: Select Anthropic
@@ -981,6 +998,7 @@ describe("ConnectFlow edge cases", () => {
   test("all ConnectStep values are valid", () => {
     const steps: ConnectStep[] = [
       "mode-select",
+      "providers-loading",
       "provider-select",
       "auth-method-select",
       "api-key-entry",
@@ -992,7 +1010,7 @@ describe("ConnectFlow edge cases", () => {
       "success",
       "error",
     ];
-    expect(steps).toHaveLength(11);
+    expect(steps).toHaveLength(12);
   });
 
   test("AUTH_METHOD_OPTIONS has api_key and oauth", () => {

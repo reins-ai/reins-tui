@@ -1,13 +1,34 @@
 import { describe, expect, test } from "bun:test";
 
-import { connectReducer, type ConnectStep } from "../../src/components/connect-flow";
+import {
+  connectReducer,
+  formatAuthMethodBadges,
+  getActiveProviders,
+  mapDaemonProviderToOption,
+  statusColor,
+  statusGlyph,
+  type ConnectStep,
+} from "../../src/components/connect-flow";
 import { err, ok, type DaemonClientError } from "../../src/daemon/contracts";
 import { MockDaemonClient } from "../../src/daemon/mock-daemon";
-import { ConnectService, type ProviderApiTransport } from "../../src/providers/connect-service";
+import {
+  ConnectService,
+  type ProviderApiTransport,
+  type ProviderAuthMethod,
+  type ProviderListEntry,
+} from "../../src/providers/connect-service";
 import { ProviderStatusService } from "../../src/providers/provider-status";
 import { createConversationStore } from "../../src/state/conversation-store";
 
 type HandlerResult = ReturnType<typeof ok<unknown>> | ReturnType<typeof err<DaemonClientError>>;
+
+interface ProviderOptionLike {
+  id: string;
+  label: string;
+  authMethods: readonly string[];
+  displayStatus?: string;
+  connectionState?: string;
+}
 
 interface FlowState {
   step: ConnectStep;
@@ -15,7 +36,7 @@ interface FlowState {
   selectedProviderIndex: number;
   selectedAuthMethodIndex: number;
   mode: "byok" | "gateway" | null;
-  provider: { id: string; label: string; authMethods: readonly string[] } | null;
+  provider: ProviderOptionLike | null;
   authMethod: "api_key" | "oauth" | null;
   secretInput: string;
   connection: {
@@ -27,6 +48,7 @@ interface FlowState {
   } | null;
   error: { code: string; message: string; retryable: boolean } | null;
   oauthUrl: string | null;
+  liveProviders: readonly ProviderOptionLike[] | null;
 }
 
 function daemonError(code: DaemonClientError["code"], message: string, retryable = true): DaemonClientError {
@@ -37,7 +59,7 @@ function daemonError(code: DaemonClientError["code"], message: string, retryable
   };
 }
 
-function createInitialFlowState(): FlowState {
+function createInitialFlowState(overrides?: Partial<FlowState>): FlowState {
   return {
     step: "mode-select",
     selectedModeIndex: 0,
@@ -50,6 +72,8 @@ function createInitialFlowState(): FlowState {
     connection: null,
     error: null,
     oauthUrl: null,
+    liveProviders: null,
+    ...overrides,
   };
 }
 
@@ -137,8 +161,12 @@ describe("provider flow integration", () => {
 
     let state = createInitialFlowState();
 
-    // Select BYOK mode
+    // Select BYOK mode — triggers provider loading
     state = connectReducer(state, { type: "SELECT_MODE" }) as FlowState;
+    expect(state.step).toBe("providers-loading");
+
+    // Simulate daemon returning providers (fallback to static)
+    state = connectReducer(state, { type: "PROVIDERS_LOAD_FAILED" }) as FlowState;
     expect(state.step).toBe("provider-select");
 
     // Select Anthropic (index 0) — goes to auth method select
@@ -239,6 +267,8 @@ describe("provider flow integration", () => {
     // Verify reducer flow matches
     let state = createInitialFlowState();
     state = connectReducer(state, { type: "SELECT_MODE" }) as FlowState;
+    expect(state.step).toBe("providers-loading");
+    state = connectReducer(state, { type: "PROVIDERS_LOAD_FAILED" }) as FlowState;
     state = connectReducer(state, { type: "SELECT_PROVIDER" }) as FlowState;
     state = connectReducer(state, { type: "NAVIGATE_DOWN" }) as FlowState;
     state = connectReducer(state, { type: "SELECT_AUTH_METHOD" }) as FlowState;
@@ -461,6 +491,8 @@ describe("provider flow integration", () => {
 
     // Navigate to auth method select
     state = connectReducer(state, { type: "SELECT_MODE" }) as FlowState;
+    expect(state.step).toBe("providers-loading");
+    state = connectReducer(state, { type: "PROVIDERS_LOAD_FAILED" }) as FlowState;
     state = connectReducer(state, { type: "SELECT_PROVIDER" }) as FlowState;
     expect(state.step).toBe("auth-method-select");
 
@@ -486,6 +518,8 @@ describe("provider flow integration", () => {
 
     // Navigate to OAuth launching
     state = connectReducer(state, { type: "SELECT_MODE" }) as FlowState;
+    expect(state.step).toBe("providers-loading");
+    state = connectReducer(state, { type: "PROVIDERS_LOAD_FAILED" }) as FlowState;
     state = connectReducer(state, { type: "SELECT_PROVIDER" }) as FlowState;
     state = connectReducer(state, { type: "NAVIGATE_DOWN" }) as FlowState;
     state = connectReducer(state, { type: "SELECT_AUTH_METHOD" }) as FlowState;
@@ -519,5 +553,261 @@ describe("provider flow integration", () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error.code).toBe("INVALID_INPUT");
+  });
+
+  // ---------------------------------------------------------------------------
+  // Live provider status display tests (MH5)
+  // ---------------------------------------------------------------------------
+
+  test("loads provider list from daemon auth/list endpoint and displays live status", async () => {
+    const transport = new MockProviderTransport();
+    transport.onGet("/api/providers/auth/list", () =>
+      ok({
+        providers: [
+          {
+            provider: "anthropic",
+            providerName: "Anthropic",
+            connectionState: "ready",
+            authModes: ["api_key", "oauth"],
+            configured: true,
+            requiresAuth: false,
+          },
+          {
+            provider: "openai",
+            providerName: "OpenAI",
+            connectionState: "requires_auth",
+            authModes: ["api_key"],
+            configured: false,
+            requiresAuth: true,
+          },
+        ],
+      }),
+    );
+
+    const connectService = new ConnectService({ transport });
+    const listResult = await connectService.listUserConfigurableProviders();
+
+    expect(listResult.ok).toBe(true);
+    if (!listResult.ok) return;
+
+    expect(listResult.value.length).toBe(2);
+
+    // Map to ProviderOptions for the UI
+    const mapped = listResult.value.map(mapDaemonProviderToOption);
+
+    expect(mapped[0].id).toBe("anthropic");
+    expect(mapped[0].displayStatus).toBe("Connected");
+    expect(mapped[0].connectionState).toBe("ready");
+    expect(mapped[0].authMethods).toEqual(["api_key", "oauth"]);
+
+    expect(mapped[1].id).toBe("openai");
+    expect(mapped[1].displayStatus).toBe("Not configured");
+    expect(mapped[1].connectionState).toBe("requires_auth");
+    expect(mapped[1].authMethods).toEqual(["api_key"]);
+
+    // Verify reducer uses live providers when loaded
+    let state = createInitialFlowState();
+    state = connectReducer(state, { type: "SELECT_MODE" }) as FlowState;
+    expect(state.step).toBe("providers-loading");
+
+    state = connectReducer(state, { type: "PROVIDERS_LOADED", providers: mapped }) as FlowState;
+    expect(state.step).toBe("provider-select");
+    expect(state.liveProviders).toHaveLength(2);
+
+    // getActiveProviders returns live list
+    const active = getActiveProviders(state);
+    expect(active).toHaveLength(2);
+    expect(active[0].displayStatus).toBe("Connected");
+    expect(active[1].displayStatus).toBe("Not configured");
+  });
+
+  test("provider select shows re-auth-required status from daemon", async () => {
+    const transport = new MockProviderTransport();
+    transport.onGet("/api/providers/auth/list", () =>
+      ok({
+        providers: [
+          {
+            provider: "anthropic",
+            providerName: "Anthropic",
+            connectionState: "requires_reauth",
+            authModes: ["api_key", "oauth"],
+            configured: true,
+            requiresAuth: true,
+          },
+        ],
+      }),
+    );
+
+    const connectService = new ConnectService({ transport });
+    const listResult = await connectService.listUserConfigurableProviders();
+    expect(listResult.ok).toBe(true);
+    if (!listResult.ok) return;
+
+    const mapped = listResult.value.map(mapDaemonProviderToOption);
+    expect(mapped[0].displayStatus).toBe("Reconnect required");
+    expect(mapped[0].connectionState).toBe("requires_reauth");
+
+    // Verify status glyph and color helpers
+    expect(statusGlyph("requires_reauth")).toBe("◎");
+    expect(statusGlyph("ready")).toBe("●");
+    expect(statusGlyph("invalid")).toBe("✗");
+    expect(statusGlyph(undefined)).toBe("○");
+  });
+
+  test("formatAuthMethodBadges renders BYOK and OAuth labels", () => {
+    expect(formatAuthMethodBadges(["api_key", "oauth"])).toBe("BYOK · OAuth");
+    expect(formatAuthMethodBadges(["api_key"])).toBe("BYOK");
+    expect(formatAuthMethodBadges(["oauth"])).toBe("OAuth");
+    expect(formatAuthMethodBadges([])).toBe("");
+  });
+
+  test("statusColor returns correct theme token colors", () => {
+    const tokens: Record<string, string> = {
+      "status.success": "#50c878",
+      "status.warning": "#f0c674",
+      "status.error": "#e85050",
+      "text.muted": "#6b6360",
+    };
+
+    expect(statusColor("ready", tokens)).toBe("#50c878");
+    expect(statusColor("requires_reauth", tokens)).toBe("#f0c674");
+    expect(statusColor("invalid", tokens)).toBe("#e85050");
+    expect(statusColor(undefined, tokens)).toBe("#6b6360");
+    expect(statusColor("requires_auth", tokens)).toBe("#6b6360");
+  });
+
+  test("falls back to static provider catalog when daemon list fails", async () => {
+    const transport = new MockProviderTransport();
+    transport.onGet("/api/providers/auth/list", () =>
+      err(daemonError("DAEMON_UNAVAILABLE", "Daemon offline", true)),
+    );
+
+    const connectService = new ConnectService({ transport });
+    const listResult = await connectService.listUserConfigurableProviders();
+    expect(listResult.ok).toBe(false);
+
+    // Reducer falls back to static BYOK_PROVIDERS on load failure
+    let state = createInitialFlowState();
+    state = connectReducer(state, { type: "SELECT_MODE" }) as FlowState;
+    expect(state.step).toBe("providers-loading");
+
+    state = connectReducer(state, { type: "PROVIDERS_LOAD_FAILED" }) as FlowState;
+    expect(state.step).toBe("provider-select");
+    expect(state.liveProviders).toBeNull();
+
+    // getActiveProviders returns static fallback
+    const active = getActiveProviders(state);
+    expect(active.length).toBeGreaterThan(0);
+    expect(active[0].id).toBe("anthropic");
+    expect(active[0].displayStatus).toBeUndefined();
+  });
+
+  test("BYOK flow works with live providers from daemon", async () => {
+    const transport = new MockProviderTransport();
+    transport.onGet("/api/providers/auth/list", () =>
+      ok({
+        providers: [
+          {
+            provider: "anthropic",
+            providerName: "Anthropic",
+            connectionState: "requires_auth",
+            authModes: ["api_key", "oauth"],
+            configured: false,
+            requiresAuth: true,
+          },
+        ],
+      }),
+    );
+    transport.onPost("/api/providers/auth/configure", () =>
+      ok({
+        configured: true,
+        valid: true,
+        providerId: "anthropic",
+        providerName: "Anthropic",
+        models: ["claude-sonnet-4-20250514"],
+        configuredAt: "2026-02-11T00:00:00.000Z",
+      }),
+    );
+
+    const connectService = new ConnectService({ transport });
+
+    // Load providers from daemon
+    const listResult = await connectService.listUserConfigurableProviders();
+    expect(listResult.ok).toBe(true);
+    if (!listResult.ok) return;
+
+    const mapped = listResult.value.map(mapDaemonProviderToOption);
+
+    let state = createInitialFlowState();
+    state = connectReducer(state, { type: "SELECT_MODE" }) as FlowState;
+    expect(state.step).toBe("providers-loading");
+
+    state = connectReducer(state, { type: "PROVIDERS_LOADED", providers: mapped }) as FlowState;
+    expect(state.step).toBe("provider-select");
+
+    // Select Anthropic (only provider from daemon)
+    state = connectReducer(state, { type: "SELECT_PROVIDER" }) as FlowState;
+    expect(state.step).toBe("auth-method-select");
+    expect(state.provider?.id).toBe("anthropic");
+    expect(state.provider?.authMethods).toEqual(["api_key", "oauth"]);
+
+    // Select API key
+    state = connectReducer(state, { type: "SELECT_AUTH_METHOD" }) as FlowState;
+    expect(state.step).toBe("api-key-entry");
+
+    // Enter key and submit
+    state = connectReducer(state, { type: "SET_SECRET", value: "sk-ant-test-123" }) as FlowState;
+    state = connectReducer(state, { type: "SUBMIT_SECRET" }) as FlowState;
+    expect(state.step).toBe("validating");
+
+    const connectResult = await connectService.configureBYOK("anthropic", "sk-ant-test-123");
+    expect(connectResult.ok).toBe(true);
+    if (!connectResult.ok) return;
+
+    state = connectReducer(state, {
+      type: "VALIDATION_SUCCESS",
+      connection: connectResult.value,
+    }) as FlowState;
+    expect(state.step).toBe("success");
+    expect(state.connection?.providerName).toBe("Anthropic");
+  });
+
+  test("back from providers-loading returns to mode-select", () => {
+    let state = createInitialFlowState();
+    state = connectReducer(state, { type: "SELECT_MODE" }) as FlowState;
+    expect(state.step).toBe("providers-loading");
+
+    state = connectReducer(state, { type: "GO_BACK" }) as FlowState;
+    expect(state.step).toBe("mode-select");
+    expect(state.mode).toBeNull();
+  });
+
+  test("skips providers-loading when providers already cached", () => {
+    const cachedProviders = [
+      { id: "anthropic", label: "Anthropic", authMethods: ["api_key", "oauth"] as ProviderAuthMethod[], displayStatus: "Connected", connectionState: "ready" },
+    ];
+
+    let state = createInitialFlowState({ liveProviders: cachedProviders });
+    state = connectReducer(state, { type: "SELECT_MODE" }) as FlowState;
+
+    // Should skip loading and go directly to provider-select
+    expect(state.step).toBe("provider-select");
+    expect(state.liveProviders).toHaveLength(1);
+  });
+
+  test("mapDaemonProviderToOption defaults authMethods to api_key when empty", () => {
+    const entry: ProviderListEntry = {
+      providerId: "custom",
+      providerName: "Custom Provider",
+      connectionState: "requires_auth",
+      displayStatus: "Not configured",
+      authMethods: [],
+      configured: false,
+      requiresAuth: true,
+    };
+
+    const option = mapDaemonProviderToOption(entry);
+    expect(option.authMethods).toEqual(["api_key"]);
+    expect(option.displayStatus).toBe("Not configured");
   });
 });

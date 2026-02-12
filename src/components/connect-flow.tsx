@@ -1,10 +1,13 @@
-import { useCallback, useReducer } from "react";
+import { useCallback, useEffect, useReducer } from "react";
+import { spawn } from "node:child_process";
+import { platform } from "node:os";
 
 import type {
   ConnectError,
   ConnectService,
   ProviderAuthMethod,
   ProviderConnection,
+  ProviderListEntry,
   ProviderMode,
 } from "../providers/connect-service";
 import { useThemeTokens } from "../theme";
@@ -34,6 +37,8 @@ export interface ProviderOption {
   readonly id: string;
   readonly label: string;
   readonly authMethods: readonly ProviderAuthMethod[];
+  readonly displayStatus?: string;
+  readonly connectionState?: string;
 }
 
 export const BYOK_PROVIDERS: readonly ProviderOption[] = [
@@ -59,12 +64,14 @@ export const AUTH_METHOD_OPTIONS: readonly AuthMethodOption[] = [
 
 export type ConnectStep =
   | "mode-select"
+  | "providers-loading"
   | "provider-select"
   | "auth-method-select"
   | "api-key-entry"
   | "gateway-token-entry"
   | "oauth-launching"
   | "oauth-waiting"
+  | "oauth-code-entry"
   | "oauth-complete"
   | "validating"
   | "success"
@@ -79,9 +86,11 @@ interface ConnectState {
   provider: ProviderOption | null;
   authMethod: ProviderAuthMethod | null;
   secretInput: string;
+  oauthCodeInput: string;
   connection: ProviderConnection | null;
   error: ConnectError | null;
   oauthUrl: string | null;
+  liveProviders: readonly ProviderOption[] | null;
 }
 
 type ConnectAction =
@@ -95,9 +104,14 @@ type ConnectAction =
   | { type: "GO_BACK" }
   | { type: "OAUTH_LAUNCHING"; url: string }
   | { type: "OAUTH_WAITING" }
+  | { type: "OAUTH_CODE_ENTRY" }
+  | { type: "SET_OAUTH_CODE"; value: string }
+  | { type: "SUBMIT_OAUTH_CODE" }
   | { type: "OAUTH_COMPLETE"; connection: ProviderConnection }
   | { type: "VALIDATION_SUCCESS"; connection: ProviderConnection }
-  | { type: "VALIDATION_ERROR"; error: ConnectError };
+  | { type: "VALIDATION_ERROR"; error: ConnectError }
+  | { type: "PROVIDERS_LOADED"; providers: readonly ProviderOption[] }
+  | { type: "PROVIDERS_LOAD_FAILED" };
 
 const MODE_OPTIONS: readonly { id: ProviderMode; label: string }[] = [
   { id: "byok", label: "BYOK (Bring Your Own Key)" },
@@ -113,9 +127,11 @@ const INITIAL_STATE: ConnectState = {
   provider: null,
   authMethod: null,
   secretInput: "",
+  oauthCodeInput: "",
   connection: null,
   error: null,
   oauthUrl: null,
+  liveProviders: null,
 };
 
 function getAvailableAuthMethods(provider: ProviderOption | null): readonly AuthMethodOption[] {
@@ -126,7 +142,55 @@ function getAvailableAuthMethods(provider: ProviderOption | null): readonly Auth
   return AUTH_METHOD_OPTIONS.filter((method) => provider.authMethods.includes(method.id));
 }
 
+export function getActiveProviders(state: ConnectState): readonly ProviderOption[] {
+  return state.liveProviders ?? BYOK_PROVIDERS;
+}
+
+export function mapDaemonProviderToOption(entry: ProviderListEntry): ProviderOption {
+  return {
+    id: entry.providerId,
+    label: entry.providerName,
+    authMethods: entry.authMethods.length > 0 ? entry.authMethods : ["api_key"],
+    displayStatus: entry.displayStatus,
+    connectionState: entry.connectionState,
+  };
+}
+
+export function formatAuthMethodBadges(methods: readonly ProviderAuthMethod[]): string {
+  return methods
+    .map((m) => (m === "api_key" ? "BYOK" : m === "oauth" ? "OAuth" : m))
+    .join(" · ");
+}
+
+export function statusGlyph(connectionState: string | undefined): string {
+  switch (connectionState) {
+    case "ready":
+      return "●";
+    case "requires_reauth":
+      return "◎";
+    case "invalid":
+      return "✗";
+    default:
+      return "○";
+  }
+}
+
+export function statusColor(connectionState: string | undefined, tokens: Record<string, string>): string {
+  switch (connectionState) {
+    case "ready":
+      return tokens["status.success"];
+    case "requires_reauth":
+      return tokens["status.warning"];
+    case "invalid":
+      return tokens["status.error"];
+    default:
+      return tokens["text.muted"];
+  }
+}
+
 export function connectReducer(state: ConnectState, action: ConnectAction): ConnectState {
+  const providers = getActiveProviders(state);
+
   switch (action.type) {
     case "NAVIGATE_UP": {
       if (state.step === "mode-select") {
@@ -141,7 +205,7 @@ export function connectReducer(state: ConnectState, action: ConnectAction): Conn
         return {
           ...state,
           selectedProviderIndex: state.selectedProviderIndex <= 0
-            ? BYOK_PROVIDERS.length - 1
+            ? providers.length - 1
             : state.selectedProviderIndex - 1,
         };
       }
@@ -167,7 +231,7 @@ export function connectReducer(state: ConnectState, action: ConnectAction): Conn
       if (state.step === "provider-select") {
         return {
           ...state,
-          selectedProviderIndex: (state.selectedProviderIndex + 1) % BYOK_PROVIDERS.length,
+          selectedProviderIndex: (state.selectedProviderIndex + 1) % providers.length,
         };
       }
       if (state.step === "auth-method-select") {
@@ -186,7 +250,7 @@ export function connectReducer(state: ConnectState, action: ConnectAction): Conn
       if (selected.id === "byok") {
         return {
           ...state,
-          step: "provider-select",
+          step: state.liveProviders === null ? "providers-loading" : "provider-select",
           mode: "byok",
           selectedProviderIndex: 0,
         };
@@ -199,9 +263,27 @@ export function connectReducer(state: ConnectState, action: ConnectAction): Conn
       };
     }
 
+    case "PROVIDERS_LOADED": {
+      return {
+        ...state,
+        step: "provider-select",
+        liveProviders: action.providers,
+        selectedProviderIndex: 0,
+      };
+    }
+
+    case "PROVIDERS_LOAD_FAILED": {
+      return {
+        ...state,
+        step: "provider-select",
+        liveProviders: null,
+        selectedProviderIndex: 0,
+      };
+    }
+
     case "SELECT_PROVIDER": {
       if (state.step !== "provider-select") return state;
-      const provider = BYOK_PROVIDERS[state.selectedProviderIndex];
+      const provider = providers[state.selectedProviderIndex];
 
       if (provider.authMethods.length > 1) {
         return {
@@ -253,6 +335,9 @@ export function connectReducer(state: ConnectState, action: ConnectAction): Conn
     }
 
     case "GO_BACK": {
+      if (state.step === "providers-loading") {
+        return { ...state, step: "mode-select", mode: null };
+      }
       if (state.step === "provider-select") {
         return { ...state, step: "mode-select", mode: null };
       }
@@ -268,8 +353,8 @@ export function connectReducer(state: ConnectState, action: ConnectAction): Conn
       if (state.step === "gateway-token-entry") {
         return { ...state, step: "mode-select", mode: null, secretInput: "" };
       }
-      if (state.step === "oauth-launching" || state.step === "oauth-waiting") {
-        return { ...state, step: "auth-method-select", authMethod: null, oauthUrl: null };
+      if (state.step === "oauth-launching" || state.step === "oauth-waiting" || state.step === "oauth-code-entry") {
+        return { ...state, step: "auth-method-select", authMethod: null, oauthUrl: null, oauthCodeInput: "" };
       }
       if (state.step === "error") {
         if (state.mode === "gateway") {
@@ -288,6 +373,18 @@ export function connectReducer(state: ConnectState, action: ConnectAction): Conn
 
     case "OAUTH_WAITING":
       return { ...state, step: "oauth-waiting" };
+
+    case "OAUTH_CODE_ENTRY":
+      return { ...state, step: "oauth-code-entry", oauthCodeInput: "" };
+
+    case "SET_OAUTH_CODE":
+      return { ...state, oauthCodeInput: action.value };
+
+    case "SUBMIT_OAUTH_CODE": {
+      if (state.step !== "oauth-code-entry") return state;
+      if (state.oauthCodeInput.trim().length === 0) return state;
+      return { ...state, step: "validating" };
+    }
 
     case "OAUTH_COMPLETE":
       return { ...state, step: "success", connection: action.connection, error: null, oauthUrl: null };
@@ -312,6 +409,22 @@ export function maskSecret(value: string): string {
     return "●".repeat(value.length);
   }
   return "●".repeat(value.length - 4) + value.slice(-4);
+}
+
+function openBrowser(url: string): void {
+  const os = platform();
+  try {
+    if (os === "darwin") {
+      spawn("open", [url], { stdio: "ignore", detached: true }).unref();
+    } else if (os === "win32") {
+      spawn("cmd", ["/c", "start", "", url], { stdio: "ignore", detached: true }).unref();
+    } else {
+      // Linux / FreeBSD
+      spawn("xdg-open", [url], { stdio: "ignore", detached: true }).unref();
+    }
+  } catch {
+    // Browser open is best-effort; URL is shown in TUI as fallback
+  }
 }
 
 function extractInputValue(value: unknown): string {
@@ -437,7 +550,20 @@ function ModeSelectStep({ state, tokens }: StepProps) {
   );
 }
 
+function ProvidersLoadingStep({ tokens }: { tokens: Record<string, string> }) {
+  return (
+    <OverlayFrame title="Select Provider" hint="Esc to cancel" tokens={tokens}>
+      <Box style={{ flexDirection: "row" }}>
+        <Text content="◎ " style={{ color: tokens["glyph.tool.running"] }} />
+        <Text content="Loading providers from daemon..." style={{ color: tokens["text.secondary"] }} />
+      </Box>
+    </OverlayFrame>
+  );
+}
+
 function ProviderSelectStep({ state, tokens }: StepProps) {
+  const providers = getActiveProviders(state);
+
   return (
     <OverlayFrame
       title="Select Provider"
@@ -447,7 +573,48 @@ function ProviderSelectStep({ state, tokens }: StepProps) {
       <Box style={{ marginBottom: 1 }}>
         <Text content="Choose a provider:" style={{ color: tokens["text.primary"] }} />
       </Box>
-      <SelectionList items={BYOK_PROVIDERS} selectedIndex={state.selectedProviderIndex} tokens={tokens} />
+      <Box style={{ flexDirection: "column" }}>
+        {providers.map((provider, index) => {
+          const isSelected = index === state.selectedProviderIndex;
+          const glyph = statusGlyph(provider.connectionState);
+          const glyphColor = statusColor(provider.connectionState, tokens);
+          const authBadges = formatAuthMethodBadges(provider.authMethods);
+          const hasLiveStatus = provider.displayStatus !== undefined;
+
+          return (
+            <Box
+              key={provider.id}
+              style={{
+                flexDirection: "row",
+                paddingLeft: 1,
+                backgroundColor: isSelected ? tokens["surface.elevated"] : "transparent",
+              }}
+            >
+              <Text
+                content={isSelected ? "› " : "  "}
+                style={{ color: tokens["accent.primary"] }}
+              />
+              {hasLiveStatus ? (
+                <Text content={`${glyph} `} style={{ color: glyphColor }} />
+              ) : null}
+              <Text
+                content={provider.label}
+                style={{ color: isSelected ? tokens["text.primary"] : tokens["text.secondary"] }}
+              />
+              {hasLiveStatus && provider.displayStatus ? (
+                <Text
+                  content={` [${provider.displayStatus}]`}
+                  style={{ color: glyphColor }}
+                />
+              ) : null}
+              <Text
+                content={` (${authBadges})`}
+                style={{ color: tokens["text.muted"] }}
+              />
+            </Box>
+          );
+        })}
+      </Box>
     </OverlayFrame>
   );
 }
@@ -530,6 +697,17 @@ function OAuthLaunchingStep({ state, tokens }: { state: ConnectState; tokens: Re
         <Text content="◎ " style={{ color: tokens["glyph.tool.running"] }} />
         <Text content="Opening browser for login..." style={{ color: tokens["text.secondary"] }} />
       </Box>
+      {state.oauthUrl ? (
+        <Box style={{ flexDirection: "column", marginTop: 1 }}>
+          <Text
+            content="If the browser didn't open, visit this URL:"
+            style={{ color: tokens["text.muted"] }}
+          />
+          <Box style={{ marginTop: 1 }}>
+            <Text content={state.oauthUrl} style={{ color: tokens["accent.primary"] }} />
+          </Box>
+        </Box>
+      ) : null}
     </OverlayFrame>
   );
 }
@@ -544,12 +722,68 @@ function OAuthWaitingStep({ state, tokens }: { state: ConnectState; tokens: Reco
           <Text content="◎ " style={{ color: tokens["glyph.tool.running"] }} />
           <Text content="Waiting for OAuth callback..." style={{ color: tokens["text.secondary"] }} />
         </Box>
+        {state.oauthUrl ? (
+          <Box style={{ flexDirection: "column", marginTop: 1 }}>
+            <Text
+              content="If the browser didn't open, visit this URL:"
+              style={{ color: tokens["text.muted"] }}
+            />
+            <Box style={{ marginTop: 1 }}>
+              <Text content={state.oauthUrl} style={{ color: tokens["accent.primary"] }} />
+            </Box>
+          </Box>
+        ) : null}
         <Box style={{ marginTop: 1 }}>
           <Text
             content="Complete the login in your browser. This page will update automatically."
             style={{ color: tokens["text.muted"] }}
           />
         </Box>
+      </Box>
+    </OverlayFrame>
+  );
+}
+
+function OAuthCodeEntryStep({
+  state,
+  tokens,
+  onCodeInput,
+}: {
+  state: ConnectState;
+  tokens: Record<string, string>;
+  onCodeInput: (value: string) => void;
+}) {
+  const providerLabel = state.provider?.label ?? "Provider";
+
+  return (
+    <OverlayFrame title={`${providerLabel} — Paste Authorization Code`} hint="Enter confirm · Esc back" tokens={tokens}>
+      <Box style={{ flexDirection: "column" }}>
+        {state.oauthUrl ? (
+          <Box style={{ flexDirection: "column", marginBottom: 1 }}>
+            <Text
+              content="If the browser didn't open, visit:"
+              style={{ color: tokens["text.muted"] }}
+            />
+            <Box style={{ marginTop: 1 }}>
+              <Text content={state.oauthUrl} style={{ color: tokens["accent.primary"] }} />
+            </Box>
+          </Box>
+        ) : null}
+        <Box style={{ marginBottom: 1 }}>
+          <Text
+            content="Paste the authorization code from the browser:"
+            style={{ color: tokens["text.primary"] }}
+          />
+        </Box>
+        <Box style={{ flexDirection: "row" }}>
+          <Text content={state.oauthCodeInput || " "} style={{ color: tokens["text.secondary"] }} />
+        </Box>
+        <Input
+          focused
+          placeholder=""
+          value={state.oauthCodeInput}
+          onInput={(value) => onCodeInput(extractInputValue(value))}
+        />
       </Box>
     </OverlayFrame>
   );
@@ -617,6 +851,29 @@ export function ConnectFlow({ connectService, onComplete, onCancel }: ConnectFlo
   const { tokens } = useThemeTokens();
   const [state, dispatch] = useReducer(connectReducer, INITIAL_STATE);
 
+  // Load live provider list from daemon when entering providers-loading step
+  useEffect(() => {
+    if (state.step !== "providers-loading") return;
+
+    let cancelled = false;
+
+    void (async () => {
+      const result = await connectService.listUserConfigurableProviders();
+      if (cancelled) return;
+
+      if (result.ok && result.value.length > 0) {
+        const mapped = result.value.map(mapDaemonProviderToOption);
+        dispatch({ type: "PROVIDERS_LOADED", providers: mapped });
+      } else {
+        dispatch({ type: "PROVIDERS_LOAD_FAILED" });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [state.step, connectService]);
+
   const runValidation = useCallback(
     async (currentState: ConnectState) => {
       if (currentState.mode === "byok" && currentState.provider) {
@@ -649,18 +906,27 @@ export function ConnectFlow({ connectService, onComplete, onCancel }: ConnectFlo
         return;
       }
 
-      dispatch({ type: "OAUTH_LAUNCHING", url: initResult.value.authUrl });
+      const authUrl = initResult.value.authUrl;
+      dispatch({ type: "OAUTH_LAUNCHING", url: authUrl });
 
-      // Transition to waiting after a brief moment for browser to open
+      // Open the URL in the user's default browser
+      openBrowser(authUrl);
+
+      // Transition to code entry after a brief moment for browser to open
       setTimeout(() => {
-        dispatch({ type: "OAUTH_WAITING" });
+        dispatch({ type: "OAUTH_CODE_ENTRY" });
       }, 1500);
+    },
+    [connectService],
+  );
 
-      const pollResult = await connectService.pollOAuthCompletion(provider.id);
-      if (pollResult.ok) {
-        dispatch({ type: "OAUTH_COMPLETE", connection: pollResult.value });
+  const runOAuthCodeExchange = useCallback(
+    async (provider: ProviderOption, code: string) => {
+      const result = await connectService.exchangeOAuthCode(provider.id, code);
+      if (result.ok) {
+        dispatch({ type: "OAUTH_COMPLETE", connection: result.value });
       } else {
-        dispatch({ type: "VALIDATION_ERROR", error: pollResult.error });
+        dispatch({ type: "VALIDATION_ERROR", error: result.error });
       }
     },
     [connectService],
@@ -668,6 +934,10 @@ export function ConnectFlow({ connectService, onComplete, onCancel }: ConnectFlo
 
   const handleSecretInput = useCallback((value: string) => {
     dispatch({ type: "SET_SECRET", value });
+  }, []);
+
+  const handleOAuthCodeInput = useCallback((value: string) => {
+    dispatch({ type: "SET_OAUTH_CODE", value });
   }, []);
 
   useKeyboard((event) => {
@@ -690,10 +960,35 @@ export function ConnectFlow({ connectService, onComplete, onCancel }: ConnectFlo
       return;
     }
 
+    // Providers loading: only Esc to cancel
+    if (state.step === "providers-loading") {
+      if (keyName === "escape" || keyName === "esc") {
+        dispatch({ type: "GO_BACK" });
+      }
+      return;
+    }
+
     // OAuth launching/waiting: only Esc to cancel
     if (state.step === "oauth-launching" || state.step === "oauth-waiting") {
       if (keyName === "escape" || keyName === "esc") {
         dispatch({ type: "GO_BACK" });
+      }
+      return;
+    }
+
+    // OAuth code entry: Esc to go back, Enter to submit
+    if (state.step === "oauth-code-entry") {
+      if (keyName === "escape" || keyName === "esc") {
+        dispatch({ type: "GO_BACK" });
+        return;
+      }
+      if (keyName === "return" || keyName === "enter") {
+        if (state.oauthCodeInput.trim().length === 0) return;
+        dispatch({ type: "SUBMIT_OAUTH_CODE" });
+        if (state.provider) {
+          void runOAuthCodeExchange(state.provider, state.oauthCodeInput);
+        }
+        return;
       }
       return;
     }
@@ -757,6 +1052,8 @@ export function ConnectFlow({ connectService, onComplete, onCancel }: ConnectFlo
   switch (state.step) {
     case "mode-select":
       return <ModeSelectStep {...stepProps} />;
+    case "providers-loading":
+      return <ProvidersLoadingStep tokens={tokens} />;
     case "provider-select":
       return <ProviderSelectStep {...stepProps} />;
     case "auth-method-select":
@@ -769,6 +1066,8 @@ export function ConnectFlow({ connectService, onComplete, onCancel }: ConnectFlo
       return <OAuthLaunchingStep state={state} tokens={tokens} />;
     case "oauth-waiting":
       return <OAuthWaitingStep state={state} tokens={tokens} />;
+    case "oauth-code-entry":
+      return <OAuthCodeEntryStep state={state} tokens={tokens} onCodeInput={handleOAuthCodeInput} />;
     case "validating":
       return <ValidatingStep tokens={tokens} />;
     case "success":
