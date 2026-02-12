@@ -61,6 +61,7 @@ export interface ConversationSummary {
   id: string;
   title: string;
   model: string;
+  provider?: string;
   messageCount: number;
   createdAt: string;
   updatedAt: string;
@@ -83,18 +84,26 @@ export interface ConversationUpdateRequest {
 export interface SendMessageRequest {
   conversationId?: string;
   content: string;
+  role?: DaemonMessageRole;
   model?: string;
+  provider?: string;
 }
 
 export interface SendMessageResponse {
   conversationId: string;
+  messageId?: string;
   userMessageId: string;
   assistantMessageId: string;
+  timestamp?: string;
 }
 
 export interface StreamResponseRequest {
   conversationId: string;
   assistantMessageId: string;
+}
+
+export interface StreamSubscribePayload extends StreamResponseRequest {
+  type: "stream.subscribe";
 }
 
 export type DaemonStreamEvent =
@@ -125,3 +134,9 @@ export type DaemonStreamEvent =
       error: DaemonClientError;
       timestamp: string;
     };
+
+export const DAEMON_CONTRACT_COMPATIBILITY_NOTES = [
+  "sendMessage response keeps userMessageId for existing clients and may also include canonical messageId",
+  "sendMessage response may include timestamp once daemon message persistence acknowledgement is wired",
+  "stream subscription payload remains type=stream.subscribe with conversationId and assistantMessageId",
+] as const;
