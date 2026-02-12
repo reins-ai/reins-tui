@@ -1,4 +1,5 @@
 import { adaptToolOutput } from "../cards/card-adapters";
+import type { ConversationLifecycleStatus } from "../state/status-machine";
 import type { DisplayMessage, DisplayToolCall } from "../store";
 import { useThemeTokens } from "../theme";
 import type { ThemeTokens } from "../theme/theme-schema";
@@ -110,9 +111,10 @@ export function ToolCallAnchor({ toolCall }: ToolCallAnchorProps) {
 
 export interface MessageProps {
   message: DisplayMessage;
+  lifecycleStatus?: ConversationLifecycleStatus;
 }
 
-export function Message({ message }: MessageProps) {
+export function Message({ message, lifecycleStatus }: MessageProps) {
   const { tokens } = useThemeTokens();
   const glyph = getRoleGlyph(message.role);
   const glyphColor = getRoleColor(message.role, tokens);
@@ -139,7 +141,11 @@ export function Message({ message }: MessageProps) {
             <Text>{" "}</Text>
           </Box>
           <Box style={{ marginLeft: 2 }}>
-            <StreamingText content={message.content} isStreaming={message.isStreaming} />
+            <StreamingText
+              content={message.content}
+              isStreaming={message.isStreaming}
+              lifecycleStatus={message.isStreaming ? lifecycleStatus : undefined}
+            />
           </Box>
         </Box>
       )}

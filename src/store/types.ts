@@ -1,6 +1,7 @@
 import type { Conversation, ConversationSummary, MessageRole } from "@reins/core";
 
 import type { LayoutMode } from "../state/layout-mode";
+import type { ConversationLifecycleStatus } from "../state/status-machine";
 
 export type FocusedPanel = "sidebar" | "conversation" | "input";
 
@@ -29,6 +30,7 @@ export interface AppState {
   messages: DisplayMessage[];
   streamingMessageId: string | null;
   isStreaming: boolean;
+  streamingLifecycleStatus: ConversationLifecycleStatus;
   isCommandPaletteOpen: boolean;
   isConnectFlowOpen: boolean;
   currentModel: string;
@@ -45,6 +47,7 @@ export const DEFAULT_STATE: AppState = {
   messages: [],
   streamingMessageId: null,
   isStreaming: false,
+  streamingLifecycleStatus: "idle",
   isCommandPaletteOpen: false,
   isConnectFlowOpen: false,
   currentModel: "default",

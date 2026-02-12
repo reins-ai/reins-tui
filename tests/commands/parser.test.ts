@@ -13,6 +13,7 @@ describe("slash command registry", () => {
       "model",
       "theme",
       "connect",
+      "status",
       "new",
       "clear",
       "export",
@@ -30,6 +31,7 @@ describe("slash command registry", () => {
       model: "model",
       theme: "appearance",
       connect: "system",
+      status: "system",
       new: "conversation",
       clear: "conversation",
       export: "conversation",
@@ -178,6 +180,7 @@ describe("getCommandAutocomplete", () => {
       "new",
       "quit",
       "settings",
+      "status",
       "theme",
     ]);
   });

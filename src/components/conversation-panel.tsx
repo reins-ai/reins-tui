@@ -89,7 +89,7 @@ function InlineToolCalls({ toolCalls }: InlineToolCallsProps) {
 }
 
 export function ConversationPanel({ isFocused, borderColor }: ConversationPanelProps) {
-  const { messages, isStreaming } = useConversation();
+  const { messages, isStreaming, lifecycleStatus } = useConversation();
   const { tokens } = useThemeTokens();
   const hasContent = messages.some(
     (message) => message.content.trim().length > 0 || (message.toolCalls && message.toolCalls.length > 0),
@@ -116,7 +116,7 @@ export function ConversationPanel({ isFocused, borderColor }: ConversationPanelP
           messages.map((message, index) => (
             <Box key={message.id} style={{ flexDirection: "column" }}>
               {shouldShowSeparator(messages, index) ? <ExchangeSeparator /> : null}
-              <Message message={message} />
+              <Message message={message} lifecycleStatus={message.isStreaming ? lifecycleStatus : undefined} />
               {message.toolCalls && message.toolCalls.length > 0 ? (
                 <InlineToolCalls toolCalls={message.toolCalls} />
               ) : null}

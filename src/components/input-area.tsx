@@ -3,6 +3,7 @@ import { useRef, useState } from "react";
 import { dispatchCommand, type CommandResult } from "../commands/handlers";
 import { parseSlashCommand } from "../commands/parser";
 import { SLASH_COMMANDS } from "../commands/registry";
+import { useDaemon } from "../daemon/daemon-context";
 import { AVAILABLE_MODELS } from "./model-selector";
 import { useApp } from "../store";
 import { InputHistory } from "../lib";
@@ -105,6 +106,7 @@ function toDate(value: Date | string | number): Date {
 export function InputArea({ isFocused, borderColor, onSubmit }: InputAreaProps) {
   const { state, dispatch } = useApp();
   const conversations = useConversations();
+  const { client: daemonClient } = useDaemon();
   const { tokens } = useThemeTokens();
   const { registry, setTheme } = useThemeContext();
   const renderer = useRenderer();
@@ -186,7 +188,7 @@ export function InputArea({ isFocused, borderColor, onSubmit }: InputAreaProps) 
         compactMode,
         setCompactMode,
       },
-      daemonClient: null,
+      daemonClient,
     });
 
     if (!commandResult.ok) {

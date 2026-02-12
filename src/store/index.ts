@@ -51,10 +51,12 @@ export type AppAction =
   | { type: "FOCUS_NEXT" }
   | { type: "FOCUS_PREV" }
   | { type: "SET_STREAMING"; payload: boolean }
+  | { type: "SET_STREAMING_LIFECYCLE_STATUS"; payload: AppState["streamingLifecycleStatus"] }
   | { type: "SET_COMMAND_PALETTE_OPEN"; payload: boolean }
   | { type: "SET_CONNECT_FLOW_OPEN"; payload: boolean }
   | { type: "SET_MODEL"; payload: string }
   | { type: "ADD_MESSAGE"; payload: DisplayMessage }
+  | { type: "SET_MESSAGES"; payload: DisplayMessage[] }
   | { type: "APPEND_TOKEN"; payload: { messageId: string; token: string } }
   | {
       type: "SET_TOOL_CALL_STATUS";
@@ -128,6 +130,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return typeof action.payload === "boolean"
         ? { ...state, isStreaming: action.payload }
         : state;
+    case "SET_STREAMING_LIFECYCLE_STATUS":
+      return {
+        ...state,
+        streamingLifecycleStatus: action.payload,
+      };
     case "SET_COMMAND_PALETTE_OPEN":
       return typeof action.payload === "boolean"
         ? { ...state, isCommandPaletteOpen: action.payload }
@@ -146,6 +153,14 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         messages: [...state.messages, action.payload],
         streamingMessageId: action.payload.isStreaming ? action.payload.id : state.streamingMessageId,
       };
+    case "SET_MESSAGES": {
+      const streamingMessage = action.payload.find((message) => message.isStreaming);
+      return {
+        ...state,
+        messages: action.payload,
+        streamingMessageId: streamingMessage?.id ?? null,
+      };
+    }
     case "APPEND_TOKEN": {
       const { messageId, token } = action.payload;
       const messageIndex = state.messages.findIndex((message) => message.id === messageId);

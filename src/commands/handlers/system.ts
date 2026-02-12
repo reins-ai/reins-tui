@@ -90,6 +90,21 @@ export const handleSettingsCommand: CommandHandler = () => {
   });
 };
 
+export const handleStatusCommand: CommandHandler = (_args, context) => {
+  const daemonStatus = context.daemonClient?.getConnectionState().status ?? "disconnected";
+  const conversationId = context.session.activeConversationId ?? "none";
+
+  return ok({
+    statusMessage: `Daemon ${daemonStatus}`,
+    responseText: [
+      `Daemon: ${daemonStatus}`,
+      `Model: ${context.model.currentModel}`,
+      `Active conversation: ${conversationId}`,
+      `Messages: ${context.session.messages.length}`,
+    ].join("\n"),
+  });
+};
+
 export const handleQuitCommand: CommandHandler = () => {
   return ok({
     statusMessage: "Quitting Reins TUI",

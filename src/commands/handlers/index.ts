@@ -8,7 +8,7 @@ import {
   handleExportConversationCommand,
   handleNewConversationCommand,
 } from "./session";
-import { handleCompactCommand, handleHelpCommand, handleQuitCommand, handleSettingsCommand } from "./system";
+import { handleCompactCommand, handleHelpCommand, handleQuitCommand, handleSettingsCommand, handleStatusCommand } from "./system";
 import { handleThemeCommand } from "./theme";
 import type { CommandError, CommandHandler, CommandHandlerContext, CommandResult } from "./types";
 
@@ -17,6 +17,7 @@ const HANDLER_MAP: Record<SlashCommandHandlerKey, CommandHandler> = {
   SWITCH_MODEL: handleModelCommand,
   SWITCH_THEME: handleThemeCommand,
   CONNECT_PROVIDER: handleConnectCommand,
+  SHOW_STATUS: handleStatusCommand,
   NEW_CONVERSATION: handleNewConversationCommand,
   CLEAR_CONVERSATION: handleClearConversationCommand,
   EXPORT_CONVERSATION: handleExportConversationCommand,

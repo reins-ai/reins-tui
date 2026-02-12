@@ -5,6 +5,7 @@ export type SlashCommandHandlerKey =
   | "SWITCH_MODEL"
   | "SWITCH_THEME"
   | "CONNECT_PROVIDER"
+  | "SHOW_STATUS"
   | "NEW_CONVERSATION"
   | "CLEAR_CONVERSATION"
   | "EXPORT_CONVERSATION"
@@ -53,6 +54,14 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     usage: "/connect",
     category: "system",
     handlerKey: "CONNECT_PROVIDER",
+  }),
+  Object.freeze({
+    name: "status",
+    aliases: Object.freeze(["st"]),
+    description: "Show daemon and session status.",
+    usage: "/status",
+    category: "system",
+    handlerKey: "SHOW_STATUS",
   }),
   Object.freeze({
     name: "new",

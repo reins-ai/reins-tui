@@ -1,11 +1,17 @@
-import { useCallback, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import { CommandPalette, type CommandPaletteDataSources, ErrorBoundary, getNextModel, HelpScreen, Layout } from "./components";
 import { ConnectFlow, type ConnectResult } from "./components/connect-flow";
+import { DaemonProvider, useDaemon } from "./daemon/daemon-context";
+import type { DaemonMessage, DaemonResult, ConversationSummary as DaemonConversationSummary } from "./daemon/contracts";
 import { ConnectService } from "./providers/connect-service";
+import { GreetingService, type StartupContent } from "./personalization/greeting-service";
+import { createConversationStore, type ConversationStoreState } from "./state/conversation-store";
 import { useConversations, useFocus } from "./hooks";
 import type { PaletteAction } from "./palette/fuzzy-index";
+import type { ConversationLifecycleStatus } from "./state/status-machine";
 import { AppContext, DEFAULT_STATE, appReducer, useApp } from "./store";
+import type { DisplayMessage, DisplayToolCall } from "./store";
 import { ThemeProvider, useThemeTokens } from "./theme";
 import { type KeyEvent, type TerminalDimensions, useKeyboard, useRenderer, useTerminalDimensions } from "./ui";
 
@@ -32,6 +38,105 @@ export function normalizeDimensions(value: unknown): TerminalDimensions {
     width: 0,
     height: 0,
   };
+}
+
+export function parseIsoDate(value: string): Date {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return new Date();
+  }
+
+  return parsed;
+}
+
+export function toStoreConversationSummary(summary: DaemonConversationSummary) {
+  return {
+    id: summary.id,
+    title: summary.title,
+    model: summary.model,
+    messageCount: summary.messageCount,
+    createdAt: parseIsoDate(summary.createdAt),
+    lastMessageAt: parseIsoDate(summary.updatedAt),
+  };
+}
+
+function toDisplayToolCallStatus(status: "running" | "complete" | "error"): DisplayToolCall["status"] {
+  switch (status) {
+    case "running":
+      return "running";
+    case "complete":
+      return "complete";
+    case "error":
+      return "error";
+  }
+}
+
+function toDisplayMessages(snapshot: ConversationStoreState): DisplayMessage[] {
+  const activeToolCalls =
+    snapshot.streaming.status === "thinking"
+      ? snapshot.streaming.toolCalls
+      : snapshot.streaming.status === "streaming"
+        ? snapshot.streaming.toolCalls
+        : snapshot.streaming.status === "complete"
+          ? snapshot.streaming.toolCalls
+          : snapshot.streaming.status === "error"
+            ? snapshot.streaming.toolCalls
+            : [];
+
+  const assistantMessageId =
+    snapshot.streaming.status === "thinking"
+      ? snapshot.streaming.assistantMessageId
+      : snapshot.streaming.status === "streaming"
+        ? snapshot.streaming.assistantMessageId
+        : snapshot.streaming.status === "complete"
+          ? snapshot.streaming.assistantMessageId
+          : snapshot.streaming.status === "error"
+            ? snapshot.streaming.assistantMessageId
+            : null;
+
+  return snapshot.messages.map((message: DaemonMessage) => {
+    const isStreamingMessage =
+      assistantMessageId !== null
+      && message.id === assistantMessageId
+      && (snapshot.streaming.status === "thinking" || snapshot.streaming.status === "streaming");
+
+    const toolCalls =
+      assistantMessageId !== null && message.id === assistantMessageId && activeToolCalls.length > 0
+        ? activeToolCalls.map((toolCall) => ({
+            id: toolCall.id,
+            name: toolCall.name,
+            status: toDisplayToolCallStatus(toolCall.status),
+            result: toolCall.error ?? toolCall.result,
+            isError: toolCall.status === "error",
+          }))
+        : undefined;
+
+    return {
+      id: message.id,
+      role: message.role,
+      content: message.content,
+      toolCalls,
+      isStreaming: isStreamingMessage,
+      createdAt: parseIsoDate(message.createdAt),
+    };
+  });
+}
+
+function getStatusTextForLifecycle(status: ConversationLifecycleStatus): string {
+  switch (status) {
+    case "idle":
+      return "Ready";
+    case "sending":
+      return "Sending message...";
+    case "thinking":
+      return "Thinking...";
+    case "streaming":
+      return "Streaming response...";
+    case "complete":
+      return "Response complete";
+    case "error":
+      return "Streaming error";
+  }
 }
 
 function isQuitEvent(event: KeyEvent): boolean {
@@ -112,16 +217,141 @@ interface AppViewProps {
 
 function AppView({ version, dimensions }: AppViewProps) {
   const { state, dispatch } = useApp();
+  const { client: daemonClient, connectionStatus, isConnected } = useDaemon();
   const focus = useFocus();
   const conversationManager = useConversations();
   const [showHelp, setShowHelp] = useState(false);
+  const [startupContent, setStartupContent] = useState<StartupContent | null>(null);
   const renderer = useRenderer();
   const isExitingRef = useRef(false);
+  const activeConversationIdRef = useRef<string | null>(state.activeConversationId);
+  const conversationStoreRef = useRef(createConversationStore({ daemonClient }));
+
+  useEffect(() => {
+    activeConversationIdRef.current = state.activeConversationId;
+  }, [state.activeConversationId]);
+
+  useEffect(() => {
+    conversationStoreRef.current = createConversationStore({ daemonClient });
+    const unsubscribe = conversationStoreRef.current.subscribe((snapshot) => {
+      dispatch({ type: "SET_MESSAGES", payload: toDisplayMessages(snapshot) });
+      dispatch({
+        type: "SET_STREAMING_LIFECYCLE_STATUS",
+        payload: snapshot.streaming.lifecycle.status,
+      });
+      dispatch({
+        type: "SET_STREAMING",
+        payload:
+          snapshot.streaming.lifecycle.status === "sending"
+          || snapshot.streaming.lifecycle.status === "thinking"
+          || snapshot.streaming.lifecycle.status === "streaming",
+      });
+      dispatch({ type: "SET_STATUS", payload: getStatusTextForLifecycle(snapshot.streaming.lifecycle.status) });
+
+      if (snapshot.conversationId && snapshot.conversationId !== activeConversationIdRef.current) {
+        dispatch({ type: "SET_ACTIVE_CONVERSATION", payload: snapshot.conversationId });
+      }
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [daemonClient, dispatch]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const greetingService = new GreetingService();
+
+    const loadStartupContent = async () => {
+      const startup = await greetingService.getFullStartup();
+      if (!cancelled) {
+        setStartupContent(startup);
+      }
+    };
+
+    void loadStartupContent();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isConnected]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydrateConversations = async () => {
+      const listResult = await daemonClient.listConversations();
+      if (!listResult.ok || cancelled) {
+        return;
+      }
+
+      const conversations = listResult.value.map(toStoreConversationSummary);
+      dispatch({ type: "SET_CONVERSATIONS", payload: conversations });
+
+      if (conversations.length > 0 && !state.activeConversationId) {
+        dispatch({ type: "SET_ACTIVE_CONVERSATION", payload: conversations[0].id });
+      }
+    };
+
+    void hydrateConversations();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [daemonClient, dispatch, isConnected, state.activeConversationId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    if (!state.activeConversationId) {
+      return;
+    }
+
+    const loadConversation = async () => {
+      const result = await daemonClient.getConversation(state.activeConversationId as string);
+      if (!result.ok || cancelled) {
+        return;
+      }
+
+      const converted: DisplayMessage[] = result.value.messages.map((message) => ({
+        id: message.id,
+        role: message.role,
+        content: message.content,
+        createdAt: parseIsoDate(message.createdAt),
+      }));
+      dispatch({ type: "SET_MESSAGES", payload: converted });
+    };
+
+    void loadConversation();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [daemonClient, dispatch, state.activeConversationId]);
 
   const closeHelp = useCallback(() => {
     setShowHelp(false);
     dispatch({ type: "SET_STATUS", payload: "Ready" });
   }, [dispatch]);
+
+  const createNewConversation = useCallback(async () => {
+    const createResult = await daemonClient.createConversation({
+      title: "New Chat",
+      model: state.currentModel,
+    });
+
+    if (!createResult.ok) {
+      conversationManager.createConversation();
+      dispatch({ type: "SET_STATUS", payload: "Started a new conversation" });
+      return;
+    }
+
+    const summary = toStoreConversationSummary(createResult.value);
+    dispatch({ type: "ADD_CONVERSATION", payload: summary });
+    dispatch({ type: "SET_ACTIVE_CONVERSATION", payload: summary.id });
+    dispatch({ type: "SET_MESSAGES", payload: [] });
+    dispatch({ type: "SET_STATUS", payload: "Started a new conversation" });
+  }, [conversationManager, daemonClient, dispatch, state.currentModel]);
 
   const exitApp = useCallback(() => {
     if (isExitingRef.current) {
@@ -136,29 +366,43 @@ function AppView({ version, dimensions }: AppViewProps) {
     process.exit(0);
   }, [dispatch, renderer]);
 
-  const handleMessageSubmit = (text: string) => {
+  const handleMessageSubmit = async (text: string) => {
     const trimmed = text.trim();
     if (trimmed.length === 0) {
       return;
     }
 
-    dispatch({
-      type: "ADD_MESSAGE",
-      payload: {
-        id: crypto.randomUUID(),
-        role: "user",
-        content: text,
-        createdAt: new Date(),
-      },
+    const sendResult: DaemonResult<void> = await conversationStoreRef.current.sendUserMessage({
+      conversationId: state.activeConversationId ?? undefined,
+      content: trimmed,
+      model: state.currentModel,
     });
-    dispatch({ type: "SET_STATUS", payload: "Message queued" });
+
+    if (!sendResult.ok) {
+      dispatch({
+        type: "ADD_MESSAGE",
+        payload: {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: `✧ ${sendResult.error.message}`,
+          createdAt: new Date(),
+        },
+      });
+      dispatch({ type: "SET_STATUS", payload: sendResult.error.message });
+      return;
+    }
+
+    const listResult = await daemonClient.listConversations();
+    if (listResult.ok) {
+      dispatch({ type: "SET_CONVERSATIONS", payload: listResult.value.map(toStoreConversationSummary) });
+    }
   };
 
   const setCommandPaletteOpen = (isOpen: boolean) => {
     dispatch({ type: "SET_COMMAND_PALETTE_OPEN", payload: isOpen });
   };
 
-  const connectService = useMemo(() => new ConnectService(), []);
+  const connectService = useMemo(() => new ConnectService({ daemonClient }), [daemonClient]);
 
   const handleConnectComplete = useCallback((result: ConnectResult) => {
     dispatch({ type: "SET_CONNECT_FLOW_OPEN", payload: false });
@@ -230,8 +474,7 @@ function AppView({ version, dimensions }: AppViewProps) {
         });
         break;
       case "new":
-        conversationManager.createConversation();
-        dispatch({ type: "SET_STATUS", payload: "Started a new conversation" });
+        void createNewConversation();
         break;
       case "clear":
         dispatch({ type: "CLEAR_MESSAGES" });
@@ -284,8 +527,7 @@ function AppView({ version, dimensions }: AppViewProps) {
     }
 
     if (isNewConversationEvent(event)) {
-      conversationManager.createConversation();
-      dispatch({ type: "SET_STATUS", payload: "Started a new conversation" });
+      void createNewConversation();
       return;
     }
 
@@ -331,6 +573,7 @@ function AppView({ version, dimensions }: AppViewProps) {
         version={version}
         dimensions={dimensions}
         showHelp={showHelp}
+        connectionStatus={connectionStatus}
         onSubmitMessage={handleMessageSubmit}
       />
       <CommandPalette
@@ -339,7 +582,7 @@ function AppView({ version, dimensions }: AppViewProps) {
         onClose={() => setCommandPaletteOpen(false)}
         onExecute={executePaletteAction}
       />
-      <HelpScreen isOpen={showHelp} />
+      <HelpScreen isOpen={showHelp} startup={startupContent} />
       {state.isConnectFlowOpen ? (
         <ConnectFlow
           connectService={connectService}
@@ -392,10 +635,12 @@ export function App({ version }: AppProps) {
   const contextValue = useMemo(() => ({ state, dispatch }), [state]);
 
   return (
-    <ThemeProvider>
-      <AppContext.Provider value={contextValue}>
-        <AppContainer version={version} dimensions={dimensions} />
-      </AppContext.Provider>
-    </ThemeProvider>
+    <DaemonProvider>
+      <ThemeProvider>
+        <AppContext.Provider value={contextValue}>
+          <AppContainer version={version} dimensions={dimensions} />
+        </AppContext.Provider>
+      </ThemeProvider>
+    </DaemonProvider>
   );
 }

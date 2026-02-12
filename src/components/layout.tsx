@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
+import type { DaemonConnectionStatus } from "../daemon/contracts";
 import type { FocusedPanel } from "../store";
 import { useApp, getLayoutVisibility } from "../store";
 import { useThemeTokens } from "../theme";
@@ -37,6 +38,7 @@ export interface LayoutProps {
   version: string;
   dimensions: TerminalDimensions;
   showHelp: boolean;
+  connectionStatus: DaemonConnectionStatus;
   onSubmitMessage(text: string): void;
 }
 
@@ -85,7 +87,7 @@ function useBreakpointConstraints(columns: number): BreakpointState {
   return breakpointState;
 }
 
-export function Layout({ version, dimensions, showHelp, onSubmitMessage }: LayoutProps) {
+export function Layout({ version, dimensions, showHelp, connectionStatus, onSubmitMessage }: LayoutProps) {
   const { state } = useApp();
   const { tokens } = useThemeTokens();
 
@@ -147,7 +149,7 @@ export function Layout({ version, dimensions, showHelp, onSubmitMessage }: Layou
         ) : null}
       </Box>
 
-      <StatusBar version={version} dimensions={dimensions} showHelp={showHelp} />
+      <StatusBar version={version} dimensions={dimensions} showHelp={showHelp} connectionStatus={connectionStatus} />
     </Box>
   );
 }
