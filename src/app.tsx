@@ -9,6 +9,8 @@ import type { DaemonMessage, DaemonResult, ConversationSummary as DaemonConversa
 import { ConnectService } from "./providers/connect-service";
 import { GreetingService, type StartupContent } from "./personalization/greeting-service";
 import { createConversationStore, type ConversationStoreState } from "./state/conversation-store";
+import { loadPinPreferences, savePinPreferences } from "./state/pin-persistence";
+import { toPinPreferences, applyPinPreferences, DEFAULT_PANEL_STATE } from "./state/layout-mode";
 import { useConversations, useFocus } from "./hooks";
 import type { PaletteAction } from "./palette/fuzzy-index";
 import type { ConversationLifecycleStatus } from "./state/status-machine";
@@ -181,17 +183,17 @@ function isNewConversationEvent(event: KeyEvent): boolean {
   return event.ctrl === true && (event.name === "n" || event.sequence === "n");
 }
 
+function isToggleDrawerEvent(event: KeyEvent): boolean {
+  return event.ctrl === true && (event.name === "1" || event.sequence === "1");
+}
+
+function isToggleTodayEvent(event: KeyEvent): boolean {
+  return event.ctrl === true && (event.name === "2" || event.sequence === "2");
+}
+
 function resolveDirectPanelFocus(event: KeyEvent) {
   if (event.ctrl !== true) {
     return null;
-  }
-
-  if (event.name === "1" || event.sequence === "1") {
-    return "sidebar" as const;
-  }
-
-  if (event.name === "2" || event.sequence === "2") {
-    return "conversation" as const;
   }
 
   if (event.name === "3" || event.sequence === "3") {
@@ -228,6 +230,33 @@ function AppView({ version, dimensions }: AppViewProps) {
   const isExitingRef = useRef(false);
   const activeConversationIdRef = useRef<string | null>(state.activeConversationId);
   const conversationStoreRef = useRef(createConversationStore({ daemonClient }));
+
+  // Restore pin preferences on startup
+  const pinPrefsLoadedRef = useRef(false);
+  useEffect(() => {
+    if (pinPrefsLoadedRef.current) return;
+    pinPrefsLoadedRef.current = true;
+    const prefs = loadPinPreferences();
+    const restoredPanels = applyPinPreferences(DEFAULT_PANEL_STATE, prefs);
+    // Restore pin state but keep panels dismissed
+    if (restoredPanels.drawer.pinned) dispatch({ type: "PIN_PANEL", payload: "drawer" });
+    if (restoredPanels.today.pinned) dispatch({ type: "PIN_PANEL", payload: "today" });
+    if (restoredPanels.modal.pinned) dispatch({ type: "PIN_PANEL", payload: "modal" });
+  }, [dispatch]);
+
+  // Persist pin preferences when they change
+  const prevPinRef = useRef(toPinPreferences(state.panels));
+  useEffect(() => {
+    const currentPins = toPinPreferences(state.panels);
+    if (
+      currentPins.drawer !== prevPinRef.current.drawer ||
+      currentPins.today !== prevPinRef.current.today ||
+      currentPins.modal !== prevPinRef.current.modal
+    ) {
+      prevPinRef.current = currentPins;
+      savePinPreferences(currentPins);
+    }
+  }, [state.panels]);
 
   useEffect(() => {
     activeConversationIdRef.current = state.activeConversationId;
@@ -545,6 +574,39 @@ function AppView({ version, dimensions }: AppViewProps) {
       return;
     }
 
+    // Escape dismisses topmost unpinned panel before any other action
+    if (isEscapeEvent(event)) {
+      const hasAnyVisible = state.panels.drawer.visible || state.panels.today.visible || state.panels.modal.visible;
+      if (hasAnyVisible) {
+        dispatch({ type: "DISMISS_TOPMOST" });
+        dispatch({ type: "SET_STATUS", payload: "Panel dismissed" });
+        return;
+      }
+    }
+
+    if (isToggleDrawerEvent(event)) {
+      const isCurrentlyVisible = state.panels.drawer.visible;
+      dispatch({ type: "TOGGLE_PANEL", payload: "drawer" });
+      if (!isCurrentlyVisible) {
+        focus.focusPanel("sidebar");
+      }
+      dispatch({
+        type: "SET_STATUS",
+        payload: isCurrentlyVisible ? "Drawer closed" : "Drawer opened",
+      });
+      return;
+    }
+
+    if (isToggleTodayEvent(event)) {
+      const isCurrentlyVisible = state.panels.today.visible;
+      dispatch({ type: "TOGGLE_PANEL", payload: "today" });
+      dispatch({
+        type: "SET_STATUS",
+        payload: isCurrentlyVisible ? "Today panel closed" : "Today panel opened",
+      });
+      return;
+    }
+
     if (isToggleActivityEvent(event)) {
       dispatch({ type: "TOGGLE_ACTIVITY" });
       const nextMode = state.layoutMode === "activity" ? "Normal" : "Activity";
@@ -576,9 +638,6 @@ function AppView({ version, dimensions }: AppViewProps) {
 
     const directFocusTarget = resolveDirectPanelFocus(event);
     if (directFocusTarget) {
-      if (directFocusTarget === "sidebar" && state.layoutMode === "zen") {
-        return;
-      }
       focus.focusPanel(directFocusTarget);
       return;
     }

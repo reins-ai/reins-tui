@@ -1,6 +1,14 @@
 import { createContext, useContext } from "react";
 
-import { reduceLayoutMode, getLayoutVisibility, type LayoutModeAction, type LayoutMode } from "../state/layout-mode";
+import {
+  reduceLayoutMode,
+  getLayoutVisibility,
+  reducePanelState,
+  deriveLayoutMode,
+  type LayoutModeAction,
+  type LayoutMode,
+  type LayoutAction,
+} from "../state/layout-mode";
 import type { AppState, DisplayMessage, DisplayToolCall, FocusedPanel } from "./types";
 import { DEFAULT_STATE } from "./types";
 
@@ -71,7 +79,8 @@ export type AppAction =
     }
   | { type: "FINISH_STREAMING"; payload: { messageId: string } }
   | { type: "CLEAR_MESSAGES" }
-  | LayoutModeAction;
+  | LayoutModeAction
+  | LayoutAction;
 
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
@@ -256,6 +265,28 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         streamingMessageId: null,
         isStreaming: false,
       };
+    case "TOGGLE_PANEL":
+    case "DISMISS_PANEL":
+    case "PIN_PANEL":
+    case "UNPIN_PANEL":
+    case "DISMISS_ALL":
+    case "DISMISS_TOPMOST": {
+      const nextPanels = reducePanelState(state.panels, action as LayoutAction);
+      if (nextPanels === state.panels) {
+        return state;
+      }
+      const nextLayoutMode = deriveLayoutMode(nextPanels);
+      const nextFocusedPanel =
+        nextLayoutMode === "zen" && state.focusedPanel === "sidebar"
+          ? "conversation"
+          : state.focusedPanel;
+      return {
+        ...state,
+        panels: nextPanels,
+        layoutMode: nextLayoutMode,
+        focusedPanel: nextFocusedPanel,
+      };
+    }
     case "TOGGLE_ACTIVITY":
     case "TOGGLE_ZEN":
     case "SET_LAYOUT_MODE": {
@@ -294,5 +325,5 @@ export function useApp(): AppContextValue {
 
 export { DEFAULT_STATE };
 export type { AppState, DisplayMessage, DisplayToolCall, FocusedPanel };
-export type { LayoutMode } from "../state/layout-mode";
+export type { LayoutMode, PanelId, PanelState } from "../state/layout-mode";
 export { getLayoutVisibility, getLayoutModeLabel } from "../state/layout-mode";

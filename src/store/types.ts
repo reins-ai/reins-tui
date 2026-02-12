@@ -1,6 +1,7 @@
 import type { Conversation, ConversationSummary, MessageRole } from "@reins/core";
 
-import type { LayoutMode } from "../state/layout-mode";
+import type { LayoutMode, PanelState } from "../state/layout-mode";
+import { DEFAULT_PANEL_STATE } from "../state/layout-mode";
 import type { ConversationLifecycleStatus } from "../state/status-machine";
 
 export type FocusedPanel = "sidebar" | "conversation" | "input";
@@ -38,6 +39,7 @@ export interface AppState {
   status: string;
   focusedPanel: FocusedPanel;
   layoutMode: LayoutMode;
+  panels: PanelState;
 }
 
 export const DEFAULT_STATE: AppState = {
@@ -55,5 +57,6 @@ export const DEFAULT_STATE: AppState = {
   availableModels: [],
   status: "Ready",
   focusedPanel: "conversation",
-  layoutMode: "normal",
+  layoutMode: "zen",
+  panels: DEFAULT_PANEL_STATE,
 };
