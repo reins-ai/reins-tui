@@ -17,7 +17,9 @@ export interface InputAreaProps {
   onSubmit(text: string): void;
 }
 
-const MAX_INPUT_LENGTH = 4000;
+export type InputSubmissionKind = "empty" | "command" | "message";
+
+export const MAX_INPUT_LENGTH = 4000;
 
 function isUpKey(name?: string): boolean {
   return name === "up";
@@ -65,7 +67,7 @@ function clampText(text: string): string {
   return text.slice(0, MAX_INPUT_LENGTH);
 }
 
-export function classifyInputSubmission(text: string): "empty" | "command" | "message" {
+export function classifyInputSubmission(text: string): InputSubmissionKind {
   const trimmed = text.trim();
 
   if (trimmed.length === 0) {
