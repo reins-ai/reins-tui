@@ -34,7 +34,7 @@ export interface DaemonWsTransportConfig {
 
 interface StreamEnvelope {
   type: "stream-event";
-  event: DaemonStreamEvent;
+  event: unknown;
 }
 
 interface HeartbeatEnvelope {
@@ -125,7 +125,7 @@ export class DaemonWsTransport {
   };
 
   constructor(config: DaemonWsTransportConfig) {
-    this.baseUrl = config.baseUrl.replace(/\/$/, "");
+    this.baseUrl = normalizeWebSocketUrl(config.baseUrl);
     this.connectTimeoutMs = Math.max(1, config.connectTimeoutMs);
     this.webSocketFactory = config.webSocketFactory ?? ((url) => new WebSocket(url) as unknown as WebSocketLike);
     this.now = config.now ?? (() => new Date());
@@ -344,15 +344,82 @@ export class DaemonWsTransport {
   }
 
   private extractStreamEvent(payload: unknown): DaemonStreamEvent | null {
-    if (this.isDaemonStreamEvent(payload)) {
-      return payload;
+    const candidate = this.isStreamEnvelope(payload) ? payload.event : payload;
+    return this.toDaemonStreamEvent(candidate);
+  }
+
+  private toDaemonStreamEvent(payload: unknown): DaemonStreamEvent | null {
+    if (!payload || typeof payload !== "object") {
+      return null;
     }
 
-    if (this.isStreamEnvelope(payload) && this.isDaemonStreamEvent(payload.event)) {
-      return payload.event;
+    const event = payload as Record<string, unknown>;
+    const type = typeof event.type === "string" ? event.type : undefined;
+    const conversationId = typeof event.conversationId === "string" ? event.conversationId : undefined;
+    const messageId = typeof event.messageId === "string" ? event.messageId : undefined;
+    const timestamp = typeof event.timestamp === "string" ? event.timestamp : undefined;
+
+    if (!type || !conversationId || !messageId || !timestamp) {
+      return null;
+    }
+
+    if (type === "start" || type === "message_start") {
+      return { type: "start", conversationId, messageId, timestamp };
+    }
+
+    if (type === "delta" || type === "content_chunk") {
+      const delta = typeof event.delta === "string" ? event.delta : typeof event.chunk === "string" ? event.chunk : undefined;
+      if (delta === undefined) {
+        return null;
+      }
+
+      return { type: "delta", conversationId, messageId, delta, timestamp };
+    }
+
+    if (type === "complete" || type === "message_complete") {
+      const content = typeof event.content === "string" ? event.content : "";
+      return { type: "complete", conversationId, messageId, content, timestamp };
+    }
+
+    if (type === "error") {
+      const errorPayload = event.error;
+      if (!errorPayload || typeof errorPayload !== "object") {
+        return null;
+      }
+
+      const errorRecord = errorPayload as Record<string, unknown>;
+      const code = this.toDaemonErrorCode(errorRecord.code);
+      const message = typeof errorRecord.message === "string" ? errorRecord.message : "Daemon stream error";
+      const retryable = typeof errorRecord.retryable === "boolean" ? errorRecord.retryable : false;
+
+      return {
+        type: "error",
+        conversationId,
+        messageId,
+        error: {
+          code,
+          message,
+          retryable,
+          fallbackHint: typeof errorRecord.fallbackHint === "string" ? errorRecord.fallbackHint : undefined,
+        },
+        timestamp,
+      };
     }
 
     return null;
+  }
+
+  private toDaemonErrorCode(value: unknown): DaemonClientError["code"] {
+    if (value === "DAEMON_UNAVAILABLE" ||
+      value === "DAEMON_DISCONNECTED" ||
+      value === "DAEMON_TIMEOUT" ||
+      value === "DAEMON_INVALID_REQUEST" ||
+      value === "DAEMON_NOT_FOUND" ||
+      value === "DAEMON_INTERNAL_ERROR") {
+      return value;
+    }
+
+    return "DAEMON_INTERNAL_ERROR";
   }
 
   private isStreamEnvelope(payload: unknown): payload is StreamEnvelope {
@@ -368,29 +435,22 @@ export class DaemonWsTransport {
   private isHeartbeatEnvelope(payload: unknown): payload is HeartbeatEnvelope {
     return Boolean(payload && typeof payload === "object" && (payload as { type?: unknown }).type === "heartbeat");
   }
+}
 
-  private isDaemonStreamEvent(payload: unknown): payload is DaemonStreamEvent {
-    if (!payload || typeof payload !== "object") {
-      return false;
+function normalizeWebSocketUrl(value: string): string {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return "ws://localhost:7433/ws";
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.pathname === "" || parsed.pathname === "/") {
+      parsed.pathname = "/ws";
     }
 
-    const event = payload as Partial<DaemonStreamEvent>;
-    if (!event.type || !event.conversationId || !event.messageId || !event.timestamp) {
-      return false;
-    }
-
-    if (event.type === "delta") {
-      return typeof event.delta === "string";
-    }
-
-    if (event.type === "complete") {
-      return typeof event.content === "string";
-    }
-
-    if (event.type === "error") {
-      return typeof event.error === "object" && event.error !== null;
-    }
-
-    return event.type === "start";
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    return trimmed.replace(/\/$/, "");
   }
 }

@@ -34,6 +34,7 @@ export interface AppState {
   isCommandPaletteOpen: boolean;
   isConnectFlowOpen: boolean;
   currentModel: string;
+  availableModels: string[];
   status: string;
   focusedPanel: FocusedPanel;
   layoutMode: LayoutMode;
@@ -51,6 +52,7 @@ export const DEFAULT_STATE: AppState = {
   isCommandPaletteOpen: false,
   isConnectFlowOpen: false,
   currentModel: "default",
+  availableModels: [],
   status: "Ready",
   focusedPanel: "conversation",
   layoutMode: "normal",

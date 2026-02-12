@@ -15,7 +15,7 @@ import type {
 export const DEFAULT_DAEMON_HOST = "localhost";
 export const DEFAULT_DAEMON_PORT = 7433;
 export const DEFAULT_DAEMON_HTTP_BASE_URL = `http://${DEFAULT_DAEMON_HOST}:${DEFAULT_DAEMON_PORT}`;
-export const DEFAULT_DAEMON_WS_BASE_URL = `ws://${DEFAULT_DAEMON_HOST}:${DEFAULT_DAEMON_PORT}`;
+export const DEFAULT_DAEMON_WS_BASE_URL = `ws://${DEFAULT_DAEMON_HOST}:${DEFAULT_DAEMON_PORT}/ws`;
 
 export interface DaemonClientConfig {
   httpBaseUrl: string;

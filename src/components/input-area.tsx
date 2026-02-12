@@ -4,7 +4,7 @@ import { dispatchCommand, type CommandResult } from "../commands/handlers";
 import { parseSlashCommand } from "../commands/parser";
 import { SLASH_COMMANDS } from "../commands/registry";
 import { useDaemon } from "../daemon/daemon-context";
-import { AVAILABLE_MODELS } from "./model-selector";
+
 import { useApp } from "../store";
 import { InputHistory } from "../lib";
 import { useThemeContext, useThemeTokens } from "../theme";
@@ -157,7 +157,7 @@ export function InputArea({ isFocused, borderColor, onSubmit }: InputAreaProps) 
     const commandResult = dispatchCommand(parseResult.value, {
       catalog: SLASH_COMMANDS,
       model: {
-        availableModels: AVAILABLE_MODELS,
+        availableModels: state.availableModels,
         currentModel: state.currentModel,
         setModel(model: string) {
           dispatch({ type: "SET_MODEL", payload: model });

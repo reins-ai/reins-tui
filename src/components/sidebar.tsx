@@ -103,7 +103,8 @@ export function Sidebar({ isFocused, borderColor }: SidebarProps) {
   };
 
   const cycleModel = () => {
-    const nextModel = getNextModel(state.currentModel);
+    if (state.availableModels.length === 0) return;
+    const nextModel = getNextModel(state.currentModel, state.availableModels);
     dispatch({ type: "SET_MODEL", payload: nextModel });
     dispatch({ type: "SET_STATUS", payload: `Model set to ${nextModel}` });
   };
@@ -269,7 +270,7 @@ export function Sidebar({ isFocused, borderColor }: SidebarProps) {
       />
 
       <Box style={{ marginTop: 1 }}>
-        <ModelSelector currentModel={state.currentModel} onCycleModel={cycleModel} />
+        <ModelSelector currentModel={state.currentModel} availableModels={state.availableModels} onCycleModel={cycleModel} />
       </Box>
 
       <Text

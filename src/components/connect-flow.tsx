@@ -771,7 +771,7 @@ function OAuthCodeEntryStep({
         ) : null}
         <Box style={{ marginBottom: 1 }}>
           <Text
-            content="Paste the authorization code from the browser:"
+            content="Paste the authorization code or callback URL from the browser:"
             style={{ color: tokens["text.primary"] }}
           />
         </Box>

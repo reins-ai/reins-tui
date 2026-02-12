@@ -55,6 +55,7 @@ export type AppAction =
   | { type: "SET_COMMAND_PALETTE_OPEN"; payload: boolean }
   | { type: "SET_CONNECT_FLOW_OPEN"; payload: boolean }
   | { type: "SET_MODEL"; payload: string }
+  | { type: "SET_AVAILABLE_MODELS"; payload: string[] }
   | { type: "ADD_MESSAGE"; payload: DisplayMessage }
   | { type: "SET_MESSAGES"; payload: DisplayMessage[] }
   | { type: "APPEND_TOKEN"; payload: { messageId: string; token: string } }
@@ -146,6 +147,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "SET_MODEL":
       return typeof action.payload === "string"
         ? { ...state, currentModel: action.payload }
+        : state;
+    case "SET_AVAILABLE_MODELS":
+      return Array.isArray(action.payload)
+        ? { ...state, availableModels: action.payload }
         : state;
     case "ADD_MESSAGE":
       return {

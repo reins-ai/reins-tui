@@ -82,6 +82,7 @@ interface DaemonOAuthInitPayload {
   url?: string;
   provider?: string;
   expiresAt?: number;
+  codeVerifier?: string;
   error?: string;
 }
 
@@ -204,7 +205,21 @@ export class HttpProviderApiTransport implements ProviderApiTransport {
       });
 
       if (!response.ok) {
-        return err(this.mapHttpError(response.status, method, path));
+        let detail: string | undefined;
+        try {
+          const payload = await response.clone().json();
+          if (isRecord(payload)) {
+            if (typeof payload.error === "string") {
+              detail = payload.error;
+            } else if (typeof payload.message === "string") {
+              detail = payload.message;
+            }
+          }
+        } catch {
+          // Ignore parse errors and fall back to status-based message.
+        }
+
+        return err(this.mapHttpError(response.status, method, path, detail));
       }
 
       return ok(response);
@@ -215,11 +230,13 @@ export class HttpProviderApiTransport implements ProviderApiTransport {
     }
   }
 
-  private mapHttpError(status: number, method: HttpMethod, path: string): DaemonClientError {
+  private mapHttpError(status: number, method: HttpMethod, path: string, detail?: string): DaemonClientError {
+    const suffix = detail ? `: ${detail}` : "";
+
     if (status === 400) {
       return {
         code: "DAEMON_INVALID_REQUEST",
-        message: `Daemon rejected request (${method} ${path})`,
+        message: `Daemon rejected request (${method} ${path})${suffix}`,
         retryable: false,
       };
     }
@@ -227,7 +244,7 @@ export class HttpProviderApiTransport implements ProviderApiTransport {
     if (status === 404) {
       return {
         code: "DAEMON_NOT_FOUND",
-        message: `Daemon resource not found (${method} ${path})`,
+        message: `Daemon resource not found (${method} ${path})${suffix}`,
         retryable: false,
       };
     }
@@ -235,14 +252,14 @@ export class HttpProviderApiTransport implements ProviderApiTransport {
     if (status >= 500) {
       return {
         code: "DAEMON_INTERNAL_ERROR",
-        message: `Daemon internal failure (${status})`,
+        message: `Daemon internal failure (${status})${suffix}`,
         retryable: true,
       };
     }
 
     return {
       code: "DAEMON_UNAVAILABLE",
-      message: `Unexpected daemon response (${status})`,
+      message: `Unexpected daemon response (${status})${suffix}`,
       retryable: true,
     };
   }
@@ -282,6 +299,72 @@ function readProviderMode(value: unknown): ProviderMode | null {
   }
 
   return null;
+}
+
+interface ParsedOAuthCodeInput {
+  code: string;
+  state?: string;
+}
+
+function parseOAuthCodeInput(input: string): ParsedOAuthCodeInput {
+  const trimmed = input.trim();
+  if (trimmed.length === 0) {
+    return { code: "" };
+  }
+
+  const decode = (value: string | null): string | undefined => {
+    if (!value) {
+      return undefined;
+    }
+
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  };
+
+  try {
+    const url = new URL(trimmed);
+    const queryCode = decode(url.searchParams.get("code"));
+    const queryState = decode(url.searchParams.get("state"));
+    if (queryCode) {
+      return { code: queryCode, state: queryState };
+    }
+
+    const hash = url.hash.startsWith("#") ? url.hash.slice(1) : url.hash;
+    if (hash.length > 0) {
+      const hashParams = new URLSearchParams(hash);
+      const hashCode = decode(hashParams.get("code"));
+      const hashState = decode(hashParams.get("state"));
+      if (hashCode) {
+        return { code: hashCode, state: hashState };
+      }
+    }
+  } catch {
+    // Non-URL input: continue with plain parsing.
+  }
+
+  if (trimmed.includes("code=")) {
+    const queryText = trimmed.includes("?") ? trimmed.slice(trimmed.indexOf("?") + 1) : trimmed;
+    const params = new URLSearchParams(queryText);
+    const code = decode(params.get("code"));
+    const state = decode(params.get("state"));
+    if (code) {
+      return { code, state };
+    }
+  }
+
+  const hashIndex = trimmed.indexOf("#");
+  if (hashIndex > 0) {
+    const code = trimmed.slice(0, hashIndex).trim();
+    const state = trimmed.slice(hashIndex + 1).trim();
+    if (code.length > 0) {
+      return { code, state: state.length > 0 ? state : undefined };
+    }
+  }
+
+  return { code: trimmed };
 }
 
 function normalizePayload(value: unknown): DaemonProviderPayload {
@@ -469,6 +552,7 @@ function pickBaseUrlFromConfig(config: DaemonClientConfig | null): string {
 export class ConnectService {
   private readonly daemonClient: DaemonClient | undefined;
   private readonly transport: ProviderApiTransport;
+  private readonly oauthVerifiers: Map<string, string> = new Map();
 
   constructor(options: ConnectServiceOptions = {}) {
     this.daemonClient = options.daemonClient;
@@ -794,10 +878,87 @@ export class ConnectService {
       });
     }
 
+    // Store the codeVerifier for later use in exchangeOAuthCode
+    if (payload.codeVerifier && typeof payload.codeVerifier === "string") {
+      this.oauthVerifiers.set(normalizedProvider, payload.codeVerifier);
+      logger.connect.info("Stored OAuth verifier", { provider: normalizedProvider });
+    }
+
     return ok({
       authUrl,
       provider: payload.provider ?? normalizedProvider,
       expiresAt: payload.expiresAt,
+    });
+  }
+
+  public async exchangeOAuthCode(
+    providerId: string,
+    code: string,
+  ): Promise<Result<ProviderConnection, ConnectError>> {
+    const normalizedProvider = providerId.trim();
+    const parsedCode = parseOAuthCodeInput(code);
+    const normalizedCode = parsedCode.code.trim();
+    if (normalizedProvider.length === 0 || normalizedCode.length === 0) {
+      return err({
+        code: "INVALID_INPUT",
+        message: "Provider ID and authorization code are required.",
+        retryable: false,
+      });
+    }
+
+    const readiness = await this.ensureDaemonReady();
+    if (!readiness.ok) {
+      return readiness;
+    }
+
+    logger.connect.info("Exchanging OAuth code", { provider: normalizedProvider });
+    
+    // Retrieve the stored verifier (PKCE flow requires it)
+    const codeVerifier = this.oauthVerifiers.get(normalizedProvider);
+    if (codeVerifier) {
+      logger.connect.info("Using stored OAuth verifier", { provider: normalizedProvider });
+    } else {
+      logger.connect.warn("No OAuth verifier found (PKCE may fail)", { provider: normalizedProvider });
+    }
+    logger.connect.info("OAuth exchange payload diagnostics", {
+      provider: normalizedProvider,
+      rawLength: code.length,
+      parsedCodeLength: normalizedCode.length,
+      hasParsedState: typeof parsedCode.state === "string" && parsedCode.state.length > 0,
+      hasVerifier: typeof codeVerifier === "string" && codeVerifier.length > 0,
+      looksLikeUrl: /^https?:\/\//.test(code.trim()),
+      hasHash: code.includes("#"),
+      hasQueryCode: code.includes("code="),
+    });
+    
+    const result = await this.transport.post<
+      { provider: string; code: string; state?: string; codeVerifier?: string },
+      unknown
+    >("/api/providers/auth/oauth/exchange", {
+      provider: normalizedProvider,
+      code: normalizedCode,
+      ...(parsedCode.state && { state: parsedCode.state }),
+      ...(codeVerifier && { codeVerifier }),
+    });
+
+    if (!result.ok) {
+      logger.connect.error("OAuth code exchange failed", { provider: normalizedProvider, error: result.error });
+      // Clean up stored verifier on failure
+      this.oauthVerifiers.delete(normalizedProvider);
+      return err(mapDaemonError(result.error));
+    }
+
+    // Clean up stored verifier after successful exchange
+    this.oauthVerifiers.delete(normalizedProvider);
+    logger.connect.info("OAuth exchange successful, cleared verifier", { provider: normalizedProvider });
+
+    const payload = normalizePayload(result.value);
+    return ok({
+      providerId: pickProviderId(payload, normalizedProvider),
+      providerName: pickProviderName(payload, normalizedProvider),
+      mode: "byok",
+      models: pickModels(payload),
+      configuredAt: pickConfiguredAt(payload),
     });
   }
 

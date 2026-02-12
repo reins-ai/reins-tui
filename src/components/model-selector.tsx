@@ -1,24 +1,23 @@
 import { useThemeTokens } from "../theme";
 import { Box, Text } from "../ui";
 
-export const AVAILABLE_MODELS = ["default", "claude-3.5-sonnet", "gpt-4o", "gemini-pro"] as const;
-
-export type AvailableModel = (typeof AVAILABLE_MODELS)[number];
-
-export function getNextModel(currentModel: string): AvailableModel {
-  const currentIndex = AVAILABLE_MODELS.indexOf(currentModel as AvailableModel);
+export function getNextModel(currentModel: string, availableModels: readonly string[]): string {
+  if (availableModels.length === 0) return currentModel;
+  const currentIndex = availableModels.indexOf(currentModel);
   const safeIndex = currentIndex >= 0 ? currentIndex : 0;
-  const nextIndex = (safeIndex + 1) % AVAILABLE_MODELS.length;
-  return AVAILABLE_MODELS[nextIndex];
+  const nextIndex = (safeIndex + 1) % availableModels.length;
+  return availableModels[nextIndex];
 }
 
 export interface ModelSelectorProps {
   currentModel: string;
+  availableModels: readonly string[];
   onCycleModel(): void;
 }
 
-export function ModelSelector({ currentModel, onCycleModel: _onCycleModel }: ModelSelectorProps) {
+export function ModelSelector({ currentModel, availableModels, onCycleModel: _onCycleModel }: ModelSelectorProps) {
   const { tokens } = useThemeTokens();
+  const hasModels = availableModels.length > 0;
 
   return (
     <Box
@@ -31,8 +30,14 @@ export function ModelSelector({ currentModel, onCycleModel: _onCycleModel }: Mod
       }}
     >
       <Text content="Model" style={{ color: tokens["text.secondary"] }} />
-      <Text content={currentModel} style={{ color: tokens["text.primary"] }} />
-      <Text content="Press M to cycle" style={{ color: tokens["text.muted"] }} />
+      <Text
+        content={hasModels ? currentModel : "No models available"}
+        style={{ color: hasModels ? tokens["text.primary"] : tokens["text.muted"] }}
+      />
+      <Text
+        content={hasModels ? "Press M to cycle" : "/connect to add provider"}
+        style={{ color: tokens["text.muted"] }}
+      />
     </Box>
   );
 }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 
 import { CommandPalette, type CommandPaletteDataSources, ErrorBoundary, getNextModel, HelpScreen, Layout } from "./components";
 import { ConnectFlow, type ConnectResult } from "./components/connect-flow";
+import { DEFAULT_DAEMON_HTTP_BASE_URL } from "./daemon/client";
 import { DaemonProvider, useDaemon } from "./daemon/daemon-context";
 import type { DaemonMessage, DaemonResult, ConversationSummary as DaemonConversationSummary } from "./daemon/contracts";
 import { ConnectService } from "./providers/connect-service";
@@ -329,6 +330,34 @@ function AppView({ version, dimensions }: AppViewProps) {
     };
   }, [daemonClient, dispatch, state.activeConversationId]);
 
+  const fetchModels = useCallback(async () => {
+    try {
+      const response = await fetch(`${DEFAULT_DAEMON_HTTP_BASE_URL}/api/models`);
+      if (!response.ok) return;
+      const data = await response.json() as { models?: { id: string; name: string; provider: string }[] };
+      const modelIds = (data.models ?? []).map((m) => m.id);
+      if (modelIds.length > 0) {
+        dispatch({ type: "SET_AVAILABLE_MODELS", payload: modelIds });
+      }
+    } catch {
+      // Daemon may not be available yet
+    }
+  }, [dispatch]);
+
+  // Fetch models on startup
+  useEffect(() => {
+    void fetchModels();
+  }, [fetchModels]);
+
+  // Auto-select first model when available models change
+  useEffect(() => {
+    if (state.availableModels.length === 0) return;
+    const isCurrentValid = state.availableModels.includes(state.currentModel);
+    if (!isCurrentValid || state.currentModel === "default") {
+      dispatch({ type: "SET_MODEL", payload: state.availableModels[0] });
+    }
+  }, [state.availableModels, state.currentModel, dispatch]);
+
   const closeHelp = useCallback(() => {
     setShowHelp(false);
     dispatch({ type: "SET_STATUS", payload: "Ready" });
@@ -404,7 +433,7 @@ function AppView({ version, dimensions }: AppViewProps) {
 
   const connectService = useMemo(() => new ConnectService({ daemonClient }), [daemonClient]);
 
-  const handleConnectComplete = useCallback((result: ConnectResult) => {
+  const handleConnectComplete = useCallback(async (result: ConnectResult) => {
     dispatch({ type: "SET_CONNECT_FLOW_OPEN", payload: false });
     if (result.success && result.connection) {
       dispatch({
@@ -412,11 +441,14 @@ function AppView({ version, dimensions }: AppViewProps) {
         payload: {
           id: crypto.randomUUID(),
           role: "assistant",
-          content: `✦ ${result.connection.providerName} connected. Models: ${result.connection.models.join(", ") || "Available"}`,
+          content: `✦ ${result.connection.providerName} connected.`,
           createdAt: new Date(),
         },
       });
       dispatch({ type: "SET_STATUS", payload: `Connected to ${result.connection.providerName}` });
+
+      // Fetch models from daemon now that a provider is connected
+      await fetchModels();
     } else if (result.error) {
       dispatch({
         type: "ADD_MESSAGE",
@@ -429,7 +461,7 @@ function AppView({ version, dimensions }: AppViewProps) {
       });
       dispatch({ type: "SET_STATUS", payload: "Connection failed" });
     }
-  }, [dispatch]);
+  }, [dispatch, fetchModels]);
 
   const handleConnectCancel = useCallback(() => {
     dispatch({ type: "SET_CONNECT_FLOW_OPEN", payload: false });
@@ -481,7 +513,7 @@ function AppView({ version, dimensions }: AppViewProps) {
         dispatch({ type: "SET_STATUS", payload: "Cleared messages" });
         break;
       case "model": {
-        const nextModel = getNextModel(state.currentModel);
+        const nextModel = getNextModel(state.currentModel, state.availableModels);
         dispatch({ type: "SET_MODEL", payload: nextModel });
         dispatch({ type: "SET_STATUS", payload: `Model set to ${nextModel}` });
         break;
