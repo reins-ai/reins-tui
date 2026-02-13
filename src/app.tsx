@@ -11,6 +11,7 @@ import { mapConversationHistory } from "./daemon/ws-transport";
 import { ConnectService } from "./providers/connect-service";
 import { GreetingService, type StartupContent } from "./personalization/greeting-service";
 import { createConversationStore, type ConversationStoreState } from "./state/conversation-store";
+import type { StreamToolCall, TurnContentBlock } from "./state/streaming-state";
 import { loadModelPreferences, saveModelPreferences } from "./state/model-persistence";
 import { loadPinPreferences, savePinPreferences } from "./state/pin-persistence";
 import { toPinPreferences, applyPinPreferences, DEFAULT_PANEL_STATE } from "./state/layout-mode";
@@ -18,7 +19,7 @@ import { useConversations, useFocus } from "./hooks";
 import type { PaletteAction } from "./palette/fuzzy-index";
 import type { ConversationLifecycleStatus } from "./state/status-machine";
 import { AppContext, DEFAULT_STATE, appReducer, useApp, createHydrationState, historyPayloadNormalizer } from "./store";
-import type { DisplayMessage, DisplayToolCall } from "./store";
+import type { DisplayContentBlock, DisplayMessage, DisplayToolCall } from "./store";
 import { ThemeProvider, useThemeTokens } from "./theme";
 import { type KeyEvent, type TerminalDimensions, useKeyboard, useRenderer, useTerminalDimensions } from "./ui";
 
@@ -78,52 +79,85 @@ function toDisplayToolCallStatus(status: "running" | "complete" | "error"): Disp
   }
 }
 
-function toDisplayMessages(snapshot: ConversationStoreState): DisplayMessage[] {
-  const activeToolCalls =
-    snapshot.streaming.status === "thinking"
-      ? snapshot.streaming.toolCalls
-      : snapshot.streaming.status === "streaming"
-        ? snapshot.streaming.toolCalls
-        : snapshot.streaming.status === "complete"
-          ? snapshot.streaming.toolCalls
-          : snapshot.streaming.status === "error"
-            ? snapshot.streaming.toolCalls
-            : [];
+interface ToolTurnCacheEntry {
+  toolCalls: DisplayToolCall[];
+  contentBlocks: DisplayContentBlock[];
+}
 
-  const assistantMessageId =
-    snapshot.streaming.status === "thinking"
-      ? snapshot.streaming.assistantMessageId
-      : snapshot.streaming.status === "streaming"
-        ? snapshot.streaming.assistantMessageId
-        : snapshot.streaming.status === "complete"
-          ? snapshot.streaming.assistantMessageId
-          : snapshot.streaming.status === "error"
-            ? snapshot.streaming.assistantMessageId
-            : null;
+function toDisplayToolCalls(toolCalls: readonly StreamToolCall[]): DisplayToolCall[] {
+  return toolCalls.map((toolCall) => ({
+    id: toolCall.id,
+    name: toolCall.name,
+    status: toDisplayToolCallStatus(toolCall.status),
+    args: toolCall.args,
+    result: toolCall.error ?? toolCall.result,
+    isError: toolCall.status === "error",
+  }));
+}
+
+function toDisplayContentBlocks(contentBlocks: readonly TurnContentBlock[]): DisplayContentBlock[] {
+  return contentBlocks.map((block) => ({
+    type: block.type,
+    toolCallId: block.toolCallId,
+    text: block.text,
+  }));
+}
+
+function resolveActiveToolTurn(streaming: ConversationStoreState["streaming"]): {
+  assistantMessageId: string | null;
+  toolCalls: readonly StreamToolCall[];
+  contentBlocks: readonly TurnContentBlock[];
+} {
+  if (
+    streaming.status === "thinking"
+    || streaming.status === "streaming"
+    || streaming.status === "complete"
+    || streaming.status === "error"
+  ) {
+    return {
+      assistantMessageId: streaming.assistantMessageId,
+      toolCalls: streaming.toolCalls,
+      contentBlocks: streaming.turnState.contentBlocks,
+    };
+  }
+
+  return {
+    assistantMessageId: null,
+    toolCalls: [],
+    contentBlocks: [],
+  };
+}
+
+function toDisplayMessages(
+  snapshot: ConversationStoreState,
+  toolTurnCache: ReadonlyMap<string, ToolTurnCacheEntry> = new Map(),
+): DisplayMessage[] {
+  const activeToolTurn = resolveActiveToolTurn(snapshot.streaming);
+  const activeToolCalls = toDisplayToolCalls(activeToolTurn.toolCalls);
+  const activeContentBlocks = toDisplayContentBlocks(activeToolTurn.contentBlocks);
 
   return snapshot.messages.map((message: DaemonMessage) => {
     const isStreamingMessage =
-      assistantMessageId !== null
-      && message.id === assistantMessageId
+      activeToolTurn.assistantMessageId !== null
+      && message.id === activeToolTurn.assistantMessageId
       && (snapshot.streaming.status === "thinking" || snapshot.streaming.status === "streaming");
-
-    const toolCalls =
-      assistantMessageId !== null && message.id === assistantMessageId && activeToolCalls.length > 0
-        ? activeToolCalls.map((toolCall) => ({
-            id: toolCall.id,
-            name: toolCall.name,
-            status: toDisplayToolCallStatus(toolCall.status),
-            args: toolCall.args,
-            result: toolCall.error ?? toolCall.result,
-            isError: toolCall.status === "error",
-          }))
-        : undefined;
+    const cachedToolTurn = toolTurnCache.get(message.id);
+    const isActiveToolTurnMessage =
+      activeToolTurn.assistantMessageId !== null
+      && message.id === activeToolTurn.assistantMessageId;
+    const toolCalls = isActiveToolTurnMessage && activeToolCalls.length > 0
+      ? activeToolCalls
+      : cachedToolTurn?.toolCalls;
+    const contentBlocks = isActiveToolTurnMessage && activeContentBlocks.length > 0
+      ? activeContentBlocks
+      : cachedToolTurn?.contentBlocks;
 
     return {
       id: message.id,
       role: message.role,
       content: message.content,
       toolCalls,
+      contentBlocks,
       isStreaming: isStreamingMessage,
       createdAt: parseIsoDate(message.createdAt),
     };
@@ -238,6 +272,13 @@ function AppView({ version, dimensions }: AppViewProps) {
   const isExitingRef = useRef(false);
   const activeConversationIdRef = useRef<string | null>(state.activeConversationId);
   const conversationStoreRef = useRef(createConversationStore({ daemonClient }));
+  const conversationStreamIdRef = useRef<string | null>(null);
+  const toolTurnCacheRef = useRef<Map<string, ToolTurnCacheEntry>>(new Map());
+  const pendingMessageSnapshotRef = useRef<ConversationStoreState | null>(null);
+  const messageFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastLifecycleStatusRef = useRef<ConversationLifecycleStatus | null>(null);
+  const lastStreamingFlagRef = useRef<boolean | null>(null);
+  const lastStatusTextRef = useRef<string | null>(null);
 
   const [providerGroups, setProviderGroups] = useState<ProviderModelGroup[]>([]);
 
@@ -288,20 +329,83 @@ function AppView({ version, dimensions }: AppViewProps) {
 
   useEffect(() => {
     conversationStoreRef.current = createConversationStore({ daemonClient });
+    pendingMessageSnapshotRef.current = null;
+    lastLifecycleStatusRef.current = null;
+    lastStreamingFlagRef.current = null;
+    lastStatusTextRef.current = null;
+
+    const clearMessageFlushTimer = () => {
+      if (messageFlushTimerRef.current !== null) {
+        clearTimeout(messageFlushTimerRef.current);
+        messageFlushTimerRef.current = null;
+      }
+    };
+
+    const flushPendingMessages = () => {
+      const snapshot = pendingMessageSnapshotRef.current;
+      if (!snapshot) {
+        return;
+      }
+
+      pendingMessageSnapshotRef.current = null;
+      dispatch({ type: "SET_MESSAGES", payload: toDisplayMessages(snapshot, toolTurnCacheRef.current) });
+    };
+
     const unsubscribe = conversationStoreRef.current.subscribe((snapshot) => {
-      dispatch({ type: "SET_MESSAGES", payload: toDisplayMessages(snapshot) });
-      dispatch({
-        type: "SET_STREAMING_LIFECYCLE_STATUS",
-        payload: snapshot.streaming.lifecycle.status,
-      });
-      dispatch({
-        type: "SET_STREAMING",
-        payload:
-          snapshot.streaming.lifecycle.status === "sending"
-          || snapshot.streaming.lifecycle.status === "thinking"
-          || snapshot.streaming.lifecycle.status === "streaming",
-      });
-      dispatch({ type: "SET_STATUS", payload: getStatusTextForLifecycle(snapshot.streaming.lifecycle.status) });
+      if (snapshot.conversationId !== conversationStreamIdRef.current) {
+        conversationStreamIdRef.current = snapshot.conversationId;
+        toolTurnCacheRef.current.clear();
+      }
+
+      const activeToolTurn = resolveActiveToolTurn(snapshot.streaming);
+      if (activeToolTurn.assistantMessageId !== null && activeToolTurn.toolCalls.length > 0) {
+        toolTurnCacheRef.current.set(activeToolTurn.assistantMessageId, {
+          toolCalls: toDisplayToolCalls(activeToolTurn.toolCalls),
+          contentBlocks: toDisplayContentBlocks(activeToolTurn.contentBlocks),
+        });
+      }
+
+      const lifecycleStatus = snapshot.streaming.lifecycle.status;
+      const isStreamingLifecycle =
+        lifecycleStatus === "sending"
+        || lifecycleStatus === "thinking"
+        || lifecycleStatus === "streaming";
+      const statusText = getStatusTextForLifecycle(lifecycleStatus);
+
+      pendingMessageSnapshotRef.current = snapshot;
+
+      if (isStreamingLifecycle) {
+        if (messageFlushTimerRef.current === null) {
+          messageFlushTimerRef.current = setTimeout(() => {
+            messageFlushTimerRef.current = null;
+            flushPendingMessages();
+          }, 16);
+        }
+      } else {
+        clearMessageFlushTimer();
+        flushPendingMessages();
+      }
+
+      if (lastLifecycleStatusRef.current !== lifecycleStatus) {
+        lastLifecycleStatusRef.current = lifecycleStatus;
+        dispatch({
+          type: "SET_STREAMING_LIFECYCLE_STATUS",
+          payload: lifecycleStatus,
+        });
+      }
+
+      if (lastStreamingFlagRef.current !== isStreamingLifecycle) {
+        lastStreamingFlagRef.current = isStreamingLifecycle;
+        dispatch({
+          type: "SET_STREAMING",
+          payload: isStreamingLifecycle,
+        });
+      }
+
+      if (lastStatusTextRef.current !== statusText) {
+        lastStatusTextRef.current = statusText;
+        dispatch({ type: "SET_STATUS", payload: statusText });
+      }
 
       if (snapshot.conversationId && snapshot.conversationId !== activeConversationIdRef.current) {
         dispatch({ type: "SET_ACTIVE_CONVERSATION", payload: snapshot.conversationId });
@@ -310,6 +414,8 @@ function AppView({ version, dimensions }: AppViewProps) {
 
     return () => {
       unsubscribe();
+      clearMessageFlushTimer();
+      pendingMessageSnapshotRef.current = null;
     };
   }, [daemonClient, dispatch]);
 
@@ -543,7 +649,7 @@ function AppView({ version, dimensions }: AppViewProps) {
         payload: {
           id: crypto.randomUUID(),
           role: "assistant",
-          content: `✧ ${sendResult.error.message}`,
+          content: `[error] ${sendResult.error.message}`,
           createdAt: new Date(),
         },
       });
@@ -571,7 +677,7 @@ function AppView({ version, dimensions }: AppViewProps) {
         payload: {
           id: crypto.randomUUID(),
           role: "assistant",
-          content: `✦ ${result.connection.providerName} connected.`,
+          content: `[ok] ${result.connection.providerName} connected.`,
           createdAt: new Date(),
         },
       });
@@ -585,7 +691,7 @@ function AppView({ version, dimensions }: AppViewProps) {
         payload: {
           id: crypto.randomUUID(),
           role: "assistant",
-          content: `✧ Connection failed: ${result.error.message}`,
+          content: `[error] Connection failed: ${result.error.message}`,
           createdAt: new Date(),
         },
       });
