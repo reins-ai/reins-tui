@@ -13,7 +13,7 @@ import {
   type BreakpointState,
 } from "../layout/breakpoints";
 import { ChatScreen } from "../screens/chat-screen";
-import { SidebarContent } from "./sidebar";
+import { SidebarContent, SIDEBAR_CONTEXT_WIDTH } from "./sidebar";
 import { StatusBar } from "./status-bar";
 import { DrawerPanel } from "./drawer-panel";
 import { ModalPanel } from "./modal-panel";
@@ -124,7 +124,7 @@ function useBreakpointConstraints(columns: number): BreakpointState {
   return breakpointState;
 }
 
-const DRAWER_WIDTH = 32;
+const DRAWER_WIDTH = SIDEBAR_CONTEXT_WIDTH;
 const TODAY_PANEL_WIDTH = 34;
 
 export function Layout({ version, dimensions, showHelp, connectionStatus, daemonMode, onSubmitMessage }: LayoutProps) {
@@ -165,16 +165,17 @@ export function Layout({ version, dimensions, showHelp, connectionStatus, daemon
         />
       </ZoneShell>
 
-      {/* Summoned left drawer with sidebar content */}
+      {/* Summoned left drawer with contextual info panel */}
       <DrawerPanel
         side="left"
         width={DRAWER_WIDTH}
         visible={state.panels.drawer.visible}
-        title={state.panels.drawer.pinned ? "Conversations 📌" : "Conversations"}
+        title={state.panels.drawer.pinned ? "Context 📌" : "Context"}
         onClose={dismissDrawer}
       >
         <SidebarContent
           isFocused={state.panels.drawer.visible && state.focusedPanel === "sidebar"}
+          connectionStatus={connectionStatus}
         />
       </DrawerPanel>
 

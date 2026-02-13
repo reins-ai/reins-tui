@@ -19,6 +19,19 @@ import {
   MAX_INPUT_LENGTH,
   type InputSubmissionKind,
 } from "../../src/components/input-area";
+import {
+  SIDEBAR_CONTEXT_WIDTH,
+  resolveConnectionHealth,
+  getContextConnectionGlyph,
+  getContextConnectionLabel,
+  getContextConnectionColor,
+  buildModelSection,
+  buildConnectionSection,
+  buildConversationSection,
+  buildSessionSection,
+  truncateContextValue,
+  type ConnectionHealth,
+} from "../../src/components/sidebar";
 
 // ---------------------------------------------------------------------------
 // Mock tokens for testing
@@ -188,5 +201,246 @@ describe("InputArea exports", () => {
   test("InputSubmissionKind type covers all cases", () => {
     const kinds: InputSubmissionKind[] = ["empty", "command", "message"];
     expect(kinds.length).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sidebar context panel utilities
+// ---------------------------------------------------------------------------
+
+describe("Sidebar context panel", () => {
+  test("SIDEBAR_CONTEXT_WIDTH is 40 chars", () => {
+    expect(SIDEBAR_CONTEXT_WIDTH).toBe(40);
+  });
+
+  describe("resolveConnectionHealth", () => {
+    test("maps connected status to connected health", () => {
+      expect(resolveConnectionHealth("connected")).toBe("connected");
+    });
+
+    test("maps connecting status to degraded health", () => {
+      expect(resolveConnectionHealth("connecting")).toBe("degraded");
+    });
+
+    test("maps reconnecting status to degraded health", () => {
+      expect(resolveConnectionHealth("reconnecting")).toBe("degraded");
+    });
+
+    test("maps disconnected status to offline health", () => {
+      expect(resolveConnectionHealth("disconnected")).toBe("offline");
+    });
+  });
+
+  describe("getContextConnectionGlyph", () => {
+    test("returns filled circle for connected", () => {
+      expect(getContextConnectionGlyph("connected")).toBe("●");
+    });
+
+    test("returns half circle for degraded", () => {
+      expect(getContextConnectionGlyph("degraded")).toBe("◐");
+    });
+
+    test("returns empty circle for offline", () => {
+      expect(getContextConnectionGlyph("offline")).toBe("○");
+    });
+  });
+
+  describe("getContextConnectionLabel", () => {
+    test("returns Connected for connected health", () => {
+      expect(getContextConnectionLabel("connected")).toBe("Connected");
+    });
+
+    test("returns Connecting… for degraded health", () => {
+      expect(getContextConnectionLabel("degraded")).toBe("Connecting…");
+    });
+
+    test("returns Offline for offline health", () => {
+      expect(getContextConnectionLabel("offline")).toBe("Offline");
+    });
+  });
+
+  describe("getContextConnectionColor", () => {
+    test("returns success for connected", () => {
+      expect(getContextConnectionColor("connected")).toBe("success");
+    });
+
+    test("returns warning for degraded", () => {
+      expect(getContextConnectionColor("degraded")).toBe("warning");
+    });
+
+    test("returns error for offline", () => {
+      expect(getContextConnectionColor("offline")).toBe("error");
+    });
+  });
+
+  describe("truncateContextValue", () => {
+    test("returns short values unchanged", () => {
+      expect(truncateContextValue("hello", 10)).toBe("hello");
+    });
+
+    test("truncates long values with ellipsis", () => {
+      const result = truncateContextValue("a very long model name here", 10);
+      expect(result.length).toBe(10);
+      expect(result.endsWith("…")).toBe(true);
+    });
+
+    test("returns exact-length values unchanged", () => {
+      expect(truncateContextValue("12345", 5)).toBe("12345");
+    });
+  });
+
+  describe("buildModelSection", () => {
+    test("includes model display name when models available", () => {
+      const section = buildModelSection("anthropic/claude-3.5-sonnet", "anthropic", ["anthropic/claude-3.5-sonnet"]);
+      expect(section.label).toBe("Model");
+      expect(section.glyph).toBe("◆");
+      const modelItem = section.items.find((i) => i.key === "Model");
+      expect(modelItem).toBeDefined();
+      expect(modelItem!.value).toBe("claude-3.5-sonnet");
+      expect(modelItem!.color).toBe("primary");
+    });
+
+    test("shows No models when no models available", () => {
+      const section = buildModelSection("default", "", []);
+      const modelItem = section.items.find((i) => i.key === "Model");
+      expect(modelItem!.value).toBe("No models");
+      expect(modelItem!.color).toBe("muted");
+    });
+
+    test("includes provider when set", () => {
+      const section = buildModelSection("claude-3.5-sonnet", "anthropic", ["claude-3.5-sonnet"]);
+      const providerItem = section.items.find((i) => i.key === "Provider");
+      expect(providerItem).toBeDefined();
+      expect(providerItem!.value).toBe("anthropic");
+    });
+
+    test("omits provider when empty", () => {
+      const section = buildModelSection("default", "", []);
+      const providerItem = section.items.find((i) => i.key === "Provider");
+      expect(providerItem).toBeUndefined();
+    });
+
+    test("includes available model count", () => {
+      const section = buildModelSection("m1", "p", ["m1", "m2", "m3"]);
+      const availItem = section.items.find((i) => i.key === "Available");
+      expect(availItem!.value).toBe("3 models");
+    });
+
+    test("uses singular for single model", () => {
+      const section = buildModelSection("m1", "p", ["m1"]);
+      const availItem = section.items.find((i) => i.key === "Available");
+      expect(availItem!.value).toBe("1 model");
+    });
+  });
+
+  describe("buildConnectionSection", () => {
+    test("shows connected state correctly", () => {
+      const section = buildConnectionSection("connected");
+      expect(section.label).toBe("Connection");
+      expect(section.glyph).toBe("●");
+      expect(section.items[0].value).toBe("Connected");
+      expect(section.items[0].color).toBe("success");
+    });
+
+    test("shows connecting state as degraded", () => {
+      const section = buildConnectionSection("connecting");
+      expect(section.glyph).toBe("◐");
+      expect(section.items[0].value).toBe("Connecting…");
+      expect(section.items[0].color).toBe("warning");
+    });
+
+    test("shows disconnected state as offline", () => {
+      const section = buildConnectionSection("disconnected");
+      expect(section.glyph).toBe("○");
+      expect(section.items[0].value).toBe("Offline");
+      expect(section.items[0].color).toBe("error");
+    });
+  });
+
+  describe("buildConversationSection", () => {
+    test("shows conversation count", () => {
+      const section = buildConversationSection(5, null, null);
+      expect(section.label).toBe("Conversations");
+      expect(section.glyph).toBe("◇");
+      const totalItem = section.items.find((i) => i.key === "Total");
+      expect(totalItem!.value).toBe("5 conversations");
+    });
+
+    test("uses singular for single conversation", () => {
+      const section = buildConversationSection(1, null, null);
+      const totalItem = section.items.find((i) => i.key === "Total");
+      expect(totalItem!.value).toBe("1 conversation");
+    });
+
+    test("includes active conversation title when present", () => {
+      const section = buildConversationSection(3, "My Chat", null);
+      const activeItem = section.items.find((i) => i.key === "Active");
+      expect(activeItem).toBeDefined();
+      expect(activeItem!.value).toBe("My Chat");
+      expect(activeItem!.color).toBe("primary");
+    });
+
+    test("omits active when no active conversation", () => {
+      const section = buildConversationSection(3, null, null);
+      const activeItem = section.items.find((i) => i.key === "Active");
+      expect(activeItem).toBeUndefined();
+    });
+
+    test("truncates long active conversation titles", () => {
+      const longTitle = "A".repeat(30);
+      const section = buildConversationSection(1, longTitle, null);
+      const activeItem = section.items.find((i) => i.key === "Active");
+      expect(activeItem!.value.length).toBe(24);
+      expect(activeItem!.value.endsWith("…")).toBe(true);
+    });
+  });
+
+  describe("buildSessionSection", () => {
+    test("shows Ready for idle status", () => {
+      const section = buildSessionSection("idle", 0);
+      expect(section.label).toBe("Session");
+      expect(section.glyph).toBe("⚡");
+      const statusItem = section.items.find((i) => i.key === "Status");
+      expect(statusItem!.value).toBe("Ready");
+      expect(statusItem!.color).toBe("muted");
+    });
+
+    test("shows Streaming with warning color", () => {
+      const section = buildSessionSection("streaming", 5);
+      const statusItem = section.items.find((i) => i.key === "Status");
+      expect(statusItem!.value).toBe("Streaming");
+      expect(statusItem!.color).toBe("warning");
+    });
+
+    test("shows Error with error color", () => {
+      const section = buildSessionSection("error", 3);
+      const statusItem = section.items.find((i) => i.key === "Status");
+      expect(statusItem!.value).toBe("Error");
+      expect(statusItem!.color).toBe("error");
+    });
+
+    test("includes message count", () => {
+      const section = buildSessionSection("idle", 12);
+      const msgItem = section.items.find((i) => i.key === "Messages");
+      expect(msgItem!.value).toBe("12 in thread");
+    });
+
+    test("capitalizes lifecycle status", () => {
+      const section = buildSessionSection("thinking", 1);
+      const statusItem = section.items.find((i) => i.key === "Status");
+      expect(statusItem!.value).toBe("Thinking");
+      expect(statusItem!.color).toBe("warning");
+    });
+  });
+
+  describe("ConnectionHealth type coverage", () => {
+    test("all health states have glyphs, labels, and colors", () => {
+      const states: ConnectionHealth[] = ["connected", "degraded", "offline"];
+      for (const health of states) {
+        expect(getContextConnectionGlyph(health).length).toBeGreaterThan(0);
+        expect(getContextConnectionLabel(health).length).toBeGreaterThan(0);
+        expect(getContextConnectionColor(health)).toBeDefined();
+      }
+    });
   });
 });
