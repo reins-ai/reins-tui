@@ -494,6 +494,193 @@ describe("connection glyph and label", () => {
   });
 });
 
+// --- Tool execution lifecycle display tests ---
+
+describe("tool execution lifecycle display", () => {
+  test("streaming without active tool shows normal streaming indicator", () => {
+    const display = resolveLifecycleDisplay("streaming", 42, null, null);
+    expect(display.glyph).toBe("▶");
+    expect(display.label).toBe("Streaming [42 tokens]");
+    expect(display.colorToken).toBe("status.info");
+  });
+
+  test("streaming without active tool and undefined shows normal streaming indicator", () => {
+    const display = resolveLifecycleDisplay("streaming", 10, null, undefined);
+    expect(display.glyph).toBe("▶");
+    expect(display.label).toBe("Streaming [10 tokens]");
+    expect(display.colorToken).toBe("status.info");
+  });
+
+  test("streaming with active tool shows Using tool indicator", () => {
+    const display = resolveLifecycleDisplay("streaming", 0, null, "bash");
+    expect(display.glyph).toBe("⚙");
+    expect(display.label).toBe("Using tool: bash");
+    expect(display.colorToken).toBe("status.warning");
+  });
+
+  test("streaming with read tool shows correct tool name", () => {
+    const display = resolveLifecycleDisplay("streaming", 0, null, "read");
+    expect(display.label).toBe("Using tool: read");
+  });
+
+  test("streaming with glob tool shows correct tool name", () => {
+    const display = resolveLifecycleDisplay("streaming", 0, null, "glob");
+    expect(display.label).toBe("Using tool: glob");
+  });
+
+  test("streaming with grep tool shows correct tool name", () => {
+    const display = resolveLifecycleDisplay("streaming", 0, null, "grep");
+    expect(display.label).toBe("Using tool: grep");
+  });
+
+  test("streaming with write tool shows correct tool name", () => {
+    const display = resolveLifecycleDisplay("streaming", 0, null, "write");
+    expect(display.label).toBe("Using tool: write");
+  });
+
+  test("streaming with edit tool shows correct tool name", () => {
+    const display = resolveLifecycleDisplay("streaming", 0, null, "edit");
+    expect(display.label).toBe("Using tool: edit");
+  });
+
+  test("streaming with ls tool shows correct tool name", () => {
+    const display = resolveLifecycleDisplay("streaming", 0, null, "ls");
+    expect(display.label).toBe("Using tool: ls");
+  });
+
+  test("idle with active tool name still shows Ready (tool name ignored)", () => {
+    const display = resolveLifecycleDisplay("idle", 0, null, "bash");
+    expect(display.glyph).toBe("●");
+    expect(display.label).toBe("Ready");
+    expect(display.colorToken).toBe("status.success");
+  });
+
+  test("complete with active tool name still shows Done (tool name ignored)", () => {
+    const display = resolveLifecycleDisplay("complete", 0, null, "bash");
+    expect(display.glyph).toBe("✓");
+    expect(display.label).toBe("Done");
+  });
+
+  test("error with active tool name still shows Error (tool name ignored)", () => {
+    const display = resolveLifecycleDisplay("error", 0, null, "bash");
+    expect(display.glyph).toBe("✗");
+    expect(display.label).toBe("Error");
+  });
+
+  test("tool display uses warning color token for visibility", () => {
+    const display = resolveLifecycleDisplay("streaming", 0, null, "bash");
+    expect(display.colorToken).toBe("status.warning");
+  });
+
+  test("tool display uses gear glyph distinct from streaming arrow", () => {
+    const toolDisplay = resolveLifecycleDisplay("streaming", 0, null, "bash");
+    const streamDisplay = resolveLifecycleDisplay("streaming", 0, null, null);
+    expect(toolDisplay.glyph).not.toBe(streamDisplay.glyph);
+    expect(toolDisplay.glyph).toBe("⚙");
+    expect(streamDisplay.glyph).toBe("▶");
+  });
+
+  test("empty string tool name is treated as no active tool", () => {
+    const display = resolveLifecycleDisplay("streaming", 42, null, "");
+    expect(display.glyph).toBe("▶");
+    expect(display.label).toBe("Streaming [42 tokens]");
+  });
+});
+
+describe("tool execution lifecycle in segments", () => {
+  test("tool active during streaming appears in lifecycle segment", () => {
+    const display = resolveLifecycleDisplay("streaming", 0, null, "bash");
+    const segments = buildSegments("connected", "claude-3.5-sonnet", display, false);
+    expect(segments.lifecycle).toContain("Using tool: bash");
+    expect(segments.lifecycle).toContain("⚙");
+  });
+
+  test("tool active with compaction shows both indicators", () => {
+    const display = resolveLifecycleDisplay("streaming", 0, null, "read");
+    const segments = buildSegments("connected", "claude-3.5-sonnet", display, true);
+    expect(segments.lifecycle).toContain("Using tool: read");
+    expect(segments.lifecycle).toContain("⚡ Compacted");
+  });
+
+  test("no tool active during streaming shows normal streaming in segments", () => {
+    const display = resolveLifecycleDisplay("streaming", 25, null, null);
+    const segments = buildSegments("connected", "claude-3.5-sonnet", display, false);
+    expect(segments.lifecycle).toContain("Streaming [25 tokens]");
+    expect(segments.lifecycle).not.toContain("Using tool");
+  });
+
+  test("tool name cleared after completion shows Ready in segments", () => {
+    const display = resolveLifecycleDisplay("idle", 0, null, null);
+    const segments = buildSegments("connected", "claude-3.5-sonnet", display, false);
+    expect(segments.lifecycle).toBe("● Ready");
+    expect(segments.lifecycle).not.toContain("Using tool");
+  });
+});
+
+describe("tool execution state transitions", () => {
+  test("single tool lifecycle: Ready → Using tool → Ready", () => {
+    // Phase 1: Idle (Ready)
+    const idle = resolveLifecycleDisplay("idle", 0, null, null);
+    expect(idle.label).toBe("Ready");
+
+    // Phase 2: Streaming with tool active
+    const toolActive = resolveLifecycleDisplay("streaming", 0, null, "bash");
+    expect(toolActive.label).toBe("Using tool: bash");
+
+    // Phase 3: Complete (Done)
+    const complete = resolveLifecycleDisplay("complete", 0, null, null);
+    expect(complete.label).toBe("Done");
+
+    // Phase 4: Back to idle (Ready)
+    const backToIdle = resolveLifecycleDisplay("idle", 0, null, null);
+    expect(backToIdle.label).toBe("Ready");
+  });
+
+  test("multi-tool sequence: tool updates per tool in sequence", () => {
+    // Tool 1: bash
+    const tool1 = resolveLifecycleDisplay("streaming", 0, null, "bash");
+    expect(tool1.label).toBe("Using tool: bash");
+
+    // Tool 2: read (updates to new tool)
+    const tool2 = resolveLifecycleDisplay("streaming", 0, null, "read");
+    expect(tool2.label).toBe("Using tool: read");
+
+    // Tool 3: grep (updates again)
+    const tool3 = resolveLifecycleDisplay("streaming", 0, null, "grep");
+    expect(tool3.label).toBe("Using tool: grep");
+
+    // Completion: clears tool
+    const done = resolveLifecycleDisplay("complete", 0, null, null);
+    expect(done.label).toBe("Done");
+  });
+
+  test("tool cleared on done event returns to Ready after timeout", () => {
+    // During tool execution
+    const during = resolveLifecycleDisplay("streaming", 0, null, "edit");
+    expect(during.label).toBe("Using tool: edit");
+
+    // After done event, lifecycle goes to complete
+    const complete = resolveLifecycleDisplay("complete", 0, "$0.01", null);
+    expect(complete.label).toBe("Done [$0.01]");
+    expect(complete.glyph).toBe("✓");
+
+    // After complete-timeout, lifecycle goes to idle
+    const idle = resolveLifecycleDisplay("idle", 0, null, null);
+    expect(idle.label).toBe("Ready");
+  });
+
+  test("streaming resumes normal display when tool clears mid-stream", () => {
+    // Tool active
+    const withTool = resolveLifecycleDisplay("streaming", 10, null, "bash");
+    expect(withTool.label).toBe("Using tool: bash");
+
+    // Tool clears but still streaming (between tools)
+    const betweenTools = resolveLifecycleDisplay("streaming", 50, null, null);
+    expect(betweenTools.label).toBe("Streaming [50 tokens]");
+    expect(betweenTools.glyph).toBe("▶");
+  });
+});
+
 // --- Theme token exclusivity ---
 
 describe("all status bar colors use theme tokens exclusively", () => {

@@ -9,7 +9,8 @@ import {
   type LayoutMode,
   type LayoutAction,
 } from "../state/layout-mode";
-import type { AppState, DisplayMessage, DisplayToolCall, FocusedPanel } from "./types";
+import type { StreamToolCall, TurnContentBlock } from "../state/streaming-state";
+import type { AppState, DisplayContentBlock, DisplayMessage, DisplayToolCall, FocusedPanel } from "./types";
 import { DEFAULT_STATE } from "./types";
 
 function isFocusedPanel(value: unknown): value is FocusedPanel {
@@ -60,6 +61,7 @@ export type AppAction =
   | { type: "FOCUS_PREV" }
   | { type: "SET_STREAMING"; payload: boolean }
   | { type: "SET_STREAMING_LIFECYCLE_STATUS"; payload: AppState["streamingLifecycleStatus"] }
+  | { type: "SET_ACTIVE_TOOL_NAME"; payload: string | null }
   | { type: "SET_COMMAND_PALETTE_OPEN"; payload: boolean }
   | { type: "SET_CONNECT_FLOW_OPEN"; payload: boolean }
   | { type: "SET_MODEL_SELECTOR_OPEN"; payload: boolean }
@@ -80,9 +82,40 @@ export type AppAction =
       };
     }
   | { type: "FINISH_STREAMING"; payload: { messageId: string } }
+  | {
+      type: "SYNC_TOOL_TURN";
+      payload: {
+        messageId: string;
+        toolCalls: StreamToolCall[];
+        contentBlocks: TurnContentBlock[];
+      };
+    }
   | { type: "CLEAR_MESSAGES" }
   | LayoutModeAction
   | LayoutAction;
+
+function streamToolCallsToDisplay(toolCalls: StreamToolCall[]): DisplayToolCall[] {
+  return [...toolCalls]
+    .sort((a, b) => a.sequenceIndex - b.sequenceIndex)
+    .map((tc) => ({
+      id: tc.id,
+      name: tc.name,
+      status: tc.status === "running" ? "running" as const
+        : tc.status === "error" ? "error" as const
+        : "complete" as const,
+      args: tc.args,
+      result: tc.result,
+      isError: tc.status === "error",
+    }));
+}
+
+function turnBlocksToDisplay(blocks: TurnContentBlock[]): DisplayContentBlock[] {
+  return blocks.map((block) => ({
+    type: block.type,
+    toolCallId: block.toolCallId,
+    text: block.text,
+  }));
+}
 
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
@@ -146,6 +179,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         streamingLifecycleStatus: action.payload,
+      };
+    case "SET_ACTIVE_TOOL_NAME":
+      return {
+        ...state,
+        activeToolName: action.payload,
       };
     case "SET_COMMAND_PALETTE_OPEN":
       return typeof action.payload === "boolean"
@@ -245,6 +283,28 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         messages: nextMessages,
       };
     }
+    case "SYNC_TOOL_TURN": {
+      const { messageId, toolCalls, contentBlocks } = action.payload;
+      const messageIndex = state.messages.findIndex((message) => message.id === messageId);
+
+      if (messageIndex === -1) {
+        return state;
+      }
+
+      const nextMessages = [...state.messages];
+      const currentMessage = nextMessages[messageIndex];
+
+      nextMessages[messageIndex] = {
+        ...currentMessage,
+        toolCalls: streamToolCallsToDisplay(toolCalls),
+        contentBlocks: turnBlocksToDisplay(contentBlocks),
+      };
+
+      return {
+        ...state,
+        messages: nextMessages,
+      };
+    }
     case "FINISH_STREAMING": {
       const { messageId } = action.payload;
       const messageIndex = state.messages.findIndex((message) => message.id === messageId);
@@ -334,6 +394,6 @@ export function useApp(): AppContextValue {
 }
 
 export { DEFAULT_STATE };
-export type { AppState, DisplayMessage, DisplayToolCall, FocusedPanel };
+export type { AppState, DisplayContentBlock, DisplayMessage, DisplayToolCall, FocusedPanel };
 export type { LayoutMode, PanelId, PanelState } from "../state/layout-mode";
 export { getLayoutVisibility, getLayoutModeLabel } from "../state/layout-mode";

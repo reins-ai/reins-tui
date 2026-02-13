@@ -85,6 +85,7 @@ export function resolveLifecycleDisplay(
   status: ConversationLifecycleStatus,
   tokenCount: number,
   cost: string | null,
+  activeToolName?: string | null,
 ): LifecycleDisplay {
   switch (status) {
     case "idle":
@@ -94,6 +95,13 @@ export function resolveLifecycleDisplay(
     case "thinking":
       return { glyph: "◑", label: "Thinking...", colorToken: "status.warning" };
     case "streaming":
+      if (activeToolName) {
+        return {
+          glyph: "⚙",
+          label: `Using tool: ${activeToolName}`,
+          colorToken: "status.warning",
+        };
+      }
       return {
         glyph: "▶",
         label: `Streaming [${tokenCount} tokens]`,
@@ -339,7 +347,7 @@ export function StatusBar({
   }, [compactionProp]);
 
   const lifecycleStatus = state.streamingLifecycleStatus;
-  const lifecycleDisplay = resolveLifecycleDisplay(lifecycleStatus, tokenCount, cost);
+  const lifecycleDisplay = resolveLifecycleDisplay(lifecycleStatus, tokenCount, cost, state.activeToolName);
 
   const segments = buildSegments(
     connectionStatus,

@@ -534,6 +534,171 @@ describe("Status bar streaming lifecycle integration", () => {
 });
 
 // ---------------------------------------------------------------------------
+// 4b. Status bar tool execution lifecycle integration (MH15)
+// ---------------------------------------------------------------------------
+
+describe("Status bar tool execution lifecycle integration", () => {
+  test("SET_ACTIVE_TOOL_NAME sets tool name in store", () => {
+    let state = DEFAULT_STATE;
+    state = appReducer(state, { type: "SET_ACTIVE_TOOL_NAME", payload: "bash" });
+    expect(state.activeToolName).toBe("bash");
+  });
+
+  test("SET_ACTIVE_TOOL_NAME clears tool name with null", () => {
+    let state = DEFAULT_STATE;
+    state = appReducer(state, { type: "SET_ACTIVE_TOOL_NAME", payload: "bash" });
+    expect(state.activeToolName).toBe("bash");
+
+    state = appReducer(state, { type: "SET_ACTIVE_TOOL_NAME", payload: null });
+    expect(state.activeToolName).toBeNull();
+  });
+
+  test("default state has null activeToolName", () => {
+    expect(DEFAULT_STATE.activeToolName).toBeNull();
+  });
+
+  test("single tool lifecycle: store + status bar integration", () => {
+    let state = DEFAULT_STATE;
+
+    // Start streaming
+    state = appReducer(state, { type: "SET_STREAMING_LIFECYCLE_STATUS", payload: "streaming" });
+    state = appReducer(state, { type: "SET_ACTIVE_TOOL_NAME", payload: "bash" });
+
+    // Status bar shows tool
+    const display = resolveLifecycleDisplay(state.streamingLifecycleStatus, 0, null, state.activeToolName);
+    expect(display.label).toBe("Using tool: bash");
+
+    const segments = buildSegments("connected", state.currentModel, display, false);
+    expect(segments.lifecycle).toContain("Using tool: bash");
+  });
+
+  test("multi-tool sequence: store updates per tool", () => {
+    let state = DEFAULT_STATE;
+    state = appReducer(state, { type: "SET_STREAMING_LIFECYCLE_STATUS", payload: "streaming" });
+
+    // Tool 1: bash
+    state = appReducer(state, { type: "SET_ACTIVE_TOOL_NAME", payload: "bash" });
+    let display = resolveLifecycleDisplay(state.streamingLifecycleStatus, 0, null, state.activeToolName);
+    expect(display.label).toBe("Using tool: bash");
+
+    // Tool 2: read
+    state = appReducer(state, { type: "SET_ACTIVE_TOOL_NAME", payload: "read" });
+    display = resolveLifecycleDisplay(state.streamingLifecycleStatus, 0, null, state.activeToolName);
+    expect(display.label).toBe("Using tool: read");
+
+    // Tool 3: grep
+    state = appReducer(state, { type: "SET_ACTIVE_TOOL_NAME", payload: "grep" });
+    display = resolveLifecycleDisplay(state.streamingLifecycleStatus, 0, null, state.activeToolName);
+    expect(display.label).toBe("Using tool: grep");
+  });
+
+  test("tool clears on completion: no stale tool name", () => {
+    let state = DEFAULT_STATE;
+    state = appReducer(state, { type: "SET_STREAMING_LIFECYCLE_STATUS", payload: "streaming" });
+    state = appReducer(state, { type: "SET_ACTIVE_TOOL_NAME", payload: "bash" });
+
+    // Complete
+    state = appReducer(state, { type: "SET_STREAMING_LIFECYCLE_STATUS", payload: "complete" });
+    state = appReducer(state, { type: "SET_ACTIVE_TOOL_NAME", payload: null });
+
+    const display = resolveLifecycleDisplay(state.streamingLifecycleStatus, 0, null, state.activeToolName);
+    expect(display.label).toBe("Done");
+    expect(display.label).not.toContain("bash");
+  });
+
+  test("tool clears on idle: no stale tool name after timeout", () => {
+    let state = DEFAULT_STATE;
+    state = appReducer(state, { type: "SET_STREAMING_LIFECYCLE_STATUS", payload: "streaming" });
+    state = appReducer(state, { type: "SET_ACTIVE_TOOL_NAME", payload: "edit" });
+
+    // Complete → idle
+    state = appReducer(state, { type: "SET_STREAMING_LIFECYCLE_STATUS", payload: "complete" });
+    state = appReducer(state, { type: "SET_ACTIVE_TOOL_NAME", payload: null });
+    state = appReducer(state, { type: "SET_STREAMING_LIFECYCLE_STATUS", payload: "idle" });
+
+    const display = resolveLifecycleDisplay(state.streamingLifecycleStatus, 0, null, state.activeToolName);
+    expect(display.label).toBe("Ready");
+  });
+
+  test("tool active during error shows Error not tool name", () => {
+    let state = DEFAULT_STATE;
+    state = appReducer(state, { type: "SET_STREAMING_LIFECYCLE_STATUS", payload: "streaming" });
+    state = appReducer(state, { type: "SET_ACTIVE_TOOL_NAME", payload: "bash" });
+
+    // Error occurs
+    state = appReducer(state, { type: "SET_STREAMING_LIFECYCLE_STATUS", payload: "error" });
+
+    const display = resolveLifecycleDisplay(state.streamingLifecycleStatus, 0, null, state.activeToolName);
+    expect(display.label).toBe("Error");
+    expect(display.glyph).toBe("✗");
+  });
+
+  test("tool name preserved across unrelated store actions", () => {
+    let state = DEFAULT_STATE;
+    state = appReducer(state, { type: "SET_ACTIVE_TOOL_NAME", payload: "bash" });
+
+    // Unrelated actions
+    state = appReducer(state, { type: "SET_MODEL", payload: "gpt-4o" });
+    state = appReducer(state, { type: "SET_STATUS", payload: "working" });
+
+    expect(state.activeToolName).toBe("bash");
+  });
+
+  test("full end-to-end: idle → streaming+tool → between tools → streaming+tool → complete → idle", () => {
+    let state = DEFAULT_STATE;
+
+    // Phase 1: Idle
+    expect(state.streamingLifecycleStatus).toBe("idle");
+    expect(state.activeToolName).toBeNull();
+    let display = resolveLifecycleDisplay(state.streamingLifecycleStatus, 0, null, state.activeToolName);
+    expect(display.label).toBe("Ready");
+
+    // Phase 2: Streaming starts, first tool
+    state = appReducer(state, { type: "SET_STREAMING_LIFECYCLE_STATUS", payload: "streaming" });
+    state = appReducer(state, { type: "SET_ACTIVE_TOOL_NAME", payload: "bash" });
+    display = resolveLifecycleDisplay(state.streamingLifecycleStatus, 0, null, state.activeToolName);
+    expect(display.label).toBe("Using tool: bash");
+
+    // Phase 3: Between tools (tool completes, next hasn't started)
+    state = appReducer(state, { type: "SET_ACTIVE_TOOL_NAME", payload: null });
+    display = resolveLifecycleDisplay(state.streamingLifecycleStatus, 20, null, state.activeToolName);
+    expect(display.label).toBe("Streaming [20 tokens]");
+
+    // Phase 4: Second tool starts
+    state = appReducer(state, { type: "SET_ACTIVE_TOOL_NAME", payload: "read" });
+    display = resolveLifecycleDisplay(state.streamingLifecycleStatus, 20, null, state.activeToolName);
+    expect(display.label).toBe("Using tool: read");
+
+    // Phase 5: Complete
+    state = appReducer(state, { type: "SET_ACTIVE_TOOL_NAME", payload: null });
+    state = appReducer(state, { type: "SET_STREAMING_LIFECYCLE_STATUS", payload: "complete" });
+    display = resolveLifecycleDisplay(state.streamingLifecycleStatus, 0, "$0.005", state.activeToolName);
+    expect(display.label).toBe("Done [$0.005]");
+
+    // Phase 6: Back to idle
+    state = appReducer(state, { type: "SET_STREAMING_LIFECYCLE_STATUS", payload: "idle" });
+    display = resolveLifecycleDisplay(state.streamingLifecycleStatus, 0, null, state.activeToolName);
+    expect(display.label).toBe("Ready");
+  });
+
+  test("status bar truncation works with tool display", () => {
+    const display = resolveLifecycleDisplay("streaming", 0, null, "bash");
+    const segments = buildSegments("connected", "claude-3.5-sonnet", display, false);
+
+    // Wide terminal shows tool info
+    const wideTruncation = resolveTruncation(segments, 120);
+    const wideText = buildTruncatedLeftText(segments, wideTruncation);
+    expect(wideText).toContain("Using tool: bash");
+
+    // Narrow terminal may drop lifecycle
+    const narrowTruncation = resolveTruncation(segments, 30);
+    const narrowText = buildTruncatedLeftText(segments, narrowTruncation);
+    // Model always visible even when lifecycle drops
+    expect(narrowText).toContain("claude-3.5-sonnet");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 5. Component interaction integration tests (MH6)
 // ---------------------------------------------------------------------------
 

@@ -10,8 +10,15 @@ export interface DisplayToolCall {
   id: string;
   name: string;
   status: "pending" | "running" | "complete" | "error";
+  args?: Record<string, unknown>;
   result?: string;
   isError?: boolean;
+}
+
+export interface DisplayContentBlock {
+  type: "text" | "tool-call";
+  toolCallId?: string;
+  text?: string;
 }
 
 export interface DisplayMessage {
@@ -19,6 +26,7 @@ export interface DisplayMessage {
   role: MessageRole;
   content: string;
   toolCalls?: DisplayToolCall[];
+  contentBlocks?: DisplayContentBlock[];
   isStreaming?: boolean;
   createdAt: Date;
 }
@@ -32,6 +40,7 @@ export interface AppState {
   streamingMessageId: string | null;
   isStreaming: boolean;
   streamingLifecycleStatus: ConversationLifecycleStatus;
+  activeToolName: string | null;
   isCommandPaletteOpen: boolean;
   isConnectFlowOpen: boolean;
   isModelSelectorOpen: boolean;
@@ -53,6 +62,7 @@ export const DEFAULT_STATE: AppState = {
   streamingMessageId: null,
   isStreaming: false,
   streamingLifecycleStatus: "idle",
+  activeToolName: null,
   isCommandPaletteOpen: false,
   isConnectFlowOpen: false,
   isModelSelectorOpen: false,
