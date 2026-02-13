@@ -87,9 +87,8 @@ export function ToolInline({ call, collapsed }: ToolInlineProps) {
         <Box
           style={{
             flexDirection: "column",
-            marginLeft: 3,
             marginTop: 0,
-            paddingLeft: 1,
+            paddingLeft: 2,
           }}
         >
           {detail.split("\n").map((line, i) => (

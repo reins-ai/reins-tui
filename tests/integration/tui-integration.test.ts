@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { appReducer, DEFAULT_STATE } from "../../src/store";
-import type { AppState } from "../../src/store/types";
+import type { AppState, DisplayMessage, DisplayToolCall } from "../../src/store/types";
 import {
   reducePanelState,
   deriveLayoutMode,
@@ -50,6 +50,45 @@ import {
   buildTruncatedLeftText,
   buildRightZoneText,
 } from "../../src/components/status-bar";
+import {
+  isExchangeBoundary,
+  MESSAGE_GAP,
+  EXCHANGE_GAP,
+  shouldRenderToolBlocks,
+  shouldAutoExpand,
+  displayToolCallToToolCall,
+  getStreamingPlaceholderStyle,
+  toolCallsToVisualStates,
+  resolveToolBlockAccent,
+} from "../../src/components/conversation-panel";
+import {
+  getMessageBlockStyle,
+  getMessageBorderChars,
+  getRoleGlyph,
+  getRoleColor,
+  GLYPH_REINS,
+  GLYPH_USER,
+  GLYPH_TOOL_DONE,
+  GLYPH_TOOL_ERROR,
+  GLYPH_TOOL_RUNNING,
+} from "../../src/components/message";
+import {
+  getToolBlockStyle,
+  getToolBlockStatusSuffix,
+  formatToolBlockArgs,
+  formatToolBlockDetail,
+} from "../../src/components/tool-inline";
+import { ACCENT_BORDER_CHARS, SUBTLE_BORDER_CHARS } from "../../src/ui/primitives";
+import {
+  validateThemeTokens,
+} from "../../src/theme/theme-schema";
+import type { ThemeTokens } from "../../src/theme/theme-schema";
+import type { ToolVisualState } from "../../src/tools/tool-lifecycle";
+import { getToolColorToken } from "../../src/tools/tool-lifecycle";
+
+import reinsDarkTheme from "../../src/theme/builtins/reins-dark.json";
+import reinsLightTheme from "../../src/theme/builtins/reins-light.json";
+import tokyonightTheme from "../../src/theme/builtins/tokyonight.json";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -785,5 +824,433 @@ describe("Component interaction integration", () => {
     expect(state.panels.modal.visible).toBe(false);
     expect(state.currentModel).toBe("claude-3.5-sonnet"); // Preserved
     expect(state.isCommandPaletteOpen).toBe(true); // Preserved
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Helpers for regression tests
+// ---------------------------------------------------------------------------
+
+function createMsg(overrides: Partial<DisplayMessage> = {}): DisplayMessage {
+  return {
+    id: "msg-1",
+    role: "assistant",
+    content: "",
+    createdAt: new Date("2026-02-12T00:00:00.000Z"),
+    ...overrides,
+  };
+}
+
+function loadThemeTokens(source: Record<string, unknown>): ThemeTokens {
+  const result = validateThemeTokens(source);
+  if (!result.ok) throw new Error("Theme invalid");
+  return result.value;
+}
+
+const ALL_THEME_SOURCES = {
+  "reins-dark": reinsDarkTheme,
+  "reins-light": reinsLightTheme,
+  tokyonight: tokyonightTheme,
+} as const;
+
+// ---------------------------------------------------------------------------
+// 6. Message block style consistency regression (MH1, MH6)
+// ---------------------------------------------------------------------------
+
+describe("Message block style consistency regression", () => {
+  const ROLES: DisplayMessage["role"][] = ["user", "assistant", "system", "tool"];
+
+  for (const [themeName, source] of Object.entries(ALL_THEME_SOURCES)) {
+    const tokens = loadThemeTokens(source);
+    const getRoleBorder = (role: string) => {
+      const mapping: Record<string, string> = {
+        user: tokens["role.user.border"],
+        assistant: tokens["role.assistant.border"],
+        system: tokens["role.system.border"],
+      };
+      return mapping[role] ?? tokens["border.subtle"];
+    };
+
+    test(`${themeName}: all roles produce valid block styles with consistent padding`, () => {
+      for (const role of ROLES) {
+        const style = getMessageBlockStyle(role, tokens, getRoleBorder);
+        expect(style.paddingLeft).toBe(2);
+        expect(style.paddingRight).toBe(1);
+        expect(style.paddingTop).toBe(0);
+        expect(style.paddingBottom).toBe(0);
+        expect(style.accentColor).toBeDefined();
+        expect(style.backgroundColor).toBeDefined();
+      }
+    });
+
+    test(`${themeName}: user and assistant have distinct accent colors`, () => {
+      const userStyle = getMessageBlockStyle("user", tokens, getRoleBorder);
+      const assistantStyle = getMessageBlockStyle("assistant", tokens, getRoleBorder);
+      expect(userStyle.accentColor).not.toBe(assistantStyle.accentColor);
+    });
+
+    test(`${themeName}: user and assistant have distinct backgrounds`, () => {
+      const userStyle = getMessageBlockStyle("user", tokens, getRoleBorder);
+      const assistantStyle = getMessageBlockStyle("assistant", tokens, getRoleBorder);
+      expect(userStyle.backgroundColor).not.toBe(assistantStyle.backgroundColor);
+    });
+  }
+
+  test("border chars: assistant uses accent, others use subtle", () => {
+    expect(getMessageBorderChars("assistant")).toBe(ACCENT_BORDER_CHARS);
+    expect(getMessageBorderChars("user")).toBe(SUBTLE_BORDER_CHARS);
+    expect(getMessageBorderChars("system")).toBe(SUBTLE_BORDER_CHARS);
+    expect(getMessageBorderChars("tool")).toBe(SUBTLE_BORDER_CHARS);
+  });
+
+  test("role glyphs are distinct and non-empty", () => {
+    expect(getRoleGlyph("user")).toBe(GLYPH_USER);
+    expect(getRoleGlyph("assistant")).toBe(GLYPH_REINS);
+    expect(getRoleGlyph("system")).toBe(GLYPH_REINS);
+    expect(getRoleGlyph("tool")).toBe(GLYPH_TOOL_DONE);
+    expect(GLYPH_USER).not.toBe(GLYPH_REINS);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. Tool block visual consistency regression (MH5, MH6)
+// ---------------------------------------------------------------------------
+
+describe("Tool block visual consistency regression", () => {
+  function makeVisualState(overrides: Partial<ToolVisualState> = {}): ToolVisualState {
+    return {
+      id: "t1",
+      toolName: "bash",
+      status: "running",
+      glyph: "◎",
+      label: "Running Bash...",
+      colorToken: "glyph.tool.running",
+      detail: undefined,
+      expanded: false,
+      hasDetail: false,
+      duration: undefined,
+      ...overrides,
+    };
+  }
+
+  for (const [themeName, source] of Object.entries(ALL_THEME_SOURCES)) {
+    const tokens = loadThemeTokens(source);
+
+    test(`${themeName}: tool block styles have consistent padding across statuses`, () => {
+      const statuses: ToolVisualState["status"][] = ["queued", "running", "success", "error"];
+      for (const status of statuses) {
+        const vs = makeVisualState({ status, colorToken: getToolColorToken(status) });
+        const style = getToolBlockStyle(vs, tokens);
+        expect(style.paddingLeft).toBe(2);
+        expect(style.paddingRight).toBe(1);
+        expect(style.backgroundColor).toBe(tokens["surface.secondary"]);
+      }
+    });
+
+    test(`${themeName}: tool block accent colors differ by status`, () => {
+      const runningVs = makeVisualState({ status: "running", colorToken: "glyph.tool.running" });
+      const successVs = makeVisualState({ status: "success", colorToken: "glyph.tool.done" });
+      const errorVs = makeVisualState({ status: "error", colorToken: "glyph.tool.error" });
+
+      const runningStyle = getToolBlockStyle(runningVs, tokens);
+      const successStyle = getToolBlockStyle(successVs, tokens);
+      const errorStyle = getToolBlockStyle(errorVs, tokens);
+
+      // At least error should differ from running and success
+      expect(errorStyle.accentColor).not.toBe(runningStyle.accentColor);
+      expect(errorStyle.accentColor).not.toBe(successStyle.accentColor);
+    });
+
+    test(`${themeName}: tool block accent resolves correctly from token`, () => {
+      const accent = resolveToolBlockAccent("glyph.tool.running", tokens);
+      expect(accent).toBe(tokens["glyph.tool.running"]);
+
+      const fallback = resolveToolBlockAccent("nonexistent.token", tokens);
+      expect(fallback).toBe(tokens["glyph.tool.running"]);
+    });
+  }
+
+  test("tool block status suffixes are descriptive", () => {
+    expect(getToolBlockStatusSuffix(makeVisualState({ status: "queued" }))).toBe("queued...");
+    expect(getToolBlockStatusSuffix(makeVisualState({ status: "running" }))).toBe("running...");
+    expect(getToolBlockStatusSuffix(makeVisualState({ status: "success" }))).toBe("done");
+    expect(getToolBlockStatusSuffix(makeVisualState({ status: "success", duration: 42 }))).toBe("done (42ms)");
+    expect(getToolBlockStatusSuffix(makeVisualState({ status: "error" }))).toBe("failed");
+  });
+
+  test("tool block args formatting handles edge cases", () => {
+    expect(formatToolBlockArgs(undefined)).toBeUndefined();
+    expect(formatToolBlockArgs({})).toBeUndefined();
+    expect(formatToolBlockArgs({ cmd: "ls" })).toBe('{"cmd":"ls"}');
+
+    const longArgs: Record<string, unknown> = { data: "x".repeat(200) };
+    const formatted = formatToolBlockArgs(longArgs);
+    expect(formatted).toBeDefined();
+    expect(formatted!.length).toBeLessThanOrEqual(121); // 120 + ellipsis
+  });
+
+  test("tool block detail formatting truncates long content", () => {
+    expect(formatToolBlockDetail(undefined)).toBeUndefined();
+    expect(formatToolBlockDetail("")).toBeUndefined();
+    expect(formatToolBlockDetail("short")).toBe("short");
+
+    const longDetail = "x".repeat(600);
+    const formatted = formatToolBlockDetail(longDetail);
+    expect(formatted).toBeDefined();
+    expect(formatted!.length).toBeLessThanOrEqual(501); // 500 + ellipsis
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. Exchange boundary and spacing regression (MH1)
+// ---------------------------------------------------------------------------
+
+describe("Exchange boundary and spacing regression", () => {
+  test("exchange boundary detected at user-after-assistant", () => {
+    const messages: DisplayMessage[] = [
+      createMsg({ id: "a1", role: "assistant", content: "Hello" }),
+      createMsg({ id: "u1", role: "user", content: "Hi" }),
+    ];
+    expect(isExchangeBoundary(messages, 0)).toBe(false);
+    expect(isExchangeBoundary(messages, 1)).toBe(true);
+  });
+
+  test("exchange boundary detected at user-after-tool", () => {
+    const messages: DisplayMessage[] = [
+      createMsg({ id: "t1", role: "tool" as DisplayMessage["role"], content: "result" }),
+      createMsg({ id: "u1", role: "user", content: "Thanks" }),
+    ];
+    expect(isExchangeBoundary(messages, 1)).toBe(true);
+  });
+
+  test("no exchange boundary for consecutive assistant messages", () => {
+    const messages: DisplayMessage[] = [
+      createMsg({ id: "a1", role: "assistant", content: "Part 1" }),
+      createMsg({ id: "a2", role: "assistant", content: "Part 2" }),
+    ];
+    expect(isExchangeBoundary(messages, 1)).toBe(false);
+  });
+
+  test("no exchange boundary for consecutive user messages", () => {
+    const messages: DisplayMessage[] = [
+      createMsg({ id: "u1", role: "user", content: "First" }),
+      createMsg({ id: "u2", role: "user", content: "Second" }),
+    ];
+    expect(isExchangeBoundary(messages, 1)).toBe(false);
+  });
+
+  test("spacing constants are positive and exchange gap exceeds message gap", () => {
+    expect(MESSAGE_GAP).toBeGreaterThan(0);
+    expect(EXCHANGE_GAP).toBeGreaterThan(0);
+    expect(EXCHANGE_GAP).toBeGreaterThan(MESSAGE_GAP);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 9. Streaming + tool interaction regression (MH1, MH5)
+// ---------------------------------------------------------------------------
+
+describe("Streaming and tool interaction regression", () => {
+  test("streaming state transitions preserve tool call data", () => {
+    let state = DEFAULT_STATE;
+
+    // Add assistant message with streaming and tool calls
+    state = appReducer(state, {
+      type: "ADD_MESSAGE",
+      payload: createMsg({
+        id: "a1",
+        role: "assistant",
+        content: "Working...",
+        isStreaming: true,
+        toolCalls: [
+          { id: "t1", name: "bash", status: "running" },
+        ],
+      }),
+    });
+    state = appReducer(state, { type: "SET_STREAMING", payload: true });
+
+    // Append tokens during tool execution
+    state = appReducer(state, { type: "APPEND_TOKEN", payload: { messageId: "a1", token: " more" } });
+
+    // Tool completes
+    state = appReducer(state, {
+      type: "SET_TOOL_CALL_STATUS",
+      payload: { messageId: "a1", toolCallId: "t1", status: "complete", result: "output" },
+    });
+
+    // Finish streaming
+    state = appReducer(state, { type: "FINISH_STREAMING", payload: { messageId: "a1" } });
+
+    expect(state.messages[0]?.content).toBe("Working... more");
+    expect(state.messages[0]?.toolCalls?.[0]?.status).toBe("complete");
+    expect(state.messages[0]?.toolCalls?.[0]?.result).toBe("output");
+    expect(state.isStreaming).toBe(false);
+  });
+
+  test("multiple tool calls complete independently during streaming", () => {
+    let state = DEFAULT_STATE;
+
+    state = appReducer(state, {
+      type: "ADD_MESSAGE",
+      payload: createMsg({
+        id: "a1",
+        role: "assistant",
+        content: "",
+        isStreaming: true,
+        toolCalls: [
+          { id: "t1", name: "bash", status: "running" },
+          { id: "t2", name: "read", status: "running" },
+          { id: "t3", name: "grep", status: "pending" },
+        ],
+      }),
+    });
+    state = appReducer(state, { type: "SET_STREAMING", payload: true });
+
+    // t1 completes, t2 errors, t3 starts running
+    state = appReducer(state, {
+      type: "SET_TOOL_CALL_STATUS",
+      payload: { messageId: "a1", toolCallId: "t1", status: "complete", result: "ok" },
+    });
+    state = appReducer(state, {
+      type: "SET_TOOL_CALL_STATUS",
+      payload: { messageId: "a1", toolCallId: "t2", status: "error", isError: true, result: "fail" },
+    });
+    state = appReducer(state, {
+      type: "SET_TOOL_CALL_STATUS",
+      payload: { messageId: "a1", toolCallId: "t3", status: "running" },
+    });
+
+    const tools = state.messages[0]?.toolCalls;
+    expect(tools?.[0]?.status).toBe("complete");
+    expect(tools?.[1]?.status).toBe("error");
+    expect(tools?.[1]?.isError).toBe(true);
+    expect(tools?.[2]?.status).toBe("running");
+
+    // Tool ordering preserved
+    expect(tools?.[0]?.id).toBe("t1");
+    expect(tools?.[1]?.id).toBe("t2");
+    expect(tools?.[2]?.id).toBe("t3");
+  });
+
+  test("displayToolCallToToolCall maps all statuses correctly", () => {
+    const pending: DisplayToolCall = { id: "t1", name: "bash", status: "pending" };
+    const running: DisplayToolCall = { id: "t2", name: "read", status: "running" };
+    const complete: DisplayToolCall = { id: "t3", name: "write", status: "complete", result: "ok" };
+    const error: DisplayToolCall = { id: "t4", name: "grep", status: "error", result: "fail", isError: true };
+
+    expect(displayToolCallToToolCall(pending).status).toBe("queued");
+    expect(displayToolCallToToolCall(running).status).toBe("running");
+    expect(displayToolCallToToolCall(complete).status).toBe("success");
+    expect(displayToolCallToToolCall(complete).result).toBe("ok");
+    expect(displayToolCallToToolCall(error).status).toBe("error");
+    expect(displayToolCallToToolCall(error).error).toBe("fail");
+    expect(displayToolCallToToolCall(error).result).toBeUndefined();
+  });
+
+  test("shouldAutoExpand only expands error-state tool calls", () => {
+    const ok: DisplayToolCall = { id: "t1", name: "bash", status: "complete", result: "ok" };
+    const running: DisplayToolCall = { id: "t2", name: "read", status: "running" };
+    const errored: DisplayToolCall = { id: "t3", name: "write", status: "error", result: "fail" };
+    const isErrorFlag: DisplayToolCall = { id: "t4", name: "grep", status: "complete", result: "fail", isError: true };
+
+    expect(shouldAutoExpand(ok)).toBe(false);
+    expect(shouldAutoExpand(running)).toBe(false);
+    expect(shouldAutoExpand(errored)).toBe(true);
+    expect(shouldAutoExpand(isErrorFlag)).toBe(true);
+  });
+
+  test("toolCallsToVisualStates preserves ordering and respects expanded set", () => {
+    const toolCalls: DisplayToolCall[] = [
+      { id: "t1", name: "bash", status: "complete", result: "ok" },
+      { id: "t2", name: "read", status: "running" },
+      { id: "t3", name: "write", status: "error", result: "fail", isError: true },
+    ];
+
+    const expandedSet = new Set(["t1"]);
+    const states = toolCallsToVisualStates(toolCalls, expandedSet);
+
+    expect(states).toHaveLength(3);
+    expect(states[0].id).toBe("t1");
+    expect(states[0].expanded).toBe(true);
+    expect(states[1].id).toBe("t2");
+    expect(states[1].expanded).toBe(false);
+    expect(states[2].id).toBe("t3");
+    // Error state is not auto-expanded by toolCallsToVisualStates
+    // (auto-expand is handled by ToolBlockList component)
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 10. Idle rendering stability regression (MH1, MH6)
+// ---------------------------------------------------------------------------
+
+describe("Idle rendering stability regression", () => {
+  test("empty token append is a no-op (no unnecessary re-renders)", () => {
+    const initial: AppState = {
+      ...DEFAULT_STATE,
+      messages: [createMsg({ id: "a1", content: "Hello", isStreaming: true })],
+      isStreaming: true,
+      streamingMessageId: "a1",
+    };
+
+    const next = appReducer(initial, {
+      type: "APPEND_TOKEN",
+      payload: { messageId: "a1", token: "" },
+    });
+
+    // Empty token should return same reference (no state change)
+    expect(next).toBe(initial);
+  });
+
+  test("duplicate FINISH_STREAMING is idempotent", () => {
+    let state: AppState = {
+      ...DEFAULT_STATE,
+      messages: [createMsg({ id: "a1", content: "Done", isStreaming: true })],
+      isStreaming: true,
+      streamingMessageId: "a1",
+    };
+
+    state = appReducer(state, { type: "FINISH_STREAMING", payload: { messageId: "a1" } });
+    const afterFirst = state;
+
+    state = appReducer(state, { type: "FINISH_STREAMING", payload: { messageId: "a1" } });
+    expect(state.isStreaming).toBe(false);
+    expect(state.messages[0]?.isStreaming).toBe(false);
+  });
+
+  test("SET_STREAMING_LIFECYCLE_STATUS to same value is stable", () => {
+    let state = appReducer(DEFAULT_STATE, { type: "SET_STREAMING_LIFECYCLE_STATUS", payload: "idle" });
+    // Setting to same value should not cause issues
+    state = appReducer(state, { type: "SET_STREAMING_LIFECYCLE_STATUS", payload: "idle" });
+    expect(state.streamingLifecycleStatus).toBe("idle");
+  });
+
+  test("shouldRenderToolBlocks returns false for messages without tool calls", () => {
+    expect(shouldRenderToolBlocks(createMsg({ role: "assistant", content: "text" }))).toBe(false);
+    expect(shouldRenderToolBlocks(createMsg({ role: "user", content: "text" }))).toBe(false);
+    expect(shouldRenderToolBlocks(createMsg({ role: "assistant", toolCalls: [] }))).toBe(false);
+  });
+
+  test("streaming placeholder style matches assistant block styling pattern", () => {
+    for (const [themeName, source] of Object.entries(ALL_THEME_SOURCES)) {
+      const tokens = loadThemeTokens(source);
+      const getRoleBorder = (role: string) => {
+        const mapping: Record<string, string> = {
+          user: tokens["role.user.border"],
+          assistant: tokens["role.assistant.border"],
+          system: tokens["role.system.border"],
+        };
+        return mapping[role] ?? tokens["border.subtle"];
+      };
+
+      const placeholderStyle = getStreamingPlaceholderStyle(tokens, getRoleBorder);
+      const assistantStyle = getMessageBlockStyle("assistant", tokens, getRoleBorder);
+
+      // Streaming placeholder should use assistant accent and background
+      expect(placeholderStyle.accentColor).toBe(assistantStyle.accentColor);
+      expect(placeholderStyle.backgroundColor).toBe(assistantStyle.backgroundColor);
+      expect(placeholderStyle.paddingLeft).toBe(assistantStyle.paddingLeft);
+      expect(placeholderStyle.paddingRight).toBe(assistantStyle.paddingRight);
+    }
   });
 });
