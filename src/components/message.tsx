@@ -246,13 +246,17 @@ export function ToolCallAnchor({ toolCall }: ToolCallAnchorProps) {
         </Box>
       ) : null}
       {showPlainResult && toolCall.result ? (
-        <Box style={{ marginLeft: 2 }}>
-          <Text style={{ color: tokens["text.muted"] }}>{formatToolResultPreview(toolCall) ?? formatResultPreview(toolCall.result)}</Text>
+        <Box style={{ flexDirection: "column", marginLeft: 2 }}>
+          {(formatToolResultPreview(toolCall) ?? formatResultPreview(toolCall.result)).split("\n").map((line, i) => (
+            <Text key={i} style={{ color: tokens["text.muted"] }}>{line}</Text>
+          ))}
         </Box>
       ) : null}
       {toolCall.result && toolCall.status === "error" ? (
-        <Box style={{ marginLeft: 2 }}>
-          <Text style={{ color: tokens["glyph.tool.error"] }}>{toolCall.result}</Text>
+        <Box style={{ flexDirection: "column", marginLeft: 2 }}>
+          {toolCall.result.split("\n").map((line, i) => (
+            <Text key={i} style={{ color: tokens["glyph.tool.error"] }}>{line}</Text>
+          ))}
         </Box>
       ) : null}
     </Box>
