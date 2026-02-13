@@ -5,7 +5,7 @@ import type { DaemonMode } from "../daemon/daemon-context";
 import type { FocusedPanel } from "../store";
 import { useApp } from "../store";
 import { useThemeTokens } from "../theme";
-import { Box, Text, type TerminalDimensions } from "../ui";
+import { Box, Text, ZoneShell, type TerminalDimensions } from "../ui";
 import {
   resolveBreakpointState,
   createResizeDebouncer,
@@ -17,6 +17,40 @@ import { SidebarContent } from "./sidebar";
 import { StatusBar } from "./status-bar";
 import { DrawerPanel } from "./drawer-panel";
 import { ModalPanel } from "./modal-panel";
+
+// --- Layout zone configuration ---
+
+/**
+ * The four explicit layout zones that compose the app shell.
+ * Each zone maps to a surface token and optional border treatment
+ * to create clear visual boundaries between regions.
+ */
+export type LayoutZoneName = "conversation" | "input" | "sidebar" | "status";
+
+export interface LayoutZoneConfig {
+  surfaceToken: string;
+  borderSides?: string[];
+}
+
+export const LAYOUT_ZONES: Record<LayoutZoneName, LayoutZoneConfig> = {
+  conversation: {
+    surfaceToken: "surface.primary",
+  },
+  input: {
+    surfaceToken: "surface.secondary",
+    borderSides: ["top"],
+  },
+  sidebar: {
+    surfaceToken: "surface.secondary",
+    borderSides: ["left"],
+  },
+  status: {
+    surfaceToken: "surface.secondary",
+    borderSides: ["top"],
+  },
+};
+
+// --- Panel border focus ---
 
 export interface PanelBorderColors {
   sidebar: string;
@@ -115,7 +149,11 @@ export function Layout({ version, dimensions, showHelp, connectionStatus, daemon
 
   return (
     <Box style={{ flexDirection: "column", height: "100%" }}>
-      <Box style={{ flexDirection: "row", flexGrow: 1 }}>
+      {/* Main content zone: conversation + input + optional side panels */}
+      <ZoneShell
+        backgroundColor={tokens["surface.primary"]}
+        style={{ flexGrow: 1, flexDirection: "row" }}
+      >
         <ChatScreen
           panelBorders={panelBorders}
           focusedPanel={state.focusedPanel}
@@ -125,7 +163,7 @@ export function Layout({ version, dimensions, showHelp, connectionStatus, daemon
           breakpoint={breakpoint}
           onSubmitMessage={onSubmitMessage}
         />
-      </Box>
+      </ZoneShell>
 
       {/* Summoned left drawer with sidebar content */}
       <DrawerPanel
@@ -161,7 +199,14 @@ export function Layout({ version, dimensions, showHelp, connectionStatus, daemon
         <Text content="Settings and preferences" style={{ color: tokens["text.secondary"] }} />
       </ModalPanel>
 
-      <StatusBar version={version} dimensions={dimensions} showHelp={showHelp} connectionStatus={connectionStatus} daemonMode={daemonMode} />
+      {/* Status zone: anchored footer with connection/model/lifecycle info */}
+      <ZoneShell
+        borderSides={["top"]}
+        borderColor={tokens["border.subtle"]}
+        backgroundColor={tokens["surface.secondary"]}
+      >
+        <StatusBar version={version} dimensions={dimensions} showHelp={showHelp} connectionStatus={connectionStatus} daemonMode={daemonMode} />
+      </ZoneShell>
     </Box>
   );
 }
