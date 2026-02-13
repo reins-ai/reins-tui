@@ -2,10 +2,12 @@ import {
   createQueuedToolCall,
   toolCallReducer,
   toolCallToMessageContent,
+  toolCallToVisualState,
   type ToolCall,
   type ToolEvent,
   type ToolMessageContent,
   type ToolQueuedEvent,
+  type ToolVisualState,
 } from "./tool-lifecycle";
 
 export interface ToolDetailState {
@@ -18,6 +20,7 @@ export interface VisibleToolCall {
   call: ToolCall;
   collapsed: boolean;
   message: ToolMessageContent;
+  visualState: ToolVisualState;
 }
 
 export type ToolDetailAction =
@@ -105,12 +108,16 @@ export function expandAll(state: ToolDetailState): ToolDetailState {
 }
 
 export function getVisibleCalls(state: ToolDetailState): VisibleToolCall[] {
-  return Array.from(state.calls.values()).map((call) => ({
-    id: call.id,
-    call,
-    collapsed: state.collapsed.has(call.id),
-    message: toolCallToMessageContent(call),
-  }));
+  return Array.from(state.calls.values()).map((call) => {
+    const isCollapsed = state.collapsed.has(call.id);
+    return {
+      id: call.id,
+      call,
+      collapsed: isCollapsed,
+      message: toolCallToMessageContent(call),
+      visualState: toolCallToVisualState(call, !isCollapsed),
+    };
+  });
 }
 
 export function toolDetailReducer(state: ToolDetailState, action: ToolDetailAction): ToolDetailState {

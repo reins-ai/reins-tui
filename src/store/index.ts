@@ -10,7 +10,7 @@ import {
   type LayoutAction,
 } from "../state/layout-mode";
 import type { StreamToolCall, TurnContentBlock } from "../state/streaming-state";
-import type { AppState, DisplayContentBlock, DisplayMessage, DisplayToolCall, FocusedPanel } from "./types";
+import type { AppState, DisplayContentBlock, DisplayMessage, DisplayToolCall, DisplayToolCallStatus, FocusedPanel } from "./types";
 import { DEFAULT_STATE } from "./types";
 
 function isFocusedPanel(value: unknown): value is FocusedPanel {
@@ -394,6 +394,6 @@ export function useApp(): AppContextValue {
 }
 
 export { DEFAULT_STATE };
-export type { AppState, DisplayContentBlock, DisplayMessage, DisplayToolCall, FocusedPanel };
+export type { AppState, DisplayContentBlock, DisplayMessage, DisplayToolCall, DisplayToolCallStatus, FocusedPanel };
 export type { LayoutMode, PanelId, PanelState } from "../state/layout-mode";
 export { getLayoutVisibility, getLayoutModeLabel } from "../state/layout-mode";

@@ -88,10 +88,12 @@ export interface StatusSegmentSources {
   terminalWidth: number;
 }
 
+export type DisplayToolCallStatus = "pending" | "running" | "complete" | "error";
+
 export interface DisplayToolCall {
   id: string;
   name: string;
-  status: "pending" | "running" | "complete" | "error";
+  status: DisplayToolCallStatus;
   args?: Record<string, unknown>;
   result?: string;
   isError?: boolean;
