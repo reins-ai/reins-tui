@@ -1,4 +1,5 @@
 import { err, ok } from "../../daemon/contracts";
+import { handleMemoryReindexCommand } from "../memory/memory-reindex-command";
 import { handleMemorySettingsCommand } from "../memory/memory-settings-command";
 import type { CommandHandler, MemoryEntry, MemoryLayer, MemoryType } from "./types";
 
@@ -271,9 +272,16 @@ export const handleMemoryCommand: CommandHandler = (args, context) => {
     });
   }
 
+  if (subcommand === "reindex") {
+    return handleMemoryReindexCommand(args, {
+      available: context.memory.available,
+      reindex: context.memory.reindex,
+    });
+  }
+
   return err({
     code: "INVALID_ARGUMENT",
-    message: `Unknown memory subcommand '${subcommand}'. Usage: /memory <list|show|settings> [options]`,
+    message: `Unknown memory subcommand '${subcommand}'. Usage: /memory <list|show|settings|reindex> [options]`,
   });
 };
 

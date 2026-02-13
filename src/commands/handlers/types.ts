@@ -89,6 +89,29 @@ export interface MemorySettingsManager {
   serialize(): string;
 }
 
+export interface MemoryReindexProgress {
+  readonly phase: "reindex" | "validation";
+  readonly totalRecords: number;
+  readonly processed: number;
+  readonly reindexed: number;
+  readonly failed: number;
+  readonly currentRecordId?: string;
+}
+
+export interface MemoryReindexResult {
+  readonly totalRecords: number;
+  readonly reindexed: number;
+  readonly failed: number;
+  readonly durationMs: number;
+  readonly failedRecordIds: readonly string[];
+  readonly provider: string;
+  readonly model?: string;
+  readonly validation?: {
+    readonly performed: boolean;
+    readonly passed: boolean;
+  };
+}
+
 export interface MemoryCommandContext {
   readonly available: boolean;
   readonly settingsManager?: MemorySettingsManager;
@@ -104,6 +127,10 @@ export interface MemoryCommandContext {
     limit?: number;
   }): Result<readonly MemoryEntry[], CommandError>;
   show(id: string): Result<MemoryEntry | null, CommandError>;
+  reindex?(input: {
+    provider: string;
+    onProgress?: (progress: MemoryReindexProgress) => void;
+  }): Result<MemoryReindexResult, CommandError>;
 }
 
 export interface CommandHandlerContext {
