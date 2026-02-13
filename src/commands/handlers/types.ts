@@ -56,12 +56,52 @@ export interface ViewCommandContext {
   setCompactMode(compactMode: boolean): void;
 }
 
+export type MemoryType = "fact" | "preference" | "decision" | "episode" | "skill" | "entity" | "document_chunk";
+export type MemoryLayer = "stm" | "ltm";
+
+export interface MemoryEntry {
+  readonly id: string;
+  readonly content: string;
+  readonly type: MemoryType;
+  readonly layer: MemoryLayer;
+  readonly importance: number;
+  readonly confidence: number;
+  readonly tags: readonly string[];
+  readonly entities: readonly string[];
+  readonly source: {
+    readonly type: string;
+    readonly conversationId?: string;
+  };
+  readonly supersedes?: string;
+  readonly supersededBy?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly accessedAt: string;
+}
+
+export interface MemoryCommandContext {
+  readonly available: boolean;
+  remember(input: {
+    content: string;
+    type?: MemoryType;
+    tags?: string[];
+    conversationId?: string;
+  }): Result<MemoryEntry, CommandError>;
+  list(options?: {
+    type?: MemoryType;
+    layer?: MemoryLayer;
+    limit?: number;
+  }): Result<readonly MemoryEntry[], CommandError>;
+  show(id: string): Result<MemoryEntry | null, CommandError>;
+}
+
 export interface CommandHandlerContext {
   readonly catalog: readonly SlashCommandDefinition[];
   readonly model: ModelCommandContext;
   readonly theme: ThemeCommandContext;
   readonly session: SessionCommandContext;
   readonly view: ViewCommandContext;
+  readonly memory: MemoryCommandContext | null;
   readonly daemonClient: DaemonClient | null;
 }
 

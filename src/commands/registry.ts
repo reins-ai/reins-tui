@@ -1,4 +1,4 @@
-export type SlashCommandCategory = "conversation" | "model" | "appearance" | "system";
+export type SlashCommandCategory = "conversation" | "model" | "appearance" | "system" | "memory";
 
 export type SlashCommandHandlerKey =
   | "HELP"
@@ -11,7 +11,9 @@ export type SlashCommandHandlerKey =
   | "EXPORT_CONVERSATION"
   | "TOGGLE_COMPACT_MODE"
   | "OPEN_SETTINGS"
-  | "QUIT_TUI";
+  | "QUIT_TUI"
+  | "REMEMBER"
+  | "MEMORY";
 
 export interface SlashCommandDefinition {
   readonly name: string;
@@ -122,6 +124,22 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     usage: "/quit",
     category: "system",
     handlerKey: "QUIT_TUI",
+  }),
+  Object.freeze({
+    name: "remember",
+    aliases: Object.freeze(["rem"]),
+    description: "Save an explicit memory entry.",
+    usage: "/remember [--type fact|preference|decision|note] [--tags a,b] <text>",
+    category: "memory",
+    handlerKey: "REMEMBER",
+  }),
+  Object.freeze({
+    name: "memory",
+    aliases: Object.freeze(["mem"]),
+    description: "List or inspect memory entries.",
+    usage: "/memory <list|show> [options]",
+    category: "memory",
+    handlerKey: "MEMORY",
   }),
 ]);
 

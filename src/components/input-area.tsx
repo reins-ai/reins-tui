@@ -274,6 +274,7 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
         compactMode,
         setCompactMode,
       },
+      memory: null,
       daemonClient,
     });
 

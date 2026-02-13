@@ -2,6 +2,7 @@ import { err, type Result } from "../../daemon/contracts";
 import type { ParsedCommand } from "../parser";
 import type { SlashCommandHandlerKey } from "../registry";
 import { handleConnectCommand } from "./connect";
+import { handleMemoryCommand, handleRememberCommand } from "./memory";
 import { handleModelCommand } from "./model";
 import {
   handleClearConversationCommand,
@@ -24,6 +25,8 @@ const HANDLER_MAP: Record<SlashCommandHandlerKey, CommandHandler> = {
   TOGGLE_COMPACT_MODE: handleCompactCommand,
   OPEN_SETTINGS: handleSettingsCommand,
   QUIT_TUI: handleQuitCommand,
+  REMEMBER: handleRememberCommand,
+  MEMORY: handleMemoryCommand,
 };
 
 export function dispatchCommand(
@@ -41,4 +44,14 @@ export function dispatchCommand(
   return handler(parsedCommand.args, context);
 }
 
-export type { CommandError, CommandHandlerContext, CommandResult, CommandSignal, CommandSignalType } from "./types";
+export type {
+  CommandError,
+  CommandHandlerContext,
+  CommandResult,
+  CommandSignal,
+  CommandSignalType,
+  MemoryCommandContext,
+  MemoryEntry,
+  MemoryLayer,
+  MemoryType,
+} from "./types";
