@@ -47,6 +47,7 @@ export function ChatScreen({
           borderSides={["top"]}
           borderColor={tokens["border.subtle"]}
           backgroundColor={tokens["surface.secondary"]}
+          style={{ flexGrow: 0, flexShrink: 0 }}
         >
           <InputArea
             isFocused={focusedPanel === "input"}

@@ -173,6 +173,7 @@ export function FramedBlock({
 
   const boxStyle: Style = {
     flexDirection: "column",
+    flexGrow: 1,
     border: borderSides,
     borderColor: resolvedAccentColor,
     customBorderChars: resolvedChars,
