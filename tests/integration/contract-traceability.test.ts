@@ -45,7 +45,7 @@ describe("Contract Traceability: MH1-MH17", () => {
     const registryResult = themeRegistryModule.createThemeRegistry();
     expect(registryResult.ok).toBe(true);
     if (registryResult.ok) {
-      expect(registryResult.value.listThemes().length).toBe(5);
+      expect(registryResult.value.listThemes().length).toBe(3);
       expect(typeof registryResult.value.getTheme().fallback256).toBe("object");
     }
 

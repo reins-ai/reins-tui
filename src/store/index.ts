@@ -1,7 +1,16 @@
 import { createContext, useContext } from "react";
 
-import { reduceLayoutMode, getLayoutVisibility, type LayoutModeAction, type LayoutMode } from "../state/layout-mode";
-import type { AppState, DisplayMessage, DisplayToolCall, FocusedPanel } from "./types";
+import {
+  reduceLayoutMode,
+  getLayoutVisibility,
+  reducePanelState,
+  deriveLayoutMode,
+  type LayoutModeAction,
+  type LayoutMode,
+  type LayoutAction,
+} from "../state/layout-mode";
+import type { StreamToolCall, TurnContentBlock } from "../state/streaming-state";
+import type { AppState, DisplayContentBlock, DisplayMessage, DisplayToolCall, FocusedPanel } from "./types";
 import { DEFAULT_STATE } from "./types";
 
 function isFocusedPanel(value: unknown): value is FocusedPanel {
@@ -52,9 +61,12 @@ export type AppAction =
   | { type: "FOCUS_PREV" }
   | { type: "SET_STREAMING"; payload: boolean }
   | { type: "SET_STREAMING_LIFECYCLE_STATUS"; payload: AppState["streamingLifecycleStatus"] }
+  | { type: "SET_ACTIVE_TOOL_NAME"; payload: string | null }
   | { type: "SET_COMMAND_PALETTE_OPEN"; payload: boolean }
   | { type: "SET_CONNECT_FLOW_OPEN"; payload: boolean }
+  | { type: "SET_MODEL_SELECTOR_OPEN"; payload: boolean }
   | { type: "SET_MODEL"; payload: string }
+  | { type: "SET_PROVIDER"; payload: string }
   | { type: "SET_AVAILABLE_MODELS"; payload: string[] }
   | { type: "ADD_MESSAGE"; payload: DisplayMessage }
   | { type: "SET_MESSAGES"; payload: DisplayMessage[] }
@@ -70,8 +82,40 @@ export type AppAction =
       };
     }
   | { type: "FINISH_STREAMING"; payload: { messageId: string } }
+  | {
+      type: "SYNC_TOOL_TURN";
+      payload: {
+        messageId: string;
+        toolCalls: StreamToolCall[];
+        contentBlocks: TurnContentBlock[];
+      };
+    }
   | { type: "CLEAR_MESSAGES" }
-  | LayoutModeAction;
+  | LayoutModeAction
+  | LayoutAction;
+
+function streamToolCallsToDisplay(toolCalls: StreamToolCall[]): DisplayToolCall[] {
+  return [...toolCalls]
+    .sort((a, b) => a.sequenceIndex - b.sequenceIndex)
+    .map((tc) => ({
+      id: tc.id,
+      name: tc.name,
+      status: tc.status === "running" ? "running" as const
+        : tc.status === "error" ? "error" as const
+        : "complete" as const,
+      args: tc.args,
+      result: tc.result,
+      isError: tc.status === "error",
+    }));
+}
+
+function turnBlocksToDisplay(blocks: TurnContentBlock[]): DisplayContentBlock[] {
+  return blocks.map((block) => ({
+    type: block.type,
+    toolCallId: block.toolCallId,
+    text: block.text,
+  }));
+}
 
 export function appReducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
@@ -136,6 +180,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ...state,
         streamingLifecycleStatus: action.payload,
       };
+    case "SET_ACTIVE_TOOL_NAME":
+      return {
+        ...state,
+        activeToolName: action.payload,
+      };
     case "SET_COMMAND_PALETTE_OPEN":
       return typeof action.payload === "boolean"
         ? { ...state, isCommandPaletteOpen: action.payload }
@@ -144,9 +193,17 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return typeof action.payload === "boolean"
         ? { ...state, isConnectFlowOpen: action.payload }
         : state;
+    case "SET_MODEL_SELECTOR_OPEN":
+      return typeof action.payload === "boolean"
+        ? { ...state, isModelSelectorOpen: action.payload }
+        : state;
     case "SET_MODEL":
       return typeof action.payload === "string"
         ? { ...state, currentModel: action.payload }
+        : state;
+    case "SET_PROVIDER":
+      return typeof action.payload === "string"
+        ? { ...state, currentProvider: action.payload }
         : state;
     case "SET_AVAILABLE_MODELS":
       return Array.isArray(action.payload)
@@ -226,6 +283,28 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         messages: nextMessages,
       };
     }
+    case "SYNC_TOOL_TURN": {
+      const { messageId, toolCalls, contentBlocks } = action.payload;
+      const messageIndex = state.messages.findIndex((message) => message.id === messageId);
+
+      if (messageIndex === -1) {
+        return state;
+      }
+
+      const nextMessages = [...state.messages];
+      const currentMessage = nextMessages[messageIndex];
+
+      nextMessages[messageIndex] = {
+        ...currentMessage,
+        toolCalls: streamToolCallsToDisplay(toolCalls),
+        contentBlocks: turnBlocksToDisplay(contentBlocks),
+      };
+
+      return {
+        ...state,
+        messages: nextMessages,
+      };
+    }
     case "FINISH_STREAMING": {
       const { messageId } = action.payload;
       const messageIndex = state.messages.findIndex((message) => message.id === messageId);
@@ -256,6 +335,28 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         streamingMessageId: null,
         isStreaming: false,
       };
+    case "TOGGLE_PANEL":
+    case "DISMISS_PANEL":
+    case "PIN_PANEL":
+    case "UNPIN_PANEL":
+    case "DISMISS_ALL":
+    case "DISMISS_TOPMOST": {
+      const nextPanels = reducePanelState(state.panels, action as LayoutAction);
+      if (nextPanels === state.panels) {
+        return state;
+      }
+      const nextLayoutMode = deriveLayoutMode(nextPanels);
+      const nextFocusedPanel =
+        nextLayoutMode === "zen" && state.focusedPanel === "sidebar"
+          ? "conversation"
+          : state.focusedPanel;
+      return {
+        ...state,
+        panels: nextPanels,
+        layoutMode: nextLayoutMode,
+        focusedPanel: nextFocusedPanel,
+      };
+    }
     case "TOGGLE_ACTIVITY":
     case "TOGGLE_ZEN":
     case "SET_LAYOUT_MODE": {
@@ -293,6 +394,6 @@ export function useApp(): AppContextValue {
 }
 
 export { DEFAULT_STATE };
-export type { AppState, DisplayMessage, DisplayToolCall, FocusedPanel };
-export type { LayoutMode } from "../state/layout-mode";
+export type { AppState, DisplayContentBlock, DisplayMessage, DisplayToolCall, FocusedPanel };
+export type { LayoutMode, PanelId, PanelState } from "../state/layout-mode";
 export { getLayoutVisibility, getLayoutModeLabel } from "../state/layout-mode";

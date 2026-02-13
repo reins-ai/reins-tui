@@ -1,4 +1,10 @@
-import { SLASH_COMMANDS, type SlashCommandCategory, type SlashCommandDefinition } from "../commands/registry";
+import {
+  SLASH_COMMANDS,
+  PALETTE_ACTIONS,
+  type SlashCommandCategory,
+  type SlashCommandDefinition,
+  type PaletteActionDefinition,
+} from "../commands/registry";
 
 export type SearchCategory = "command" | "conversation" | "note" | "action";
 
@@ -358,11 +364,34 @@ export function createNoteSearchItems(notes: readonly NoteSearchSource[]): reado
   );
 }
 
+export function createActionSearchItems(
+  actions: readonly PaletteActionDefinition[] = PALETTE_ACTIONS,
+): readonly SearchableItem<PaletteAction>[] {
+  return Object.freeze(
+    actions.map((action) =>
+      Object.freeze({
+        id: action.id,
+        label: action.label,
+        description: action.description,
+        category: "action" as const,
+        keywords: Object.freeze([
+          ...action.keywords,
+          action.category,
+          ...(action.shortcutHint ? [action.shortcutHint] : []),
+        ]),
+        action: Object.freeze({ type: "action", key: action.actionKey } satisfies ActionSearchAction),
+      } satisfies SearchableItem<PaletteAction>),
+    ),
+  );
+}
+
 export function createUnifiedSearchItems(source: SearchIndexSource): readonly SearchableItem<PaletteAction>[] {
   const commandItems = createCommandSearchItems(source.commands ?? SLASH_COMMANDS);
   const conversationItems = createConversationSearchItems(source.conversations ?? []);
   const noteItems = createNoteSearchItems(source.notes ?? []);
-  const actionItems = Object.freeze([...(source.actions ?? [])]);
+  const actionItems = source.actions
+    ? Object.freeze([...source.actions])
+    : createActionSearchItems();
 
   return Object.freeze([...commandItems, ...conversationItems, ...noteItems, ...actionItems]);
 }

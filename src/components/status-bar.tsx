@@ -1,13 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 
 import type { DaemonConnectionStatus } from "../daemon/contracts";
+import type { DaemonMode } from "../daemon/daemon-context";
 import { useApp } from "../store";
 import { useThemeTokens } from "../theme";
 import { Box, Text, type TerminalDimensions } from "../ui";
+import type { ConversationLifecycleStatus } from "../state/status-machine";
+
+// --- Constants ---
 
 export const HEARTBEAT_GLYPH = "·";
 export const HEARTBEAT_PULSE_INTERVAL_MS = 2_000;
 export const HEARTBEAT_RECONNECT_INTERVAL_MS = 500;
+export const COMPACTION_INDICATOR_DURATION_MS = 4_000;
+
+// --- Heartbeat helpers ---
 
 export type HeartbeatPhase = "bright" | "dim";
 
@@ -38,6 +45,184 @@ export function resolveHeartbeatInterval(status: DaemonConnectionStatus): number
 
   return HEARTBEAT_PULSE_INTERVAL_MS;
 }
+
+// --- Connection helpers ---
+
+export function getConnectionLabel(status: DaemonConnectionStatus, daemonMode?: DaemonMode): string {
+  switch (status) {
+    case "connected":
+      return "Connected";
+    case "disconnected":
+      return daemonMode === "mock" ? "⚠ Daemon disconnected" : "Offline";
+    case "connecting":
+      return "Connecting...";
+    case "reconnecting":
+      return "Reconnecting...";
+  }
+}
+
+export function getConnectionGlyph(status: DaemonConnectionStatus): string {
+  switch (status) {
+    case "connected":
+      return "●";
+    case "disconnected":
+      return "○";
+    case "connecting":
+    case "reconnecting":
+      return "◌";
+  }
+}
+
+// --- Streaming lifecycle display ---
+
+export interface LifecycleDisplay {
+  glyph: string;
+  label: string;
+  colorToken: string;
+}
+
+export function resolveLifecycleDisplay(
+  status: ConversationLifecycleStatus,
+  tokenCount: number,
+  cost: string | null,
+  activeToolName?: string | null,
+): LifecycleDisplay {
+  switch (status) {
+    case "idle":
+      return { glyph: "●", label: "Ready", colorToken: "status.success" };
+    case "sending":
+      return { glyph: "◐", label: "Sending...", colorToken: "status.warning" };
+    case "thinking":
+      return { glyph: "◑", label: "Thinking...", colorToken: "status.warning" };
+    case "streaming":
+      if (activeToolName) {
+        return {
+          glyph: "⚙",
+          label: `Using tool: ${activeToolName}`,
+          colorToken: "status.warning",
+        };
+      }
+      return {
+        glyph: "▶",
+        label: `Streaming [${tokenCount} tokens]`,
+        colorToken: "status.info",
+      };
+    case "complete": {
+      const costSuffix = cost ? ` [${cost}]` : "";
+      return { glyph: "✓", label: `Done${costSuffix}`, colorToken: "status.success" };
+    }
+    case "error":
+      return { glyph: "✗", label: "Error", colorToken: "status.error" };
+  }
+}
+
+// --- Two-zone layout helpers ---
+
+export interface StatusBarSegments {
+  heartbeat: string;
+  connection: string;
+  model: string;
+  lifecycle: string;
+  hint: string;
+}
+
+export function buildSegments(
+  connectionStatus: DaemonConnectionStatus,
+  modelName: string,
+  lifecycleDisplay: LifecycleDisplay,
+  compactionActive: boolean,
+  daemonMode?: DaemonMode,
+): StatusBarSegments {
+  const connectionGlyph = getConnectionGlyph(connectionStatus);
+  const heartbeat = HEARTBEAT_GLYPH;
+  const connection = `${connectionGlyph} ${getConnectionLabel(connectionStatus, daemonMode)}`;
+  const model = modelName;
+  const compactionSuffix = compactionActive ? " ⚡ Compacted" : "";
+  const lifecycle = `${lifecycleDisplay.glyph} ${lifecycleDisplay.label}${compactionSuffix}`;
+  const hint = "Ctrl+K palette";
+
+  return { heartbeat, connection, model, lifecycle, hint };
+}
+
+export function buildLeftZoneText(segments: StatusBarSegments, includeHeartbeat: boolean): string {
+  const parts: string[] = [];
+  if (includeHeartbeat) {
+    parts.push(segments.heartbeat);
+  }
+  parts.push(segments.connection);
+  parts.push(segments.model);
+  parts.push(segments.lifecycle);
+  return parts.join(" │ ");
+}
+
+export function buildRightZoneText(segments: StatusBarSegments): string {
+  return segments.hint;
+}
+
+/**
+ * Determine which segments to show based on available width.
+ * Truncation priority (first to drop → last to drop):
+ *   shortcut hint → heartbeat → lifecycle detail → model (always visible)
+ *
+ * Returns: { showHint, showHeartbeat, showLifecycle }
+ */
+export interface TruncationResult {
+  showHint: boolean;
+  showHeartbeat: boolean;
+  showLifecycle: boolean;
+}
+
+export function resolveTruncation(
+  segments: StatusBarSegments,
+  terminalWidth: number,
+): TruncationResult {
+  // Padding: 1 left + 1 right = 2, separator between zones = 3 (" │ ")
+  const PADDING = 2;
+  const ZONE_SEPARATOR = 3;
+
+  // Full layout: left zone + zone separator + right zone
+  const fullLeft = buildLeftZoneText(segments, true);
+  const fullRight = buildRightZoneText(segments);
+  const fullWidth = fullLeft.length + ZONE_SEPARATOR + fullRight.length + PADDING;
+
+  if (fullWidth <= terminalWidth) {
+    return { showHint: true, showHeartbeat: true, showLifecycle: true };
+  }
+
+  // Drop hint first
+  const noHintWidth = fullLeft.length + PADDING;
+  if (noHintWidth <= terminalWidth) {
+    return { showHint: false, showHeartbeat: true, showLifecycle: true };
+  }
+
+  // Drop heartbeat
+  const noHeartbeatLeft = buildLeftZoneText(segments, false);
+  const noHeartbeatWidth = noHeartbeatLeft.length + PADDING;
+  if (noHeartbeatWidth <= terminalWidth) {
+    return { showHint: false, showHeartbeat: false, showLifecycle: true };
+  }
+
+  // Drop lifecycle detail — show only model + connection
+  return { showHint: false, showHeartbeat: false, showLifecycle: false };
+}
+
+export function buildTruncatedLeftText(
+  segments: StatusBarSegments,
+  truncation: TruncationResult,
+): string {
+  const parts: string[] = [];
+  if (truncation.showHeartbeat) {
+    parts.push(segments.heartbeat);
+  }
+  parts.push(segments.connection);
+  parts.push(segments.model);
+  if (truncation.showLifecycle) {
+    parts.push(segments.lifecycle);
+  }
+  return parts.join(" │ ");
+}
+
+// --- HeartbeatPulse component ---
 
 export interface HeartbeatPulseProps {
   connectionStatus: DaemonConnectionStatus;
@@ -84,33 +269,10 @@ export function HeartbeatPulse({ connectionStatus, compact = false }: HeartbeatP
   );
 }
 
+// --- ConnectionIndicator component ---
+
 export interface ConnectionIndicatorProps {
   connectionStatus: DaemonConnectionStatus;
-}
-
-export function getConnectionLabel(status: DaemonConnectionStatus): string {
-  switch (status) {
-    case "connected":
-      return "Connected";
-    case "disconnected":
-      return "Offline";
-    case "connecting":
-      return "Connecting...";
-    case "reconnecting":
-      return "Reconnecting...";
-  }
-}
-
-export function getConnectionGlyph(status: DaemonConnectionStatus): string {
-  switch (status) {
-    case "connected":
-      return "●";
-    case "disconnected":
-      return "○";
-    case "connecting":
-    case "reconnecting":
-      return "◌";
-  }
 }
 
 export function ConnectionIndicator({ connectionStatus }: ConnectionIndicatorProps) {
@@ -134,30 +296,95 @@ export function ConnectionIndicator({ connectionStatus }: ConnectionIndicatorPro
   );
 }
 
+// --- StatusBar component ---
+
 export interface StatusBarProps {
   version: string;
   dimensions: TerminalDimensions;
   showHelp: boolean;
   connectionStatus?: DaemonConnectionStatus;
+  daemonMode?: DaemonMode;
+  tokenCount?: number;
+  cost?: string | null;
+  compactionActive?: boolean;
 }
 
-export function StatusBar({ version, dimensions, showHelp, connectionStatus = "disconnected" }: StatusBarProps) {
+export function StatusBar({
+  dimensions,
+  connectionStatus = "disconnected",
+  daemonMode,
+  tokenCount = 0,
+  cost = null,
+  compactionActive: compactionProp,
+}: StatusBarProps) {
   const { state } = useApp();
   const { tokens } = useThemeTokens();
-  const streaming = state.isStreaming ? "Streaming" : "Idle";
-  const help = showHelp ? "Help on" : "Help off";
+
+  // Compaction auto-dismiss: if compactionProp goes true, show for COMPACTION_INDICATOR_DURATION_MS
+  const [compactionVisible, setCompactionVisible] = useState(false);
+  const compactionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (compactionProp) {
+      setCompactionVisible(true);
+
+      if (compactionTimerRef.current !== null) {
+        clearTimeout(compactionTimerRef.current);
+      }
+
+      compactionTimerRef.current = setTimeout(() => {
+        setCompactionVisible(false);
+        compactionTimerRef.current = null;
+      }, COMPACTION_INDICATOR_DURATION_MS);
+    }
+
+    return () => {
+      if (compactionTimerRef.current !== null) {
+        clearTimeout(compactionTimerRef.current);
+        compactionTimerRef.current = null;
+      }
+    };
+  }, [compactionProp]);
+
+  const lifecycleStatus = state.streamingLifecycleStatus;
+  const lifecycleDisplay = resolveLifecycleDisplay(lifecycleStatus, tokenCount, cost, state.activeToolName);
+
+  const segments = buildSegments(
+    connectionStatus,
+    state.currentModel,
+    lifecycleDisplay,
+    compactionVisible,
+    daemonMode,
+  );
+
+  const truncation = resolveTruncation(segments, dimensions.width);
+  const leftText = buildTruncatedLeftText(segments, truncation);
+  const rightText = truncation.showHint ? buildRightZoneText(segments) : "";
+
+  const lifecycleColor = tokens[lifecycleDisplay.colorToken as keyof typeof tokens] ?? tokens["text.primary"];
 
   return (
-    <Box style={{ height: 1, backgroundColor: tokens["surface.primary"], color: tokens["text.primary"], marginTop: 1, paddingLeft: 1 }}>
-      <Text>
-        {`v${version} | model ${state.currentModel} | `}
-      </Text>
-      <HeartbeatPulse connectionStatus={connectionStatus} compact={dimensions.width < 80} />
-      <Text>{" "}</Text>
-      <ConnectionIndicator connectionStatus={connectionStatus} />
-      <Text>
-        {` | ${state.status} | ${streaming} | ${dimensions.width}x${dimensions.height} | Tab/Shift+Tab focus | Ctrl+1/2/3 jump | q quit | ? help (${help})`}
-      </Text>
+    <Box style={{
+      height: 1,
+      backgroundColor: tokens["surface.primary"],
+      color: tokens["text.primary"],
+      marginTop: 1,
+      paddingLeft: 1,
+      paddingRight: 1,
+      flexDirection: "row",
+    }}>
+      <Box style={{ flexGrow: 1 }}>
+        <Text style={{ color: lifecycleColor }}>
+          {leftText}
+        </Text>
+      </Box>
+      {rightText.length > 0 && (
+        <Box>
+          <Text style={{ color: tokens["text.muted"] }}>
+            {rightText}
+          </Text>
+        </Box>
+      )}
     </Box>
   );
 }

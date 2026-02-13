@@ -20,14 +20,14 @@ function createTestContext(overrides: Partial<MutableTestState> = {}): {
 } {
   const state: MutableTestState = {
     model: overrides.model ?? "default",
-    theme: overrides.theme ?? "hearthstone",
+    theme: overrides.theme ?? "reins-dark",
     compactMode: overrides.compactMode ?? false,
     conversationCount: overrides.conversationCount ?? 1,
     conversationId: overrides.conversationId ?? "conversation-1",
     messages: overrides.messages ?? [],
   };
 
-  const themes = ["hearthstone", "daylight", "solarized-warm", "nord-frost", "rose-pine"] as const;
+  const themes = ["reins-dark", "reins-light", "tokyonight"] as const;
 
   const context: CommandHandlerContext = {
     catalog: SLASH_COMMANDS,
@@ -134,12 +134,12 @@ describe("slash command handlers", () => {
     expect(listResult.ok).toBe(true);
     if (listResult.ok) {
       expect(listResult.value.responseText).toContain("Available themes:");
-      expect(listResult.value.responseText).toContain("hearthstone (active)");
+      expect(listResult.value.responseText).toContain("reins-dark (active)");
     }
 
-    const switchResult = runCommand("/theme daylight", context);
+    const switchResult = runCommand("/theme reins-light", context);
     expect(switchResult.ok).toBe(true);
-    expect(state.theme).toBe("daylight");
+    expect(state.theme).toBe("reins-light");
   });
 
   test("session handlers return expected behavior", () => {

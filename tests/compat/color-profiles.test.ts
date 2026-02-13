@@ -4,20 +4,16 @@ import { hexTo256, resolveTheme256 } from "../../src/theme/fallback-256";
 import { createThemeRegistry, type BuiltInThemeName } from "../../src/theme/theme-registry";
 import { THEME_TOKEN_NAMES, validateThemeTokens, type ThemeTokens } from "../../src/theme/theme-schema";
 
-import daylightSource from "../../src/theme/builtins/daylight.json";
-import hearthstoneSource from "../../src/theme/builtins/hearthstone.json";
-import nordFrostSource from "../../src/theme/builtins/nord-frost.json";
-import rosePineSource from "../../src/theme/builtins/rose-pine.json";
-import solarizedWarmSource from "../../src/theme/builtins/solarized-warm.json";
+import reinsDarkSource from "../../src/theme/builtins/reins-dark.json";
+import reinsLightSource from "../../src/theme/builtins/reins-light.json";
+import tokyonightSource from "../../src/theme/builtins/tokyonight.json";
 
 const HEX_COLOR_PATTERN = /^#[0-9a-fA-F]{6}$/;
 
 const ALL_BUILTIN_THEMES: { name: BuiltInThemeName; source: unknown }[] = [
-  { name: "hearthstone", source: hearthstoneSource },
-  { name: "daylight", source: daylightSource },
-  { name: "solarized-warm", source: solarizedWarmSource },
-  { name: "nord-frost", source: nordFrostSource },
-  { name: "rose-pine", source: rosePineSource },
+  { name: "reins-dark", source: reinsDarkSource },
+  { name: "reins-light", source: reinsLightSource },
+  { name: "tokyonight", source: tokyonightSource },
 ];
 
 // ---------------------------------------------------------------------------
@@ -116,39 +112,39 @@ describe("256-color fallback profile", () => {
 // ---------------------------------------------------------------------------
 
 describe("theme switching correctness", () => {
-  test("switching from hearthstone to daylight changes token values", () => {
+  test("switching from reins-dark to reins-light changes token values", () => {
     const registryResult = createThemeRegistry();
     if (!registryResult.ok) throw new Error("Failed to create registry");
 
     const registry = registryResult.value;
-    const hearthstoneTokens = { ...registry.getTheme().tokens };
+    const darkTokens = { ...registry.getTheme().tokens };
 
-    const switchResult = registry.setTheme("daylight");
-    if (!switchResult.ok) throw new Error("Failed to switch to daylight");
+    const switchResult = registry.setTheme("reins-light");
+    if (!switchResult.ok) throw new Error("Failed to switch to reins-light");
 
-    const daylightTokens = registry.getTheme().tokens;
+    const lightTokens = registry.getTheme().tokens;
 
     // Themes must differ on at least some tokens
     let differenceCount = 0;
     for (const tokenName of THEME_TOKEN_NAMES) {
-      if (hearthstoneTokens[tokenName] !== daylightTokens[tokenName]) {
+      if (darkTokens[tokenName] !== lightTokens[tokenName]) {
         differenceCount++;
       }
     }
 
-    // Hearthstone (dark) and Daylight (light) should differ substantially
+    // Dark and light should differ substantially
     expect(differenceCount).toBeGreaterThan(THEME_TOKEN_NAMES.length / 2);
   });
 
-  test("round-trip switch: hearthstone → daylight → hearthstone restores original tokens", () => {
+  test("round-trip switch: reins-dark → reins-light → reins-dark restores original tokens", () => {
     const registryResult = createThemeRegistry();
     if (!registryResult.ok) throw new Error("Failed to create registry");
 
     const registry = registryResult.value;
     const originalTokens = { ...registry.getTheme().tokens };
 
-    registry.setTheme("daylight");
-    registry.setTheme("hearthstone");
+    registry.setTheme("reins-light");
+    registry.setTheme("reins-dark");
 
     const restoredTokens = registry.getTheme().tokens;
 
@@ -162,15 +158,15 @@ describe("theme switching correctness", () => {
     if (!registryResult.ok) throw new Error("Failed to create registry");
 
     const registry = registryResult.value;
-    const hearthstoneFallback = { ...registry.getTheme().fallback256 };
+    const darkFallback = { ...registry.getTheme().fallback256 };
 
-    registry.setTheme("daylight");
-    const daylightFallback = registry.getTheme().fallback256;
+    registry.setTheme("reins-light");
+    const lightFallback = registry.getTheme().fallback256;
 
     // Fallback indices should also differ between dark and light themes
     let differenceCount = 0;
     for (const tokenName of THEME_TOKEN_NAMES) {
-      if (hearthstoneFallback[tokenName] !== daylightFallback[tokenName]) {
+      if (darkFallback[tokenName] !== lightFallback[tokenName]) {
         differenceCount++;
       }
     }
@@ -183,13 +179,13 @@ describe("theme switching correctness", () => {
     if (!registryResult.ok) throw new Error("Failed to create registry");
 
     const registry = registryResult.value;
-    expect(registry.getActiveThemeName()).toBe("hearthstone");
+    expect(registry.getActiveThemeName()).toBe("reins-dark");
 
-    registry.setTheme("nord-frost");
-    expect(registry.getActiveThemeName()).toBe("nord-frost");
+    registry.setTheme("tokyonight");
+    expect(registry.getActiveThemeName()).toBe("tokyonight");
 
-    registry.setTheme("rose-pine");
-    expect(registry.getActiveThemeName()).toBe("rose-pine");
+    registry.setTheme("reins-light");
+    expect(registry.getActiveThemeName()).toBe("reins-light");
   });
 
   test("rapid sequential switching settles on final theme", () => {
@@ -198,19 +194,17 @@ describe("theme switching correctness", () => {
 
     const registry = registryResult.value;
     const themes: BuiltInThemeName[] = [
-      "daylight",
-      "solarized-warm",
-      "nord-frost",
-      "rose-pine",
-      "hearthstone",
+      "reins-light",
+      "tokyonight",
+      "reins-dark",
     ];
 
     for (const theme of themes) {
       registry.setTheme(theme);
     }
 
-    expect(registry.getActiveThemeName()).toBe("hearthstone");
-    expect(registry.getTheme().name).toBe("hearthstone");
+    expect(registry.getActiveThemeName()).toBe("reins-dark");
+    expect(registry.getTheme().name).toBe("reins-dark");
   });
 });
 
@@ -238,12 +232,12 @@ describe("theme edge cases", () => {
     const registry = registryResult.value;
     registry.setTheme("nonexistent-theme");
 
-    expect(registry.getActiveThemeName()).toBe("hearthstone");
-    expect(registry.getTheme().name).toBe("hearthstone");
+    expect(registry.getActiveThemeName()).toBe("reins-dark");
+    expect(registry.getTheme().name).toBe("reins-dark");
   });
 
   test("corrupted palette with missing tokens fails validation", () => {
-    const corrupted = { ...hearthstoneSource } as Record<string, string>;
+    const corrupted = { ...reinsDarkSource } as Record<string, string>;
     delete corrupted["surface.primary"];
     delete corrupted["text.primary"];
 
@@ -257,7 +251,7 @@ describe("theme edge cases", () => {
   });
 
   test("corrupted palette with invalid hex values fails validation", () => {
-    const corrupted = { ...hearthstoneSource, "accent.primary": "not-hex" };
+    const corrupted = { ...reinsDarkSource, "accent.primary": "not-hex" };
 
     const result = validateThemeTokens(corrupted);
     expect(result.ok).toBe(false);
@@ -286,7 +280,7 @@ describe("theme edge cases", () => {
   });
 
   test("extra unknown tokens are flagged as errors", () => {
-    const withExtra = { ...hearthstoneSource, "unknown.token": "#ff0000" };
+    const withExtra = { ...reinsDarkSource, "unknown.token": "#ff0000" };
 
     const result = validateThemeTokens(withExtra);
     expect(result.ok).toBe(false);

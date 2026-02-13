@@ -4,7 +4,6 @@ import { dispatchCommand, type CommandResult } from "../commands/handlers";
 import { parseSlashCommand } from "../commands/parser";
 import { SLASH_COMMANDS } from "../commands/registry";
 import { useDaemon } from "../daemon/daemon-context";
-
 import { useApp } from "../store";
 import { InputHistory } from "../lib";
 import { useThemeContext, useThemeTokens } from "../theme";
@@ -17,7 +16,9 @@ export interface InputAreaProps {
   onSubmit(text: string): void;
 }
 
-const MAX_INPUT_LENGTH = 4000;
+export type InputSubmissionKind = "empty" | "command" | "message";
+
+export const MAX_INPUT_LENGTH = 4000;
 
 function isUpKey(name?: string): boolean {
   return name === "up";
@@ -65,7 +66,7 @@ function clampText(text: string): string {
   return text.slice(0, MAX_INPUT_LENGTH);
 }
 
-export function classifyInputSubmission(text: string): "empty" | "command" | "message" {
+export function classifyInputSubmission(text: string): InputSubmissionKind {
   const trimmed = text.trim();
 
   if (trimmed.length === 0) {
@@ -106,7 +107,7 @@ function toDate(value: Date | string | number): Date {
 export function InputArea({ isFocused, borderColor, onSubmit }: InputAreaProps) {
   const { state, dispatch } = useApp();
   const conversations = useConversations();
-  const { client: daemonClient } = useDaemon();
+  const { client: daemonClient, mode: daemonMode } = useDaemon();
   const { tokens } = useThemeTokens();
   const { registry, setTheme } = useThemeContext();
   const renderer = useRenderer();
@@ -280,7 +281,7 @@ export function InputArea({ isFocused, borderColor, onSubmit }: InputAreaProps) 
     >
       <Input
         focused={isFocused}
-        placeholder="Type a message... (Enter to send)"
+        placeholder={daemonMode === "mock" ? "⚠ Daemon offline — responses are simulated" : "Type a message... (Enter to send)"}
         value={input}
         onInput={handleInput}
         onSubmit={handleSubmit}
@@ -288,9 +289,12 @@ export function InputArea({ isFocused, borderColor, onSubmit }: InputAreaProps) 
       <Box style={{ flexDirection: "row" }}>
         <Text
           content={
-            validationError ?? (isFocused ? "Enter to send" : "Press Tab to focus input")
+            validationError
+              ?? (daemonMode === "mock"
+                ? "⚠ Daemon disconnected — start daemon for real responses"
+                : isFocused ? "Enter to send" : "Press Tab to focus input")
           }
-          style={{ color: validationError ? tokens["status.error"] : tokens["text.secondary"] }}
+          style={{ color: validationError ? tokens["status.error"] : daemonMode === "mock" ? tokens["status.warning"] : tokens["text.secondary"] }}
         />
         <Text content={` ${input.length}/${MAX_INPUT_LENGTH}`} style={{ color: tokens["text.secondary"] }} />
       </Box>

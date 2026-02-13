@@ -22,6 +22,18 @@ export interface SlashCommandDefinition {
   readonly handlerKey: SlashCommandHandlerKey;
 }
 
+export type PaletteActionCategory = "actions" | "conversations" | "commands" | "panels" | "settings";
+
+export interface PaletteActionDefinition {
+  readonly id: string;
+  readonly label: string;
+  readonly description: string;
+  readonly category: PaletteActionCategory;
+  readonly shortcutHint?: string;
+  readonly keywords: readonly string[];
+  readonly actionKey: string;
+}
+
 const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
   Object.freeze({
     name: "help",
@@ -134,3 +146,107 @@ export function getSlashCommandByNameOrAlias(nameOrAlias: string): SlashCommandD
 
   return COMMAND_LOOKUP.get(normalized) ?? null;
 }
+
+const PALETTE_ACTION_DEFINITIONS: readonly PaletteActionDefinition[] = Object.freeze([
+  // Conversations
+  Object.freeze({
+    id: "action:new-chat",
+    label: "New Chat",
+    description: "Start a new conversation.",
+    category: "actions",
+    shortcutHint: "Ctrl+N",
+    keywords: Object.freeze(["new", "chat", "conversation", "create"]),
+    actionKey: "new-chat",
+  }),
+  Object.freeze({
+    id: "action:switch-conversation",
+    label: "Switch Conversation",
+    description: "Jump to another conversation.",
+    category: "conversations",
+    keywords: Object.freeze(["switch", "conversation", "jump", "open", "chat"]),
+    actionKey: "switch-conversation",
+  }),
+  Object.freeze({
+    id: "action:search-conversations",
+    label: "Search Conversations",
+    description: "Find a conversation by title or content.",
+    category: "conversations",
+    keywords: Object.freeze(["search", "find", "conversation", "filter"]),
+    actionKey: "search-conversations",
+  }),
+  // Model/Provider
+  Object.freeze({
+    id: "action:switch-model",
+    label: "Switch Model",
+    description: "Open the model selector.",
+    category: "actions",
+    shortcutHint: "Ctrl+M",
+    keywords: Object.freeze(["model", "switch", "provider", "ai", "llm"]),
+    actionKey: "switch-model",
+  }),
+  // Theme
+  Object.freeze({
+    id: "action:switch-theme",
+    label: "Switch Theme",
+    description: "Change the visual theme.",
+    category: "actions",
+    keywords: Object.freeze(["theme", "appearance", "dark", "light", "tokyonight"]),
+    actionKey: "switch-theme",
+  }),
+  // Panels
+  Object.freeze({
+    id: "action:toggle-drawer",
+    label: "Toggle Drawer",
+    description: "Show or hide the conversation drawer.",
+    category: "panels",
+    shortcutHint: "Ctrl+1",
+    keywords: Object.freeze(["drawer", "sidebar", "panel", "conversations"]),
+    actionKey: "toggle-drawer",
+  }),
+  Object.freeze({
+    id: "action:toggle-today",
+    label: "Toggle Today Panel",
+    description: "Show or hide the today panel.",
+    category: "panels",
+    shortcutHint: "Ctrl+2",
+    keywords: Object.freeze(["today", "panel", "activity", "summary"]),
+    actionKey: "toggle-today",
+  }),
+  // Settings/Help
+  Object.freeze({
+    id: "action:open-help",
+    label: "Open Help",
+    description: "Show keyboard shortcuts and help.",
+    category: "settings",
+    shortcutHint: "?",
+    keywords: Object.freeze(["help", "shortcuts", "keyboard", "guide"]),
+    actionKey: "open-help",
+  }),
+  Object.freeze({
+    id: "action:open-settings",
+    label: "Open Settings",
+    description: "Open application settings.",
+    category: "settings",
+    keywords: Object.freeze(["settings", "preferences", "config", "options"]),
+    actionKey: "open-settings",
+  }),
+  // General
+  Object.freeze({
+    id: "action:clear-chat",
+    label: "Clear Chat",
+    description: "Clear the current conversation messages.",
+    category: "actions",
+    keywords: Object.freeze(["clear", "chat", "messages", "reset"]),
+    actionKey: "clear-chat",
+  }),
+  Object.freeze({
+    id: "action:copy-last-response",
+    label: "Copy Last Response",
+    description: "Copy the last assistant response to clipboard.",
+    category: "actions",
+    keywords: Object.freeze(["copy", "response", "clipboard", "last"]),
+    actionKey: "copy-last-response",
+  }),
+]);
+
+export const PALETTE_ACTIONS: readonly PaletteActionDefinition[] = PALETTE_ACTION_DEFINITIONS;

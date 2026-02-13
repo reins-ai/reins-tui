@@ -104,8 +104,23 @@ describe("Edge Cases", () => {
     expect(twice.messages[0]?.isStreaming).toBe(false);
   });
 
-  test("handles focus cycling without leaving known panels", () => {
+  test("handles focus cycling without leaving known panels (zen default)", () => {
     let state = DEFAULT_STATE;
+    const visitedPanels = new Set<string>();
+
+    // Default is zen mode — sidebar not in cycle
+    for (let index = 0; index < 12; index += 1) {
+      state = appReducer(state, { type: "FOCUS_NEXT" });
+      visitedPanels.add(state.focusedPanel);
+    }
+
+    expect(visitedPanels.has("conversation")).toBe(true);
+    expect(visitedPanels.has("input")).toBe(true);
+    expect(visitedPanels.size).toBe(2);
+  });
+
+  test("handles focus cycling with sidebar when drawer is open", () => {
+    let state = appReducer(DEFAULT_STATE, { type: "TOGGLE_PANEL", payload: "drawer" });
     const visitedPanels = new Set<string>();
 
     for (let index = 0; index < 12; index += 1) {

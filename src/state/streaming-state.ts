@@ -11,10 +11,25 @@ export interface StreamToolCall {
   id: string;
   name: string;
   status: "running" | "complete" | "error";
+  sequenceIndex: number;
+  args?: Record<string, unknown>;
   startedAt: string;
   completedAt?: string;
   result?: string;
   error?: string;
+}
+
+export interface TurnContentBlock {
+  type: "text" | "tool-call";
+  toolCallId?: string;
+  text?: string;
+}
+
+export interface MultiToolTurnState {
+  contentBlocks: TurnContentBlock[];
+  synthesisContent: string;
+  hasToolCalls: boolean;
+  textBeforeTools: string;
 }
 
 export type StreamingEvent =
@@ -38,6 +53,7 @@ export type StreamingEvent =
       messageId: string;
       toolCallId: string;
       name: string;
+      args?: Record<string, unknown>;
     }
   | {
       type: "tool-call-complete";
@@ -68,6 +84,7 @@ export type StreamingState =
       conversationId: string | null;
       messages: DaemonMessage[];
       toolCalls: StreamToolCall[];
+      turnState: MultiToolTurnState;
     }
   | {
       status: "sending";
@@ -76,6 +93,7 @@ export type StreamingState =
       messages: DaemonMessage[];
       pendingUserMessageId: string;
       toolCalls: StreamToolCall[];
+      turnState: MultiToolTurnState;
     }
   | {
       status: "thinking";
@@ -85,6 +103,7 @@ export type StreamingState =
       assistantMessageId: string;
       partialContent: string;
       toolCalls: StreamToolCall[];
+      turnState: MultiToolTurnState;
     }
   | {
       status: "streaming";
@@ -94,6 +113,7 @@ export type StreamingState =
       assistantMessageId: string;
       partialContent: string;
       toolCalls: StreamToolCall[];
+      turnState: MultiToolTurnState;
     }
   | {
       status: "complete";
@@ -103,6 +123,7 @@ export type StreamingState =
       assistantMessageId: string;
       content: string;
       toolCalls: StreamToolCall[];
+      turnState: MultiToolTurnState;
       completedAt: string;
     }
   | {
@@ -114,8 +135,18 @@ export type StreamingState =
       partialContent: string;
       error: DaemonClientError;
       toolCalls: StreamToolCall[];
+      turnState: MultiToolTurnState;
       failedAt: string;
     };
+
+export function createInitialTurnState(): MultiToolTurnState {
+  return {
+    contentBlocks: [],
+    synthesisContent: "",
+    hasToolCalls: false,
+    textBeforeTools: "",
+  };
+}
 
 export function createInitialStreamingState(timestamp: string): StreamingState {
   return {
@@ -124,6 +155,7 @@ export function createInitialStreamingState(timestamp: string): StreamingState {
     conversationId: null,
     messages: [],
     toolCalls: [],
+    turnState: createInitialTurnState(),
   };
 }
 
@@ -233,10 +265,13 @@ function resolveConversationId(state: StreamingState, event: StreamingEvent): st
 
 function applyToolCallStart(toolCalls: StreamToolCall[], event: Extract<StreamingEvent, { type: "tool-call-start" }>): StreamToolCall[] {
   const index = toolCalls.findIndex((toolCall) => toolCall.id === event.toolCallId);
+  const nextSequenceIndex = index === -1 ? toolCalls.length : toolCalls[index].sequenceIndex;
   const nextToolCall: StreamToolCall = {
     id: event.toolCallId,
     name: event.name,
     status: "running",
+    sequenceIndex: nextSequenceIndex,
+    args: event.args,
     startedAt: event.timestamp,
   };
 
@@ -258,6 +293,7 @@ function applyToolCallComplete(toolCalls: StreamToolCall[], event: Extract<Strea
         id: event.toolCallId,
         name: "unknown",
         status: event.error ? "error" : "complete",
+        sequenceIndex: toolCalls.length,
         startedAt: event.timestamp,
         completedAt: event.timestamp,
         result: event.result,
@@ -278,6 +314,52 @@ function applyToolCallComplete(toolCalls: StreamToolCall[], event: Extract<Strea
   return next;
 }
 
+function buildTurnState(
+  toolCalls: StreamToolCall[],
+  partialContent: string,
+  previousTurnState: MultiToolTurnState,
+): MultiToolTurnState {
+  const hasToolCalls = toolCalls.length > 0;
+
+  if (!hasToolCalls) {
+    return {
+      contentBlocks: partialContent.length > 0
+        ? [{ type: "text", text: partialContent }]
+        : [],
+      synthesisContent: "",
+      hasToolCalls: false,
+      textBeforeTools: partialContent,
+    };
+  }
+
+  const textBeforeTools = previousTurnState.textBeforeTools;
+  const blocks: TurnContentBlock[] = [];
+
+  if (textBeforeTools.length > 0) {
+    blocks.push({ type: "text", text: textBeforeTools });
+  }
+
+  const sorted = [...toolCalls].sort((a, b) => a.sequenceIndex - b.sequenceIndex);
+  for (const toolCall of sorted) {
+    blocks.push({ type: "tool-call", toolCallId: toolCall.id });
+  }
+
+  const synthesisContent = partialContent.length > textBeforeTools.length
+    ? partialContent.slice(textBeforeTools.length)
+    : previousTurnState.synthesisContent;
+
+  if (synthesisContent.length > 0) {
+    blocks.push({ type: "text", text: synthesisContent });
+  }
+
+  return {
+    contentBlocks: blocks,
+    synthesisContent,
+    hasToolCalls: true,
+    textBeforeTools,
+  };
+}
+
 export function reduceStreamingState(state: StreamingState, event: StreamingEvent): StreamingState {
   const lifecycle = reduceStatusMachine(state.lifecycle, toStatusMachineEvent(event));
   const conversationId = resolveConversationId(state, event);
@@ -294,6 +376,7 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
           conversationId,
           messages: state.messages,
           toolCalls: [],
+          turnState: createInitialTurnState(),
         };
       }
 
@@ -310,6 +393,7 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
         messages: [...state.messages, event.userMessage],
         pendingUserMessageId: event.userMessage.id,
         toolCalls: [],
+        turnState: createInitialTurnState(),
       };
     }
     case "message-ack": {
@@ -325,6 +409,7 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
         assistantMessageId: event.assistantMessageId,
         partialContent: "",
         toolCalls: state.toolCalls,
+        turnState: state.turnState,
       };
     }
     case "start": {
@@ -340,6 +425,7 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
         assistantMessageId: event.messageId,
         partialContent: "",
         toolCalls: state.toolCalls,
+        turnState: state.turnState,
       };
     }
     case "delta": {
@@ -350,6 +436,8 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
       const currentPartial =
         state.status === "streaming" || state.status === "thinking" || state.status === "error" ? state.partialContent : "";
       const partialContent = `${currentPartial}${event.delta}`;
+      const nextToolCalls = state.toolCalls;
+      const nextTurnState = buildTurnState(nextToolCalls, partialContent, state.turnState);
       return {
         status: "streaming",
         lifecycle,
@@ -357,7 +445,8 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
         messages: upsertAssistantMessage(state.messages, event.messageId, partialContent, event.timestamp),
         assistantMessageId: event.messageId,
         partialContent,
-        toolCalls: state.toolCalls,
+        toolCalls: nextToolCalls,
+        turnState: nextTurnState,
       };
     }
     case "complete": {
@@ -365,6 +454,7 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
         return state;
       }
 
+      const finalTurnState = buildTurnState(state.toolCalls, event.content, state.turnState);
       return {
         status: "complete",
         lifecycle,
@@ -373,6 +463,7 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
         assistantMessageId: event.messageId,
         content: event.content,
         toolCalls: state.toolCalls,
+        turnState: finalTurnState,
         completedAt: event.timestamp,
       };
     }
@@ -393,6 +484,7 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
         partialContent,
         error: event.error,
         toolCalls: state.toolCalls,
+        turnState: state.turnState,
         failedAt: event.timestamp,
       };
     }
@@ -403,6 +495,11 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
 
       const basePartial =
         state.status === "streaming" || state.status === "thinking" || state.status === "error" ? state.partialContent : "";
+      const nextToolCalls = applyToolCallStart(state.toolCalls, event);
+      const prevTurnState: MultiToolTurnState = state.turnState.hasToolCalls
+        ? state.turnState
+        : { ...state.turnState, textBeforeTools: basePartial };
+      const nextTurnState = buildTurnState(nextToolCalls, basePartial, prevTurnState);
 
       return {
         status: "streaming",
@@ -411,7 +508,8 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
         messages: state.messages,
         assistantMessageId: event.messageId,
         partialContent: basePartial,
-        toolCalls: applyToolCallStart(state.toolCalls, event),
+        toolCalls: nextToolCalls,
+        turnState: nextTurnState,
       };
     }
     case "tool-call-complete": {
@@ -421,6 +519,8 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
 
       const basePartial =
         state.status === "streaming" || state.status === "thinking" || state.status === "error" ? state.partialContent : "";
+      const nextToolCalls = applyToolCallComplete(state.toolCalls, event);
+      const nextTurnState = buildTurnState(nextToolCalls, basePartial, state.turnState);
 
       return {
         status: "streaming",
@@ -429,7 +529,8 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
         messages: state.messages,
         assistantMessageId: event.messageId,
         partialContent: basePartial,
-        toolCalls: applyToolCallComplete(state.toolCalls, event),
+        toolCalls: nextToolCalls,
+        turnState: nextTurnState,
       };
     }
     default:

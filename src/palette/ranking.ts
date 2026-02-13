@@ -13,6 +13,15 @@ export interface RankingOptions {
   readonly now?: () => number;
   readonly categoryOrder?: readonly SearchCategory[];
   readonly recentWindowMs?: number;
+  readonly recencyTracker?: RecencyTracker;
+}
+
+interface ResolvedRankingOptions {
+  readonly limit: number;
+  readonly now: () => number;
+  readonly categoryOrder: readonly SearchCategory[];
+  readonly recentWindowMs: number;
+  readonly recencyTracker: RecencyTracker | undefined;
 }
 
 export interface RankedSearchResult<ActionType = string> extends FuzzySearchResult<ActionType> {
@@ -43,6 +52,35 @@ const MATCH_WEIGHT: Readonly<Record<MatchKind, number>> = Object.freeze({
   fuzzy: 40,
   empty: 0,
 });
+
+const SESSION_RECENCY_BOOST = 160;
+const SESSION_RECENCY_DECAY = 0.85;
+
+export class RecencyTracker {
+  private usageOrder: string[] = [];
+
+  recordUsage(itemId: string): void {
+    this.usageOrder = this.usageOrder.filter((id) => id !== itemId);
+    this.usageOrder.unshift(itemId);
+  }
+
+  getBoost(itemId: string): number {
+    const index = this.usageOrder.indexOf(itemId);
+    if (index < 0) {
+      return 0;
+    }
+
+    return SESSION_RECENCY_BOOST * Math.pow(SESSION_RECENCY_DECAY, index);
+  }
+
+  getUsageOrder(): readonly string[] {
+    return this.usageOrder;
+  }
+
+  reset(): void {
+    this.usageOrder = [];
+  }
+}
 
 function createCategoryIndex(categoryOrder: readonly SearchCategory[]): ReadonlyMap<SearchCategory, number> {
   const map = new Map<SearchCategory, number>();
@@ -115,9 +153,17 @@ function compareByCategoryThenLabel(
   return left.item.label.localeCompare(right.item.label);
 }
 
+function sessionRecencyBoost(itemId: string, tracker: RecencyTracker | undefined): number {
+  if (!tracker) {
+    return 0;
+  }
+
+  return tracker.getBoost(itemId);
+}
+
 function rankNonEmptyQuery<ActionType>(
   matches: readonly FuzzySearchResult<ActionType>[],
-  options: Required<RankingOptions>,
+  options: ResolvedRankingOptions,
 ): readonly RankedSearchResult<ActionType>[] {
   const now = options.now();
   const categoryIndex = createCategoryIndex(options.categoryOrder);
@@ -128,7 +174,8 @@ function rankNonEmptyQuery<ActionType>(
       MATCH_WEIGHT[match.matchKind] +
       recencyBoost(match.item, now, options.recentWindowMs) +
       popularityBoost(match.item) +
-      categoryBoost(match.item, categoryIndex);
+      categoryBoost(match.item, categoryIndex) +
+      sessionRecencyBoost(match.item.id, options.recencyTracker);
 
     return {
       ...match,
@@ -159,13 +206,17 @@ function rankNonEmptyQuery<ActionType>(
 
 function rankEmptyQuery<ActionType>(
   matches: readonly FuzzySearchResult<ActionType>[],
-  options: Required<RankingOptions>,
+  options: ResolvedRankingOptions,
 ): readonly RankedSearchResult<ActionType>[] {
   const now = options.now();
   const categoryIndex = createCategoryIndex(options.categoryOrder);
 
   const ranked = matches.map((match) => {
-    const rankScore = recencyBoost(match.item, now, options.recentWindowMs) + popularityBoost(match.item) + categoryBoost(match.item, categoryIndex);
+    const rankScore =
+      recencyBoost(match.item, now, options.recentWindowMs) +
+      popularityBoost(match.item) +
+      categoryBoost(match.item, categoryIndex) +
+      sessionRecencyBoost(match.item.id, options.recencyTracker);
     return {
       ...match,
       rankScore,
@@ -193,11 +244,12 @@ export function rankSearchResults<ActionType>(
   options: RankingOptions = {},
 ): readonly RankedSearchResult<ActionType>[] {
   const normalizedQuery = query.trim();
-  const resolvedOptions: Required<RankingOptions> = {
+  const resolvedOptions: ResolvedRankingOptions = {
     limit: options.limit ?? DEFAULT_LIMIT,
     now: options.now ?? (() => Date.now()),
     categoryOrder: options.categoryOrder ?? DEFAULT_CATEGORY_ORDER,
     recentWindowMs: options.recentWindowMs ?? DEFAULT_RECENT_WINDOW_MS,
+    recencyTracker: options.recencyTracker,
   };
 
   const matches = searchFuzzyIndex(index, normalizedQuery);

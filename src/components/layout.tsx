@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import type { DaemonConnectionStatus } from "../daemon/contracts";
+import type { DaemonMode } from "../daemon/daemon-context";
 import type { FocusedPanel } from "../store";
-import { useApp, getLayoutVisibility } from "../store";
+import { useApp } from "../store";
 import { useThemeTokens } from "../theme";
 import { Box, Text, type TerminalDimensions } from "../ui";
 import {
@@ -11,10 +12,11 @@ import {
   didBandChange,
   type BreakpointState,
 } from "../layout/breakpoints";
-import { ConversationPanel } from "./conversation-panel";
-import { InputArea } from "./input-area";
-import { Sidebar } from "./sidebar";
+import { ChatScreen } from "../screens/chat-screen";
+import { SidebarContent } from "./sidebar";
 import { StatusBar } from "./status-bar";
+import { DrawerPanel } from "./drawer-panel";
+import { ModalPanel } from "./modal-panel";
 
 export interface PanelBorderColors {
   sidebar: string;
@@ -39,6 +41,7 @@ export interface LayoutProps {
   dimensions: TerminalDimensions;
   showHelp: boolean;
   connectionStatus: DaemonConnectionStatus;
+  daemonMode?: DaemonMode;
   onSubmitMessage(text: string): void;
 }
 
@@ -87,69 +90,78 @@ function useBreakpointConstraints(columns: number): BreakpointState {
   return breakpointState;
 }
 
-export function Layout({ version, dimensions, showHelp, connectionStatus, onSubmitMessage }: LayoutProps) {
-  const { state } = useApp();
+const DRAWER_WIDTH = 32;
+const TODAY_PANEL_WIDTH = 34;
+
+export function Layout({ version, dimensions, showHelp, connectionStatus, daemonMode, onSubmitMessage }: LayoutProps) {
+  const { state, dispatch } = useApp();
   const { tokens } = useThemeTokens();
 
   const breakpoint = useBreakpointConstraints(dimensions.width);
-  const effectiveMode = breakpoint.constrainedMode;
-  const visibility = getLayoutVisibility(effectiveMode);
 
   const panelBorders = getPanelBorderColors(state.focusedPanel, tokens["border.focus"], tokens["border.subtle"]);
+
+  const dismissDrawer = useCallback(() => {
+    dispatch({ type: "DISMISS_PANEL", payload: "drawer" });
+  }, [dispatch]);
+
+  const dismissToday = useCallback(() => {
+    dispatch({ type: "DISMISS_PANEL", payload: "today" });
+  }, [dispatch]);
+
+  const dismissModal = useCallback(() => {
+    dispatch({ type: "DISMISS_PANEL", payload: "modal" });
+  }, [dispatch]);
 
   return (
     <Box style={{ flexDirection: "column", height: "100%" }}>
       <Box style={{ flexDirection: "row", flexGrow: 1 }}>
-        {visibility.showSidebar ? (
-          <Sidebar isFocused={state.focusedPanel === "sidebar"} borderColor={panelBorders.sidebar} />
-        ) : null}
-
-        <Box style={{ flexGrow: 1, marginLeft: visibility.showSidebar ? 1 : 0, flexDirection: "column" }}>
-          <ConversationPanel
-            isFocused={state.focusedPanel === "conversation"}
-            borderColor={panelBorders.conversation}
-          />
-          <InputArea
-            isFocused={state.focusedPanel === "input"}
-            borderColor={panelBorders.input}
-            onSubmit={onSubmitMessage}
-          />
-        </Box>
-
-        {visibility.showActivityPanel ? (
-          <Box
-            style={{
-              width: breakpoint.panelWidths.activity,
-              marginLeft: 1,
-              border: true,
-              borderColor: tokens["border.subtle"],
-              padding: 1,
-              flexDirection: "column",
-            }}
-          >
-            <Text content="Activity" style={{ color: tokens["text.secondary"] }} />
-            <Text content="Tool calls and events" style={{ color: tokens["text.muted"] }} />
-          </Box>
-        ) : null}
-
-        {breakpoint.showExpandedPanel ? (
-          <Box
-            style={{
-              width: breakpoint.panelWidths.expanded,
-              marginLeft: 1,
-              border: true,
-              borderColor: tokens["border.subtle"],
-              padding: 1,
-              flexDirection: "column",
-            }}
-          >
-            <Text content="Details" style={{ color: tokens["text.secondary"] }} />
-            <Text content="Expanded view" style={{ color: tokens["text.muted"] }} />
-          </Box>
-        ) : null}
+        <ChatScreen
+          panelBorders={panelBorders}
+          focusedPanel={state.focusedPanel}
+          showSidebar={false}
+          showActivityPanel={false}
+          showExpandedPanel={false}
+          breakpoint={breakpoint}
+          onSubmitMessage={onSubmitMessage}
+        />
       </Box>
 
-      <StatusBar version={version} dimensions={dimensions} showHelp={showHelp} connectionStatus={connectionStatus} />
+      {/* Summoned left drawer with sidebar content */}
+      <DrawerPanel
+        side="left"
+        width={DRAWER_WIDTH}
+        visible={state.panels.drawer.visible}
+        title={state.panels.drawer.pinned ? "Conversations 📌" : "Conversations"}
+        onClose={dismissDrawer}
+      >
+        <SidebarContent
+          isFocused={state.panels.drawer.visible && state.focusedPanel === "sidebar"}
+        />
+      </DrawerPanel>
+
+      {/* Summoned right today/activity panel */}
+      <DrawerPanel
+        side="right"
+        width={TODAY_PANEL_WIDTH}
+        visible={state.panels.today.visible}
+        title={state.panels.today.pinned ? "Today 📌" : "Today"}
+        onClose={dismissToday}
+      >
+        <Text content="Activity" style={{ color: tokens["text.secondary"] }} />
+        <Text content="Tool calls and events" style={{ color: tokens["text.muted"] }} />
+      </DrawerPanel>
+
+      {/* Summoned center modal */}
+      <ModalPanel
+        visible={state.panels.modal.visible}
+        title="Settings"
+        onClose={dismissModal}
+      >
+        <Text content="Settings and preferences" style={{ color: tokens["text.secondary"] }} />
+      </ModalPanel>
+
+      <StatusBar version={version} dimensions={dimensions} showHelp={showHelp} connectionStatus={connectionStatus} daemonMode={daemonMode} />
     </Box>
   );
 }

@@ -25,8 +25,29 @@ describe("appReducer", () => {
     expect(next.focusedPanel).toBe("sidebar");
   });
 
-  test("handles FOCUS_NEXT in cycle order", () => {
-    const sidebarState = { ...DEFAULT_STATE, focusedPanel: "sidebar" as const };
+  test("handles FOCUS_NEXT in cycle order (default zen: conversation → input)", () => {
+    const conversationState = DEFAULT_STATE; // default focus is conversation
+    const inputState = appReducer(conversationState, { type: "FOCUS_NEXT" });
+    const wrappedState = appReducer(inputState, { type: "FOCUS_NEXT" });
+
+    expect(conversationState.focusedPanel).toBe("conversation");
+    expect(inputState.focusedPanel).toBe("input");
+    expect(wrappedState.focusedPanel).toBe("conversation");
+  });
+
+  test("handles FOCUS_PREV in reverse cycle order (default zen: conversation → input)", () => {
+    const conversationState = DEFAULT_STATE; // default focus is conversation
+    const inputState = appReducer(conversationState, { type: "FOCUS_PREV" });
+    const wrappedState = appReducer(inputState, { type: "FOCUS_PREV" });
+
+    expect(conversationState.focusedPanel).toBe("conversation");
+    expect(inputState.focusedPanel).toBe("input");
+    expect(wrappedState.focusedPanel).toBe("conversation");
+  });
+
+  test("handles FOCUS_NEXT with sidebar when drawer is open", () => {
+    const withDrawer = appReducer(DEFAULT_STATE, { type: "TOGGLE_PANEL", payload: "drawer" });
+    const sidebarState = { ...withDrawer, focusedPanel: "sidebar" as const };
     const conversationState = appReducer(sidebarState, { type: "FOCUS_NEXT" });
     const inputState = appReducer(conversationState, { type: "FOCUS_NEXT" });
     const wrappedState = appReducer(inputState, { type: "FOCUS_NEXT" });
@@ -34,17 +55,6 @@ describe("appReducer", () => {
     expect(conversationState.focusedPanel).toBe("conversation");
     expect(inputState.focusedPanel).toBe("input");
     expect(wrappedState.focusedPanel).toBe("sidebar");
-  });
-
-  test("handles FOCUS_PREV in reverse cycle order", () => {
-    const inputState = { ...DEFAULT_STATE, focusedPanel: "input" as const };
-    const conversationState = appReducer(inputState, { type: "FOCUS_PREV" });
-    const sidebarState = appReducer(conversationState, { type: "FOCUS_PREV" });
-    const wrappedState = appReducer(sidebarState, { type: "FOCUS_PREV" });
-
-    expect(conversationState.focusedPanel).toBe("conversation");
-    expect(sidebarState.focusedPanel).toBe("sidebar");
-    expect(wrappedState.focusedPanel).toBe("input");
   });
 
   test("handles SET_STREAMING", () => {
