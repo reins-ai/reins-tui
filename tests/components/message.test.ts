@@ -472,3 +472,231 @@ describe("tool preview formatting", () => {
     expect(preview).toContain("hello");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Mixed sequence reload parity (MH1, MH3, MH4)
+// ---------------------------------------------------------------------------
+
+describe("mixed sequence reload parity", () => {
+  const getRoleBorder = makeGetRoleBorder(tokens);
+
+  /**
+   * Simulates a realistic multi-turn conversation with interleaved
+   * assistant text, tool calls, tool results, and user follow-ups.
+   */
+  function buildMixedSequence(): {
+    live: DisplayMessage[];
+    hydrated: DisplayMessage[];
+  } {
+    const t1 = new Date("2026-02-13T10:00:00Z");
+    const t2 = new Date("2026-02-13T10:00:05Z");
+    const t3 = new Date("2026-02-13T10:00:30Z");
+    const t4 = new Date("2026-02-13T10:01:00Z");
+
+    const live: DisplayMessage[] = [
+      makeLiveMessage("user", "List the files in /src", { createdAt: t1 }),
+      makeLiveMessage("assistant", "Let me check that for you.", {
+        createdAt: t2,
+        toolCalls: [{
+          id: "tc-ls",
+          name: "bash",
+          status: "complete" as const,
+          args: { command: "ls /src" },
+          result: "index.ts\napp.tsx\nutils.ts",
+        }],
+      }),
+      makeLiveMessage("assistant", "Here are the files:\n- index.ts\n- app.tsx\n- utils.ts", {
+        createdAt: t3,
+      }),
+      makeLiveMessage("user", "Thanks! Now show me index.ts", { createdAt: t4 }),
+    ];
+
+    const hydrated: DisplayMessage[] = [
+      makeHydratedMessage("user", "List the files in /src", {
+        createdAt: t1.toISOString(),
+        ordering: { timestampMs: t1.getTime(), fallbackIndex: 0 },
+      }),
+      makeHydratedMessage("assistant", "Let me check that for you.", {
+        createdAt: t2.toISOString(),
+        ordering: { timestampMs: t2.getTime(), fallbackIndex: 1 },
+        payload: {
+          text: "Let me check that for you.",
+          blocks: [
+            { type: "text", text: "Let me check that for you." },
+            { type: "tool-use", toolCallId: "tc-ls", name: "bash", args: { command: "ls /src" } },
+            { type: "tool-result", toolCallId: "tc-ls", output: "index.ts\napp.tsx\nutils.ts" },
+          ],
+        },
+      }),
+      makeHydratedMessage("assistant", "Here are the files:\n- index.ts\n- app.tsx\n- utils.ts", {
+        createdAt: t3.toISOString(),
+        ordering: { timestampMs: t3.getTime(), fallbackIndex: 2 },
+      }),
+      makeHydratedMessage("user", "Thanks! Now show me index.ts", {
+        createdAt: t4.toISOString(),
+        ordering: { timestampMs: t4.getTime(), fallbackIndex: 3 },
+      }),
+    ];
+
+    return { live, hydrated };
+  }
+
+  test("mixed sequence preserves role order across live and hydrated", () => {
+    const { live, hydrated } = buildMixedSequence();
+
+    expect(live).toHaveLength(hydrated.length);
+    for (let i = 0; i < live.length; i++) {
+      expect(live[i].role).toBe(hydrated[i].role);
+    }
+  });
+
+  test("mixed sequence text content matches between live and hydrated", () => {
+    const { live, hydrated } = buildMixedSequence();
+
+    for (let i = 0; i < live.length; i++) {
+      expect(live[i].content).toBe(hydrated[i].content);
+    }
+  });
+
+  test("mixed sequence role labels match between live and hydrated", () => {
+    const { live, hydrated } = buildMixedSequence();
+
+    for (let i = 0; i < live.length; i++) {
+      expect(getRoleGlyph(live[i].role)).toBe(getRoleGlyph(hydrated[i].role));
+      expect(getRoleColor(live[i].role, tokens)).toBe(getRoleColor(hydrated[i].role, tokens));
+    }
+  });
+
+  test("mixed sequence block styling matches between live and hydrated", () => {
+    const { live, hydrated } = buildMixedSequence();
+
+    for (let i = 0; i < live.length; i++) {
+      const liveStyle = getMessageBlockStyle(live[i].role, tokens, getRoleBorder);
+      const hydratedStyle = getMessageBlockStyle(hydrated[i].role, tokens, getRoleBorder);
+      expect(liveStyle.accentColor).toBe(hydratedStyle.accentColor);
+      expect(liveStyle.backgroundColor).toBe(hydratedStyle.backgroundColor);
+    }
+  });
+
+  test("mixed sequence has no escaped artifacts in any hydrated message", () => {
+    const { hydrated } = buildMixedSequence();
+
+    for (const msg of hydrated) {
+      expect(msg.content).not.toMatch(ESCAPED_SEQUENCE_PATTERN);
+    }
+  });
+
+  test("hydrated assistant message with tool calls preserves tool data in mixed sequence", () => {
+    const { hydrated } = buildMixedSequence();
+
+    const assistantWithTools = hydrated[1];
+    expect(assistantWithTools.toolCalls).toBeDefined();
+    expect(assistantWithTools.toolCalls).toHaveLength(1);
+    expect(assistantWithTools.toolCalls![0].name).toBe("bash");
+    expect(assistantWithTools.toolCalls![0].result).toBe("index.ts\napp.tsx\nutils.ts");
+    expect(assistantWithTools.toolCalls![0].result).not.toMatch(ESCAPED_SEQUENCE_PATTERN);
+  });
+
+  test("hydrated multi-line assistant content preserves real newlines in mixed sequence", () => {
+    const { hydrated } = buildMixedSequence();
+
+    const multiLineMsg = hydrated[2];
+    expect(multiLineMsg.content).toContain("\n");
+    expect(multiLineMsg.content.split("\n")).toHaveLength(4); // "Here are the files:" + 3 items
+    expect(multiLineMsg.content).not.toMatch(ESCAPED_SEQUENCE_PATTERN);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reload parity for code-heavy content (MH1, MH4)
+// ---------------------------------------------------------------------------
+
+describe("code-heavy content reload parity", () => {
+  test("hydrated code block with mixed whitespace preserves formatting", () => {
+    const code = [
+      "function greet(name: string): string {",
+      "\tconst greeting = `Hello, ${name}!`;",
+      "\treturn greeting;",
+      "}",
+    ].join("\n");
+
+    const live = makeLiveMessage("assistant", code);
+    const hydrated = makeHydratedMessage("assistant", code);
+
+    expect(live.content).toBe(hydrated.content);
+    expect(hydrated.content).toContain("\t");
+    expect(hydrated.content).toContain("\n");
+    expect(hydrated.content).not.toMatch(ESCAPED_SEQUENCE_PATTERN);
+  });
+
+  test("hydrated message with backslash-heavy paths preserves literal backslashes", () => {
+    const text = "The file is at C:\\Users\\james\\Documents\\project\\src\\index.ts";
+    const hydrated = makeHydratedMessage("assistant", text);
+
+    expect(hydrated.content).toBe(text);
+    expect(hydrated.content).not.toMatch(ESCAPED_SEQUENCE_PATTERN);
+  });
+
+  test("hydrated message with JSON-like content preserves quotes", () => {
+    const text = '{"name": "test", "value": 42}';
+    const hydrated = makeHydratedMessage("assistant", text);
+
+    expect(hydrated.content).toBe(text);
+    expect(hydrated.content).toContain('"name"');
+    expect(hydrated.content).toContain('"test"');
+  });
+
+  test("hydrated message with multi-paragraph text preserves blank lines", () => {
+    const text = "First paragraph.\n\nSecond paragraph.\n\nThird paragraph.";
+    const live = makeLiveMessage("assistant", text);
+    const hydrated = makeHydratedMessage("assistant", text);
+
+    expect(live.content).toBe(hydrated.content);
+    expect(hydrated.content.split("\n\n")).toHaveLength(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Timestamp and metadata parity (MH3, MH4)
+// ---------------------------------------------------------------------------
+
+describe("timestamp and metadata parity across origins", () => {
+  test("hydrated messages from different timestamps maintain correct ordering", () => {
+    const timestamps = [
+      "2026-02-13T08:00:00.000Z",
+      "2026-02-13T08:05:00.000Z",
+      "2026-02-13T08:10:00.000Z",
+    ];
+
+    const messages = timestamps.map((ts, i) =>
+      makeHydratedMessage(i % 2 === 0 ? "user" : "assistant", `Message ${i}`, {
+        createdAt: ts,
+        ordering: { timestampMs: new Date(ts).getTime(), fallbackIndex: i },
+      }),
+    );
+
+    for (let i = 1; i < messages.length; i++) {
+      expect(messages[i].createdAt.getTime()).toBeGreaterThan(
+        messages[i - 1].createdAt.getTime(),
+      );
+    }
+  });
+
+  test("hydrated message createdAt round-trips through Date correctly", () => {
+    const isoString = "2026-02-13T15:30:45.123Z";
+    const hydrated = makeHydratedMessage("user", "Test", {
+      createdAt: isoString,
+    });
+
+    expect(hydrated.createdAt).toBeInstanceOf(Date);
+    expect(hydrated.createdAt.toISOString()).toBe(isoString);
+  });
+
+  test("all hydrated messages have isStreaming false", () => {
+    const roles: Array<"user" | "assistant" | "system"> = ["user", "assistant", "system"];
+    for (const role of roles) {
+      const hydrated = makeHydratedMessage(role, "content");
+      expect(hydrated.isStreaming).toBe(false);
+    }
+  });
+});

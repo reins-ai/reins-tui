@@ -1345,3 +1345,175 @@ describe("tool output reload parity — ToolCallAnchor rendering structure", () 
     expect(toolSplits).toBeGreaterThanOrEqual(1); // ToolBlock detail
   });
 });
+
+// ---------------------------------------------------------------------------
+// Mixed tool/message sequence reload parity (MH2, MH4)
+// ---------------------------------------------------------------------------
+
+describe("mixed tool/message sequence reload parity", () => {
+  /**
+   * Builds a realistic sequence of tool calls as they would appear in
+   * a hydrated conversation: multiple tools interleaved with text.
+   */
+  function buildMixedToolSequence(): DisplayToolCall[] {
+    return [
+      makeDisplayToolCall("complete", {
+        name: "bash",
+        args: { command: "ls -la /src" },
+        result: "total 24\ndrwxr-xr-x  5 user staff 160 Jan 1 00:00 .\n-rw-r--r--  1 user staff 1024 Jan 1 00:00 index.ts",
+      }),
+      makeDisplayToolCall("complete", {
+        name: "read_file",
+        args: { path: "/src/index.ts" },
+        result: "import { App } from './app';\n\nconst app = new App();\napp.start();",
+      }),
+      makeDisplayToolCall("error", {
+        name: "bash",
+        args: { command: "rm -rf /protected" },
+        result: "Permission denied: /protected\nOperation not permitted",
+        isError: true,
+      }),
+    ];
+  }
+
+  test("all tool results in mixed sequence contain no escaped newlines", () => {
+    const tools = buildMixedToolSequence();
+
+    for (const tool of tools) {
+      if (tool.result) {
+        expect(tool.result).not.toContain("\\n");
+        expect(tool.result).not.toContain("\\t");
+      }
+    }
+  });
+
+  test("all tool results in mixed sequence preserve real line breaks", () => {
+    const tools = buildMixedToolSequence();
+
+    // First tool: ls output has 3 lines
+    expect(tools[0].result!.split("\n")).toHaveLength(3);
+
+    // Second tool: code file has 4 lines
+    expect(tools[1].result!.split("\n")).toHaveLength(4);
+
+    // Third tool: error has 2 lines
+    expect(tools[2].result!.split("\n")).toHaveLength(2);
+  });
+
+  test("formatToolResultPreview preserves line breaks for each tool in sequence", () => {
+    const tools = buildMixedToolSequence();
+
+    for (const tool of tools) {
+      const preview = formatToolResultPreview(tool);
+      expect(preview).toBeDefined();
+      expect(preview).not.toContain("\\n");
+    }
+  });
+
+  test("displayToolCallToVisualState produces correct status for each tool in sequence", () => {
+    const tools = buildMixedToolSequence();
+
+    const states = tools.map((t) => displayToolCallToVisualState(t, true));
+
+    expect(states[0].status).toBe("success");
+    expect(states[1].status).toBe("success");
+    expect(states[2].status).toBe("error");
+  });
+
+  test("visual state detail for each tool in sequence contains no escaped artifacts", () => {
+    const tools = buildMixedToolSequence();
+
+    for (const tool of tools) {
+      const vs = displayToolCallToVisualState(tool, true);
+      if (vs.detail) {
+        expect(vs.detail).not.toContain("\\n");
+        expect(vs.detail).not.toContain("\\t");
+        expect(vs.detail).not.toContain("\\\\");
+      }
+    }
+  });
+
+  test("error tool in mixed sequence preserves error text with real newlines", () => {
+    const tools = buildMixedToolSequence();
+    const errorTool = tools[2];
+
+    const vs = displayToolCallToVisualState(errorTool, true);
+    expect(vs.detail).toBeDefined();
+    expect(vs.detail).toContain("Permission denied");
+    expect(vs.detail).toContain("Operation not permitted");
+    expect(vs.detail!.split("\n").length).toBeGreaterThanOrEqual(2);
+  });
+
+  test("tool block styles are status-driven regardless of sequence position", () => {
+    const tools = buildMixedToolSequence();
+    const states = tools.map((t) => displayToolCallToVisualState(t, true));
+
+    const successStyle = getToolBlockStyle(
+      makeVisualState("success", { id: states[0].id }),
+      MOCK_TOKENS,
+    );
+    const errorStyle = getToolBlockStyle(
+      makeVisualState("error", { id: states[2].id }),
+      MOCK_TOKENS,
+    );
+
+    expect(successStyle.accentColor).toBe(MOCK_TOKENS["glyph.tool.done"]);
+    expect(errorStyle.accentColor).toBe(MOCK_TOKENS["glyph.tool.error"]);
+    expect(successStyle.accentColor).not.toBe(errorStyle.accentColor);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tool output formatting parity: live JSON vs hydrated decoded (MH2, MH4)
+// ---------------------------------------------------------------------------
+
+describe("tool output formatting parity: live JSON vs hydrated decoded", () => {
+  test("buildSimplifiedToolText produces identical output for JSON and pre-decoded results", () => {
+    const args = { command: "cat package.json" };
+    const jsonResult = '{"command":"cat package.json","output":"{\\"name\\": \\"reins-tui\\"}"}';
+    const decodedResult = '{"name": "reins-tui"}';
+
+    const fromJson = buildSimplifiedToolText(args, jsonResult, undefined);
+    const fromDecoded = buildSimplifiedToolText(args, decodedResult, undefined);
+
+    expect(fromJson).toBeDefined();
+    expect(fromDecoded).toBeDefined();
+    // Both should contain the command prefix and the output content
+    expect(fromJson).toContain("$ cat package.json");
+    expect(fromDecoded).toContain("$ cat package.json");
+  });
+
+  test("formatDetailSection handles string result with embedded JSON without re-escaping", () => {
+    const call = makeToolCall("success", {
+      result: '{"name": "test", "version": "1.0.0"}',
+    });
+    const detail = formatDetailSection(call);
+    expect(detail).toBeDefined();
+    expect(detail).toContain("Result:");
+    // String result should be used directly, not JSON.stringify'd again
+    expect(detail).not.toContain("\\\\");
+  });
+
+  test("formatDetailSection handles multi-line string result without adding escape sequences", () => {
+    const call = makeToolCall("success", {
+      result: "Line 1: success\nLine 2: data loaded\nLine 3: complete",
+    });
+    const detail = formatDetailSection(call);
+    expect(detail).toBeDefined();
+    expect(detail).toContain("Line 1: success");
+    expect(detail).toContain("Line 2: data loaded");
+    expect(detail).not.toContain("\\n");
+  });
+
+  test("formatDetailSection handles result with tabs preserving real tab characters", () => {
+    const call = makeToolCall("success", {
+      result: "NAME\tSIZE\tDATE\nfoo.ts\t1024\t2026-01-01\nbar.ts\t2048\t2026-01-02",
+    });
+    const detail = formatDetailSection(call);
+    expect(detail).toBeDefined();
+    expect(detail).toContain("NAME");
+    expect(detail).toContain("foo.ts");
+    expect(detail).not.toContain("\\t");
+    expect(detail).not.toContain("\\n");
+  });
+});

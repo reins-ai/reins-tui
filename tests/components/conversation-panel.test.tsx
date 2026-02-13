@@ -382,3 +382,323 @@ describe("hydrated content integrity in conversation flow", () => {
     expect(hydrated.toolCalls).toHaveLength(1);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Mixed sequence ordering and role distinction (MH3, MH4)
+// ---------------------------------------------------------------------------
+
+describe("mixed sequence ordering and role distinction on reload", () => {
+  const ESCAPED_SEQUENCE_PATTERN = /(?<!\\)\\[ntr"\\]/;
+
+  /**
+   * Builds a realistic multi-turn conversation with assistant text,
+   * tool calls/results, and user follow-ups — as it would appear
+   * after history hydration on reconnect.
+   */
+  function buildRealisticReloadSequence(): DisplayMessage[] {
+    const t1 = new Date("2026-02-13T09:00:00Z");
+    const t2 = new Date("2026-02-13T09:00:10Z");
+    const t3 = new Date("2026-02-13T09:00:30Z");
+    const t4 = new Date("2026-02-13T09:01:00Z");
+    const t5 = new Date("2026-02-13T09:01:30Z");
+
+    return [
+      makeHydratedDisplayMessage("user", "What files are in the project?", {
+        createdAt: t1.toISOString(),
+        ordering: { timestampMs: t1.getTime(), fallbackIndex: 0 },
+      }),
+      makeHydratedDisplayMessage("assistant", "Let me check the project structure.", {
+        createdAt: t2.toISOString(),
+        ordering: { timestampMs: t2.getTime(), fallbackIndex: 1 },
+        payload: {
+          text: "Let me check the project structure.",
+          blocks: [
+            { type: "text", text: "Let me check the project structure." },
+            { type: "tool-use", toolCallId: "tc-ls", name: "bash", args: { command: "ls -la" } },
+            { type: "tool-result", toolCallId: "tc-ls", output: "total 32\npackage.json\nsrc/\ntests/" },
+          ],
+        },
+      }),
+      makeHydratedDisplayMessage("assistant", "The project contains:\n- package.json\n- src/ directory\n- tests/ directory", {
+        createdAt: t3.toISOString(),
+        ordering: { timestampMs: t3.getTime(), fallbackIndex: 2 },
+      }),
+      makeHydratedDisplayMessage("user", "Show me the package.json", {
+        createdAt: t4.toISOString(),
+        ordering: { timestampMs: t4.getTime(), fallbackIndex: 3 },
+      }),
+      makeHydratedDisplayMessage("assistant", "Here is the package.json content:", {
+        createdAt: t5.toISOString(),
+        ordering: { timestampMs: t5.getTime(), fallbackIndex: 4 },
+        payload: {
+          text: "Here is the package.json content:",
+          blocks: [
+            { type: "text", text: "Here is the package.json content:" },
+            { type: "tool-use", toolCallId: "tc-read", name: "read_file", args: { path: "package.json" } },
+            { type: "tool-result", toolCallId: "tc-read", output: "{\n  \"name\": \"reins-tui\",\n  \"version\": \"0.1.0\"\n}" },
+          ],
+        },
+      }),
+    ];
+  }
+
+  test("chronological ordering is preserved across all messages in reload sequence", () => {
+    const messages = buildRealisticReloadSequence();
+
+    for (let i = 1; i < messages.length; i++) {
+      expect(messages[i].createdAt.getTime()).toBeGreaterThan(
+        messages[i - 1].createdAt.getTime(),
+      );
+    }
+  });
+
+  test("role sequence matches expected user-assistant-assistant-user-assistant pattern", () => {
+    const messages = buildRealisticReloadSequence();
+    const roles = messages.map((m) => m.role);
+
+    expect(roles).toEqual(["user", "assistant", "assistant", "user", "assistant"]);
+  });
+
+  test("exchange boundaries are detected correctly in reload sequence", () => {
+    const messages = buildRealisticReloadSequence();
+
+    // Index 0: first message, no boundary
+    expect(isExchangeBoundary(messages, 0)).toBe(false);
+    // Index 1: assistant after user — not a boundary (same exchange)
+    expect(isExchangeBoundary(messages, 1)).toBe(false);
+    // Index 2: assistant after assistant — not a boundary
+    expect(isExchangeBoundary(messages, 2)).toBe(false);
+    // Index 3: user after assistant — IS a boundary (new exchange)
+    expect(isExchangeBoundary(messages, 3)).toBe(true);
+    // Index 4: assistant after user — not a boundary
+    expect(isExchangeBoundary(messages, 4)).toBe(false);
+  });
+
+  test("no escaped artifacts in any message content across reload sequence", () => {
+    const messages = buildRealisticReloadSequence();
+
+    for (const msg of messages) {
+      expect(msg.content).not.toMatch(ESCAPED_SEQUENCE_PATTERN);
+    }
+  });
+
+  test("no escaped artifacts in tool call results across reload sequence", () => {
+    const messages = buildRealisticReloadSequence();
+
+    for (const msg of messages) {
+      if (msg.toolCalls) {
+        for (const tc of msg.toolCalls) {
+          if (tc.result) {
+            expect(tc.result).not.toContain("\\n");
+            expect(tc.result).not.toContain("\\t");
+            expect(tc.result).not.toContain("\\\\");
+          }
+        }
+      }
+    }
+  });
+
+  test("tool calls in reload sequence have correct metadata", () => {
+    const messages = buildRealisticReloadSequence();
+
+    // Message at index 1 has bash tool call
+    const msg1 = messages[1];
+    expect(msg1.toolCalls).toHaveLength(1);
+    expect(msg1.toolCalls![0].name).toBe("bash");
+    expect(msg1.toolCalls![0].status).toBe("complete");
+    expect(msg1.toolCalls![0].args).toEqual({ command: "ls -la" });
+
+    // Message at index 4 has read_file tool call
+    const msg4 = messages[4];
+    expect(msg4.toolCalls).toHaveLength(1);
+    expect(msg4.toolCalls![0].name).toBe("read_file");
+    expect(msg4.toolCalls![0].status).toBe("complete");
+    expect(msg4.toolCalls![0].args).toEqual({ path: "package.json" });
+  });
+
+  test("tool results preserve real newlines in reload sequence", () => {
+    const messages = buildRealisticReloadSequence();
+
+    // bash tool result has 3 lines
+    const bashResult = messages[1].toolCalls![0].result!;
+    expect(bashResult.split("\n")).toHaveLength(4); // "total 32" + 3 entries
+
+    // read_file tool result has multi-line JSON
+    const readResult = messages[4].toolCalls![0].result!;
+    expect(readResult.split("\n").length).toBeGreaterThanOrEqual(4);
+    expect(readResult).toContain('"name"');
+    expect(readResult).toContain('"reins-tui"');
+  });
+
+  test("shouldRenderToolBlocks correctly identifies tool-bearing messages in sequence", () => {
+    const messages = buildRealisticReloadSequence();
+
+    expect(shouldRenderToolBlocks(messages[0])).toBe(false); // user, no tools
+    expect(shouldRenderToolBlocks(messages[1])).toBe(true);  // assistant with tools
+    expect(shouldRenderToolBlocks(messages[2])).toBe(false); // assistant, no tools
+    expect(shouldRenderToolBlocks(messages[3])).toBe(false); // user, no tools
+    expect(shouldRenderToolBlocks(messages[4])).toBe(true);  // assistant with tools
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Role distinction visual parity: live vs hydrated (MH3, MH4)
+// ---------------------------------------------------------------------------
+
+describe("role distinction visual parity: live vs hydrated", () => {
+  test("user role visual treatment is identical for live and hydrated", () => {
+    const live = makeMessage("user", "Hello");
+    const hydrated = makeHydratedDisplayMessage("user", "Hello");
+
+    expect(getRoleGlyph(live.role)).toBe(GLYPH_USER);
+    expect(getRoleGlyph(hydrated.role)).toBe(GLYPH_USER);
+    expect(getRoleColor(live.role, MOCK_TOKENS)).toBe(getRoleColor(hydrated.role, MOCK_TOKENS));
+
+    const liveStyle = getMessageBlockStyle(live.role, MOCK_TOKENS, mockGetRoleBorder);
+    const hydratedStyle = getMessageBlockStyle(hydrated.role, MOCK_TOKENS, mockGetRoleBorder);
+    expect(liveStyle).toEqual(hydratedStyle);
+  });
+
+  test("assistant role visual treatment is identical for live and hydrated", () => {
+    const live = makeMessage("assistant", "Response");
+    const hydrated = makeHydratedDisplayMessage("assistant", "Response");
+
+    expect(getRoleGlyph(live.role)).toBe(GLYPH_REINS);
+    expect(getRoleGlyph(hydrated.role)).toBe(GLYPH_REINS);
+    expect(getRoleColor(live.role, MOCK_TOKENS)).toBe(getRoleColor(hydrated.role, MOCK_TOKENS));
+
+    const liveStyle = getMessageBlockStyle(live.role, MOCK_TOKENS, mockGetRoleBorder);
+    const hydratedStyle = getMessageBlockStyle(hydrated.role, MOCK_TOKENS, mockGetRoleBorder);
+    expect(liveStyle).toEqual(hydratedStyle);
+  });
+
+  test("system role visual treatment is identical for live and hydrated", () => {
+    const live = makeMessage("system", "System prompt");
+    const hydrated = makeHydratedDisplayMessage("system", "System prompt");
+
+    expect(getRoleGlyph(live.role)).toBe(getRoleGlyph(hydrated.role));
+    expect(getRoleColor(live.role, MOCK_TOKENS)).toBe(getRoleColor(hydrated.role, MOCK_TOKENS));
+
+    const liveStyle = getMessageBlockStyle(live.role, MOCK_TOKENS, mockGetRoleBorder);
+    const hydratedStyle = getMessageBlockStyle(hydrated.role, MOCK_TOKENS, mockGetRoleBorder);
+    expect(liveStyle).toEqual(hydratedStyle);
+  });
+
+  test("border chars are identical for all roles across live and hydrated", () => {
+    const roles: Array<"user" | "assistant" | "system"> = ["user", "assistant", "system"];
+
+    for (const role of roles) {
+      const live = makeMessage(role, "content");
+      const hydrated = makeHydratedDisplayMessage(role, "content");
+      expect(getMessageBorderChars(live.role)).toBe(getMessageBorderChars(hydrated.role));
+    }
+  });
+
+  test("user and assistant have distinct visual treatments in hydrated messages", () => {
+    const user = makeHydratedDisplayMessage("user", "Question");
+    const assistant = makeHydratedDisplayMessage("assistant", "Answer");
+
+    // Glyphs differ
+    expect(getRoleGlyph(user.role)).not.toBe(getRoleGlyph(assistant.role));
+
+    // Colors differ
+    expect(getRoleColor(user.role, MOCK_TOKENS)).not.toBe(
+      getRoleColor(assistant.role, MOCK_TOKENS),
+    );
+
+    // Block styles differ
+    const userStyle = getMessageBlockStyle(user.role, MOCK_TOKENS, mockGetRoleBorder);
+    const assistantStyle = getMessageBlockStyle(assistant.role, MOCK_TOKENS, mockGetRoleBorder);
+    expect(userStyle.accentColor).not.toBe(assistantStyle.accentColor);
+    expect(userStyle.backgroundColor).not.toBe(assistantStyle.backgroundColor);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Content blocks ordering parity on reload (MH4)
+// ---------------------------------------------------------------------------
+
+describe("content blocks ordering parity on reload", () => {
+  test("hydrated message with interleaved text and tool blocks preserves block order", () => {
+    const hydrated = makeHydratedDisplayMessage("assistant", "I'll check two things.", {
+      payload: {
+        text: "I'll check two things.",
+        blocks: [
+          { type: "text", text: "I'll check two things." },
+          { type: "tool-use", toolCallId: "tc-1", name: "bash", args: { command: "ls" } },
+          { type: "tool-result", toolCallId: "tc-1", output: "file.txt" },
+          { type: "text", text: "Now let me read it." },
+          { type: "tool-use", toolCallId: "tc-2", name: "read_file", args: { path: "file.txt" } },
+          { type: "tool-result", toolCallId: "tc-2", output: "Hello world" },
+        ],
+      },
+    });
+
+    expect(hydrated.contentBlocks).toBeDefined();
+    expect(hydrated.contentBlocks).toHaveLength(6);
+
+    // Verify block type ordering
+    expect(hydrated.contentBlocks![0].type).toBe("text");
+    expect(hydrated.contentBlocks![0].text).toBe("I'll check two things.");
+    expect(hydrated.contentBlocks![1].type).toBe("tool-call");
+    expect(hydrated.contentBlocks![1].toolCallId).toBe("tc-1");
+    expect(hydrated.contentBlocks![2].type).toBe("tool-call"); // tool-result maps to tool-call
+    expect(hydrated.contentBlocks![3].type).toBe("text");
+    expect(hydrated.contentBlocks![3].text).toBe("Now let me read it.");
+    expect(hydrated.contentBlocks![4].type).toBe("tool-call");
+    expect(hydrated.contentBlocks![4].toolCallId).toBe("tc-2");
+    expect(hydrated.contentBlocks![5].type).toBe("tool-call");
+  });
+
+  test("hydrated message with multiple tool calls preserves all tool metadata", () => {
+    const hydrated = makeHydratedDisplayMessage("assistant", "", {
+      payload: {
+        text: "",
+        blocks: [
+          { type: "tool-use", toolCallId: "tc-a", name: "bash", args: { command: "git status" } },
+          { type: "tool-result", toolCallId: "tc-a", output: "On branch main\nnothing to commit" },
+          { type: "tool-use", toolCallId: "tc-b", name: "bash", args: { command: "git log -1" } },
+          { type: "tool-result", toolCallId: "tc-b", output: "commit abc123\nAuthor: test" },
+        ],
+      },
+    });
+
+    expect(hydrated.toolCalls).toHaveLength(2);
+
+    expect(hydrated.toolCalls![0].id).toBe("tc-a");
+    expect(hydrated.toolCalls![0].name).toBe("bash");
+    expect(hydrated.toolCalls![0].result).toBe("On branch main\nnothing to commit");
+    expect(hydrated.toolCalls![0].result).not.toContain("\\n");
+
+    expect(hydrated.toolCalls![1].id).toBe("tc-b");
+    expect(hydrated.toolCalls![1].name).toBe("bash");
+    expect(hydrated.toolCalls![1].result).toBe("commit abc123\nAuthor: test");
+    expect(hydrated.toolCalls![1].result).not.toContain("\\n");
+  });
+
+  test("hydrated message with error tool call preserves error state in sequence", () => {
+    const hydrated = makeHydratedDisplayMessage("assistant", "Trying both commands.", {
+      payload: {
+        text: "Trying both commands.",
+        blocks: [
+          { type: "text", text: "Trying both commands." },
+          { type: "tool-use", toolCallId: "tc-ok", name: "bash", args: { command: "echo ok" } },
+          { type: "tool-result", toolCallId: "tc-ok", output: "ok" },
+          { type: "tool-use", toolCallId: "tc-fail", name: "bash", args: { command: "bad-cmd" } },
+          { type: "tool-result", toolCallId: "tc-fail", output: "command not found", isError: true },
+        ],
+      },
+    });
+
+    expect(hydrated.toolCalls).toHaveLength(2);
+
+    // First tool: success
+    expect(hydrated.toolCalls![0].status).toBe("complete");
+    expect(hydrated.toolCalls![0].isError).toBeFalsy();
+
+    // Second tool: error
+    expect(hydrated.toolCalls![1].status).toBe("error");
+    expect(hydrated.toolCalls![1].isError).toBe(true);
+    expect(hydrated.toolCalls![1].result).toBe("command not found");
+  });
+});
