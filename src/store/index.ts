@@ -19,6 +19,7 @@ import type {
 } from "../daemon/contracts";
 import type { AppState, DisplayContentBlock, DisplayMessage, DisplayToolCall, DisplayToolCallStatus, FocusedPanel } from "./types";
 import { DEFAULT_STATE } from "./types";
+import { applyHydratedHistoryChunk } from "./history-hydration";
 
 function isFocusedPanel(value: unknown): value is FocusedPanel {
   return value === "sidebar" || value === "conversation" || value === "input";
@@ -100,6 +101,14 @@ export type AppAction =
   | { type: "TOGGLE_TOOL_EXPAND"; payload: { toolCallId: string } }
   | { type: "COLLAPSE_ALL_TOOLS" }
   | { type: "CLEAR_MESSAGES" }
+  | {
+      type: "HYDRATE_HISTORY";
+      payload: {
+        rawMessages: readonly DaemonRawHistoryMessage[];
+        normalizer: DaemonHistoryPayloadNormalizer;
+        hydrationState: HistoryHydrationState;
+      };
+    }
   | LayoutModeAction
   | LayoutAction;
 
@@ -592,6 +601,25 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ...state,
         expandedToolCalls: new Set<string>(),
       };
+    case "HYDRATE_HISTORY": {
+      const { rawMessages, normalizer, hydrationState } = action.payload;
+      const result = applyHydratedHistoryChunk({
+        existingMessages: state.messages,
+        incomingRawMessages: rawMessages,
+        hydrationState,
+        normalizer,
+      });
+
+      if (result.messages.length === state.messages.length
+        && result.messages.every((m, i) => m === state.messages[i])) {
+        return state;
+      }
+
+      return {
+        ...state,
+        messages: result.messages,
+      };
+    }
     case "CLEAR_MESSAGES":
       return {
         ...state,
@@ -662,3 +690,12 @@ export { DEFAULT_STATE };
 export type { AppState, DisplayContentBlock, DisplayMessage, DisplayToolCall, DisplayToolCallStatus, FocusedPanel };
 export type { LayoutMode, PanelId, PanelState } from "../state/layout-mode";
 export { getLayoutVisibility, getLayoutModeLabel } from "../state/layout-mode";
+export {
+  applyHydratedHistoryChunk,
+  createHydrationState,
+  decodeEscapedText,
+  historyPayloadNormalizer,
+  hydratedMessageToDisplayMessage,
+  normalizeHistoryMessage,
+  sortHydratedHistoryMessages,
+} from "./history-hydration";
