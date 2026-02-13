@@ -253,6 +253,32 @@ function parseStatusPayload(value: unknown): ProviderStatusInfo {
   };
 }
 
+/**
+ * Lightweight shape for feeding provider health and model data
+ * into the status segment system. Maps from ProviderStatusInfo
+ * without requiring daemon contract changes.
+ */
+export interface ProviderStatusFeed {
+  healthy: boolean;
+  activeModel: string | null;
+  provider: string | null;
+  modelCount: number;
+}
+
+/**
+ * Extract a ProviderStatusFeed from a ProviderStatusInfo.
+ * This adapter keeps the status segment system decoupled from
+ * the full provider status response shape.
+ */
+export function toProviderStatusFeed(info: ProviderStatusInfo): ProviderStatusFeed {
+  return {
+    healthy: info.status === "active" || info.status === "configured",
+    activeModel: info.activeModel,
+    provider: info.provider,
+    modelCount: info.models.length,
+  };
+}
+
 export class ProviderStatusService {
   private readonly daemonClient: DaemonClient | undefined;
   private readonly transport: ProviderApiTransport;
