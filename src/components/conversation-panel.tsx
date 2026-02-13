@@ -2,14 +2,17 @@ import type { DisplayMessage, DisplayToolCall } from "../store";
 import { useApp } from "../store";
 import { useConversation } from "../hooks";
 import { useThemeTokens } from "../theme";
+import type { ThemeTokens } from "../theme/theme-schema";
 import type { MessageRole } from "../theme/use-theme-tokens";
-import type { ToolCall, ToolCallStatus } from "../tools/tool-lifecycle";
+import type { ToolCall, ToolCallStatus, ToolVisualState } from "../tools/tool-lifecycle";
+import { displayToolCallToVisualState } from "../tools/tool-lifecycle";
 import type { FramedBlockStyle } from "../ui/types";
 import { Box, ScrollBox, Text } from "../ui";
 import { ACCENT_BORDER_CHARS, FramedBlock } from "../ui/primitives";
 import { LogoAscii } from "./logo-ascii";
 import { Message } from "./message";
 import { formatModelDisplayName } from "./model-selector";
+import { ToolBlock } from "./tool-inline";
 
 /**
  * Determine whether a message starts a new exchange turn.
@@ -85,6 +88,72 @@ export function getStreamingPlaceholderStyle(
   };
 }
 
+/**
+ * Convert an array of DisplayToolCalls into ToolVisualState objects
+ * for rendering as standalone tool blocks in the conversation flow.
+ * Uses the displayToolCallToVisualState adapter from tool-lifecycle.
+ */
+export function toolCallsToVisualStates(
+  toolCalls: readonly DisplayToolCall[],
+  expandedSet?: ReadonlySet<string>,
+): ToolVisualState[] {
+  return toolCalls.map((dtc) => {
+    const expanded = expandedSet?.has(dtc.id) ?? false;
+    return displayToolCallToVisualState(dtc, expanded);
+  });
+}
+
+/**
+ * Resolve the accent color for a tool block from its visual state
+ * color token. Falls back to glyph.tool.running if the token is
+ * not found in the theme.
+ */
+export function resolveToolBlockAccent(
+  colorToken: string,
+  tokens: Readonly<ThemeTokens>,
+): string {
+  return tokens[colorToken as keyof ThemeTokens] ?? tokens["glyph.tool.running"];
+}
+
+/**
+ * Renders a list of tool calls as standalone ToolBlock components.
+ * Each block gets its own FramedBlock with lifecycle-aware styling.
+ * Used when tool calls should appear as distinct visual blocks
+ * rather than inline anchors within a message.
+ */
+export function ToolBlockList({ toolCalls }: { toolCalls: readonly DisplayToolCall[] }) {
+  const visualStates = toolCallsToVisualStates(toolCalls);
+
+  return (
+    <>
+      {visualStates.map((vs) => (
+        <Box key={vs.id} style={{ marginTop: 0 }}>
+          <ToolBlock visualState={vs} />
+        </Box>
+      ))}
+    </>
+  );
+}
+
+/**
+ * Determine whether a message should render its tool calls as
+ * standalone ToolBlock components rather than inline ToolCallAnchors.
+ * Tool-role messages always use block rendering. Assistant messages
+ * with tool calls use block rendering when the message has no
+ * text content (pure tool-use turn).
+ */
+export function shouldRenderToolBlocks(message: DisplayMessage): boolean {
+  if (!message.toolCalls || message.toolCalls.length === 0) {
+    return false;
+  }
+
+  if (message.role === "tool") {
+    return true;
+  }
+
+  return false;
+}
+
 export function ConversationPanel({ isFocused, borderColor }: ConversationPanelProps) {
   const { messages, isStreaming, lifecycleStatus } = useConversation();
   const { state } = useApp();
@@ -139,9 +208,18 @@ export function ConversationPanel({ isFocused, borderColor }: ConversationPanelP
                 ? MESSAGE_GAP
                 : 0;
 
+            const useToolBlocks = shouldRenderToolBlocks(message);
+
             return (
               <Box key={message.id} style={{ flexDirection: "column", marginTop: gap }}>
-                <Message message={message} lifecycleStatus={message.isStreaming ? lifecycleStatus : undefined} />
+                <Message
+                  message={message}
+                  lifecycleStatus={message.isStreaming ? lifecycleStatus : undefined}
+                  renderToolBlocks={useToolBlocks}
+                />
+                {useToolBlocks && message.toolCalls ? (
+                  <ToolBlockList toolCalls={message.toolCalls} />
+                ) : null}
               </Box>
             );
           })

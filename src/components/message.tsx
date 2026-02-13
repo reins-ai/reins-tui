@@ -237,9 +237,15 @@ export function ToolCallAnchor({ toolCall }: ToolCallAnchorProps) {
 export interface MessageProps {
   message: DisplayMessage;
   lifecycleStatus?: ConversationLifecycleStatus;
+  /**
+   * When true, tool calls are rendered externally as standalone ToolBlock
+   * components rather than inline ToolCallAnchors within this message.
+   * The Message component skips its own tool call rendering in this case.
+   */
+  renderToolBlocks?: boolean;
 }
 
-export function Message({ message, lifecycleStatus }: MessageProps) {
+export function Message({ message, lifecycleStatus, renderToolBlocks }: MessageProps) {
   const { tokens, getRoleBorder } = useThemeTokens();
   const glyph = getRoleGlyph(message.role);
   const glyphColor = getRoleColor(message.role, tokens);
@@ -276,7 +282,7 @@ export function Message({ message, lifecycleStatus }: MessageProps) {
         </Box>
       )}
 
-      {message.toolCalls?.map((toolCall) => (
+      {!renderToolBlocks && message.toolCalls?.map((toolCall) => (
         <ToolCallAnchor key={toolCall.id} toolCall={toolCall} />
       ))}
     </FramedBlock>

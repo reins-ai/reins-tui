@@ -2,19 +2,34 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import type { ToolCall, ToolCallStatus } from "../../src/tools/tool-lifecycle";
-import { getToolGlyph, toolCallToMessageContent } from "../../src/tools/tool-lifecycle";
+import type { ToolCall, ToolCallStatus, ToolVisualState, ToolVisualStatus } from "../../src/tools/tool-lifecycle";
+import {
+  getToolGlyph,
+  getToolColorToken,
+  toolCallToMessageContent,
+  toolCallToVisualState,
+  displayToolCallToVisualState,
+} from "../../src/tools/tool-lifecycle";
 import type { ThemeTokens } from "../../src/theme/theme-schema";
 import {
   getStatusColor,
   formatDetailSection,
+  getToolBlockStyle,
+  getToolBlockStatusSuffix,
+  formatToolBlockArgs,
+  formatToolBlockDetail,
 } from "../../src/components/tool-inline";
 import {
   formatArgsPreview,
   formatResultPreview,
 } from "../../src/components/message";
-import { displayToolCallToToolCall } from "../../src/components/conversation-panel";
-import type { DisplayToolCall } from "../../src/store";
+import {
+  displayToolCallToToolCall,
+  toolCallsToVisualStates,
+  shouldRenderToolBlocks,
+  resolveToolBlockAccent,
+} from "../../src/components/conversation-panel";
+import type { DisplayMessage, DisplayToolCall } from "../../src/store";
 
 const MOCK_TOKENS: ThemeTokens = {
   "surface.primary": "#1a1a2e",
@@ -610,3 +625,412 @@ describe("ToolCallAnchor args display", () => {
     expect(source).toContain("formatResultPreview");
   });
 });
+
+// --- ToolBlock lifecycle style assertions ---
+
+describe("ToolBlock style per lifecycle status", () => {
+  test("running status uses glyph.tool.running accent", () => {
+    const vs = makeVisualState("running");
+    const style = getToolBlockStyle(vs, MOCK_TOKENS);
+    expect(style.accentColor).toBe(MOCK_TOKENS["glyph.tool.running"]);
+  });
+
+  test("queued status uses glyph.tool.running accent", () => {
+    const vs = makeVisualState("queued");
+    const style = getToolBlockStyle(vs, MOCK_TOKENS);
+    expect(style.accentColor).toBe(MOCK_TOKENS["glyph.tool.running"]);
+  });
+
+  test("success status uses glyph.tool.done accent", () => {
+    const vs = makeVisualState("success");
+    const style = getToolBlockStyle(vs, MOCK_TOKENS);
+    expect(style.accentColor).toBe(MOCK_TOKENS["glyph.tool.done"]);
+  });
+
+  test("error status uses glyph.tool.error accent", () => {
+    const vs = makeVisualState("error");
+    const style = getToolBlockStyle(vs, MOCK_TOKENS);
+    expect(style.accentColor).toBe(MOCK_TOKENS["glyph.tool.error"]);
+  });
+
+  test("all statuses use surface.secondary background", () => {
+    const statuses: ToolVisualStatus[] = ["queued", "running", "success", "error"];
+    for (const status of statuses) {
+      const vs = makeVisualState(status);
+      const style = getToolBlockStyle(vs, MOCK_TOKENS);
+      expect(style.backgroundColor).toBe(MOCK_TOKENS["surface.secondary"]);
+    }
+  });
+
+  test("all statuses share consistent padding", () => {
+    const statuses: ToolVisualStatus[] = ["queued", "running", "success", "error"];
+    for (const status of statuses) {
+      const vs = makeVisualState(status);
+      const style = getToolBlockStyle(vs, MOCK_TOKENS);
+      expect(style.paddingLeft).toBe(2);
+      expect(style.paddingRight).toBe(1);
+    }
+  });
+
+  test("each lifecycle status produces a distinct accent color", () => {
+    const running = getToolBlockStyle(makeVisualState("running"), MOCK_TOKENS);
+    const success = getToolBlockStyle(makeVisualState("success"), MOCK_TOKENS);
+    const error = getToolBlockStyle(makeVisualState("error"), MOCK_TOKENS);
+
+    expect(running.accentColor).not.toBe(success.accentColor);
+    expect(running.accentColor).not.toBe(error.accentColor);
+    expect(success.accentColor).not.toBe(error.accentColor);
+  });
+
+  test("tool block accent differs from assistant message accent", () => {
+    const toolStyle = getToolBlockStyle(makeVisualState("running"), MOCK_TOKENS);
+    // Assistant accent uses role.assistant.border, tool uses glyph.tool.running
+    expect(toolStyle.accentColor).toBe(MOCK_TOKENS["glyph.tool.running"]);
+    // These should be different tokens
+    expect(toolStyle.backgroundColor).toBe(MOCK_TOKENS["surface.secondary"]);
+    expect(toolStyle.backgroundColor).not.toBe(MOCK_TOKENS["conversation.assistant.bg"]);
+  });
+});
+
+describe("ToolBlock status suffix", () => {
+  test("queued shows 'queued...'", () => {
+    const vs = makeVisualState("queued");
+    expect(getToolBlockStatusSuffix(vs)).toBe("queued...");
+  });
+
+  test("running shows 'running...'", () => {
+    const vs = makeVisualState("running");
+    expect(getToolBlockStatusSuffix(vs)).toBe("running...");
+  });
+
+  test("success without duration shows 'done'", () => {
+    const vs = makeVisualState("success");
+    expect(getToolBlockStatusSuffix(vs)).toBe("done");
+  });
+
+  test("success with duration shows 'done (Nms)'", () => {
+    const vs = makeVisualState("success", { duration: 150 });
+    expect(getToolBlockStatusSuffix(vs)).toBe("done (150ms)");
+  });
+
+  test("error shows 'failed'", () => {
+    const vs = makeVisualState("error");
+    expect(getToolBlockStatusSuffix(vs)).toBe("failed");
+  });
+});
+
+describe("formatToolBlockArgs", () => {
+  test("returns undefined for undefined args", () => {
+    expect(formatToolBlockArgs(undefined)).toBeUndefined();
+  });
+
+  test("returns undefined for empty object", () => {
+    expect(formatToolBlockArgs({})).toBeUndefined();
+  });
+
+  test("returns compact JSON for small args", () => {
+    const result = formatToolBlockArgs({ command: "ls -la" });
+    expect(result).toBeDefined();
+    expect(result).toContain("ls -la");
+  });
+
+  test("truncates long args with ellipsis", () => {
+    const longValue = "x".repeat(200);
+    const result = formatToolBlockArgs({ content: longValue }, 120);
+    expect(result).toBeDefined();
+    expect(result!.length).toBeLessThanOrEqual(121);
+    expect(result!.endsWith("…")).toBe(true);
+  });
+
+  test("preserves short args without truncation", () => {
+    const result = formatToolBlockArgs({ q: "hi" });
+    expect(result).toBeDefined();
+    expect(result!.endsWith("…")).toBe(false);
+  });
+});
+
+describe("formatToolBlockDetail", () => {
+  test("returns undefined for undefined detail", () => {
+    expect(formatToolBlockDetail(undefined)).toBeUndefined();
+  });
+
+  test("returns undefined for empty string", () => {
+    expect(formatToolBlockDetail("")).toBeUndefined();
+  });
+
+  test("returns short detail unchanged", () => {
+    const detail = "Args:\n{\"command\":\"ls\"}";
+    expect(formatToolBlockDetail(detail)).toBe(detail);
+  });
+
+  test("truncates long detail with ellipsis", () => {
+    const longDetail = "x".repeat(600);
+    const result = formatToolBlockDetail(longDetail, 500);
+    expect(result).toBeDefined();
+    expect(result!.length).toBeLessThanOrEqual(501);
+    expect(result!.endsWith("…")).toBe(true);
+  });
+});
+
+describe("toolCallsToVisualStates adapter", () => {
+  test("converts DisplayToolCalls to ToolVisualState array", () => {
+    const dtcs: DisplayToolCall[] = [
+      makeDisplayToolCall("running", { name: "bash" }),
+      makeDisplayToolCall("complete", { name: "read" }),
+    ];
+    const states = toolCallsToVisualStates(dtcs);
+    expect(states).toHaveLength(2);
+    expect(states[0].status).toBe("running");
+    expect(states[1].status).toBe("success");
+  });
+
+  test("respects expanded set for expansion state", () => {
+    const dtcs: DisplayToolCall[] = [
+      makeDisplayToolCall("complete", {
+        name: "bash",
+        result: "output data",
+      }),
+    ];
+    const expandedSet = new Set([dtcs[0].id]);
+    const states = toolCallsToVisualStates(dtcs, expandedSet);
+    expect(states[0].expanded).toBe(true);
+  });
+
+  test("defaults to collapsed when no expanded set", () => {
+    const dtcs: DisplayToolCall[] = [
+      makeDisplayToolCall("complete", {
+        name: "bash",
+        result: "output data",
+      }),
+    ];
+    const states = toolCallsToVisualStates(dtcs);
+    expect(states[0].expanded).toBe(false);
+  });
+
+  test("preserves tool names through conversion", () => {
+    const dtcs: DisplayToolCall[] = [
+      makeDisplayToolCall("running", { name: "calendar.lookup" }),
+    ];
+    const states = toolCallsToVisualStates(dtcs);
+    expect(states[0].toolName).toBe("calendar.lookup");
+  });
+
+  test("maps all display statuses correctly", () => {
+    const statuses: Array<{ input: DisplayToolCall["status"]; expected: ToolVisualStatus }> = [
+      { input: "pending", expected: "queued" },
+      { input: "running", expected: "running" },
+      { input: "complete", expected: "success" },
+      { input: "error", expected: "error" },
+    ];
+
+    for (const { input, expected } of statuses) {
+      const dtcs = [makeDisplayToolCall(input, { name: "test" })];
+      const states = toolCallsToVisualStates(dtcs);
+      expect(states[0].status).toBe(expected);
+    }
+  });
+});
+
+describe("shouldRenderToolBlocks", () => {
+  test("returns false for message without tool calls", () => {
+    const msg = makeDisplayMessage("assistant", "Hello");
+    expect(shouldRenderToolBlocks(msg)).toBe(false);
+  });
+
+  test("returns false for message with empty tool calls", () => {
+    const msg = makeDisplayMessage("assistant", "Hello", { toolCalls: [] });
+    expect(shouldRenderToolBlocks(msg)).toBe(false);
+  });
+
+  test("returns true for tool-role message with tool calls", () => {
+    const msg = makeDisplayMessage("tool", "result", {
+      toolCalls: [makeDisplayToolCall("complete", { name: "bash" })],
+    });
+    expect(shouldRenderToolBlocks(msg)).toBe(true);
+  });
+
+  test("returns false for assistant message with tool calls", () => {
+    const msg = makeDisplayMessage("assistant", "Let me check...", {
+      toolCalls: [makeDisplayToolCall("running", { name: "bash" })],
+    });
+    expect(shouldRenderToolBlocks(msg)).toBe(false);
+  });
+
+  test("returns false for user message", () => {
+    const msg = makeDisplayMessage("user", "Hello");
+    expect(shouldRenderToolBlocks(msg)).toBe(false);
+  });
+});
+
+describe("resolveToolBlockAccent", () => {
+  test("resolves glyph.tool.running token", () => {
+    const color = resolveToolBlockAccent("glyph.tool.running", MOCK_TOKENS);
+    expect(color).toBe(MOCK_TOKENS["glyph.tool.running"]);
+  });
+
+  test("resolves glyph.tool.done token", () => {
+    const color = resolveToolBlockAccent("glyph.tool.done", MOCK_TOKENS);
+    expect(color).toBe(MOCK_TOKENS["glyph.tool.done"]);
+  });
+
+  test("resolves glyph.tool.error token", () => {
+    const color = resolveToolBlockAccent("glyph.tool.error", MOCK_TOKENS);
+    expect(color).toBe(MOCK_TOKENS["glyph.tool.error"]);
+  });
+
+  test("falls back to glyph.tool.running for unknown token", () => {
+    const color = resolveToolBlockAccent("nonexistent.token", MOCK_TOKENS);
+    expect(color).toBe(MOCK_TOKENS["glyph.tool.running"]);
+  });
+});
+
+describe("ToolBlock source structure", () => {
+  test("tool-inline.tsx exports ToolBlock component", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/tool-inline.tsx"),
+      "utf-8",
+    );
+    expect(source).toContain("export function ToolBlock");
+  });
+
+  test("tool-inline.tsx uses FramedBlock for tool blocks", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/tool-inline.tsx"),
+      "utf-8",
+    );
+    expect(source).toContain("FramedBlock");
+    expect(source).toContain("SUBTLE_BORDER_CHARS");
+  });
+
+  test("tool-inline.tsx exports getToolBlockStyle", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/tool-inline.tsx"),
+      "utf-8",
+    );
+    expect(source).toContain("export function getToolBlockStyle");
+  });
+
+  test("tool-inline.tsx exports getToolBlockStatusSuffix", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/tool-inline.tsx"),
+      "utf-8",
+    );
+    expect(source).toContain("export function getToolBlockStatusSuffix");
+  });
+
+  test("tool-inline.tsx imports ToolVisualState from tool-lifecycle", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/tool-inline.tsx"),
+      "utf-8",
+    );
+    expect(source).toContain("ToolVisualState");
+    expect(source).toContain("tool-lifecycle");
+  });
+
+  test("conversation-panel.tsx imports ToolBlock", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/conversation-panel.tsx"),
+      "utf-8",
+    );
+    expect(source).toContain("ToolBlock");
+    expect(source).toContain("tool-inline");
+  });
+
+  test("conversation-panel.tsx exports ToolBlockList", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/conversation-panel.tsx"),
+      "utf-8",
+    );
+    expect(source).toContain("ToolBlockList");
+  });
+
+  test("conversation-panel.tsx exports shouldRenderToolBlocks", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/conversation-panel.tsx"),
+      "utf-8",
+    );
+    expect(source).toContain("export function shouldRenderToolBlocks");
+  });
+
+  test("message.tsx supports renderToolBlocks prop", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/message.tsx"),
+      "utf-8",
+    );
+    expect(source).toContain("renderToolBlocks");
+  });
+});
+
+describe("ToolBlock visual distinction from message blocks", () => {
+  test("tool block uses surface.secondary, not conversation backgrounds", () => {
+    const vs = makeVisualState("running");
+    const style = getToolBlockStyle(vs, MOCK_TOKENS);
+    expect(style.backgroundColor).toBe(MOCK_TOKENS["surface.secondary"]);
+    expect(style.backgroundColor).not.toBe(MOCK_TOKENS["conversation.user.bg"]);
+    expect(style.backgroundColor).not.toBe(MOCK_TOKENS["conversation.assistant.bg"]);
+  });
+
+  test("tool block uses SUBTLE_BORDER_CHARS (lighter than assistant ACCENT)", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/tool-inline.tsx"),
+      "utf-8",
+    );
+    // ToolBlock uses SUBTLE_BORDER_CHARS
+    expect(source).toContain("SUBTLE_BORDER_CHARS");
+    // Message uses ACCENT_BORDER_CHARS for assistant
+    const msgSource = readFileSync(
+      resolve(import.meta.dir, "../../src/components/message.tsx"),
+      "utf-8",
+    );
+    expect(msgSource).toContain("ACCENT_BORDER_CHARS");
+  });
+
+  test("tool block accent colors are status-driven, not role-driven", () => {
+    const running = getToolBlockStyle(makeVisualState("running"), MOCK_TOKENS);
+    const success = getToolBlockStyle(makeVisualState("success"), MOCK_TOKENS);
+    const error = getToolBlockStyle(makeVisualState("error"), MOCK_TOKENS);
+
+    // Each status has its own accent
+    expect(running.accentColor).toBe(MOCK_TOKENS["glyph.tool.running"]);
+    expect(success.accentColor).toBe(MOCK_TOKENS["glyph.tool.done"]);
+    expect(error.accentColor).toBe(MOCK_TOKENS["glyph.tool.error"]);
+  });
+});
+
+// --- Helper for creating ToolVisualState test fixtures ---
+
+function makeVisualState(
+  status: ToolVisualStatus,
+  overrides?: Partial<ToolVisualState>,
+): ToolVisualState {
+  const colorToken = getToolColorToken(status);
+  const glyph = getToolGlyph(status);
+
+  return {
+    id: `vs-${crypto.randomUUID().slice(0, 8)}`,
+    toolName: "bash",
+    status,
+    glyph,
+    label: `Bash ${status}`,
+    colorToken,
+    detail: undefined,
+    expanded: false,
+    hasDetail: false,
+    duration: undefined,
+    ...overrides,
+  };
+}
+
+function makeDisplayMessage(
+  role: DisplayMessage["role"],
+  content: string,
+  overrides?: Partial<DisplayMessage>,
+): DisplayMessage {
+  return {
+    id: crypto.randomUUID(),
+    role,
+    content,
+    createdAt: new Date(),
+    ...overrides,
+  };
+}
