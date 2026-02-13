@@ -12,20 +12,13 @@ import { Message } from "./message";
 import { formatModelDisplayName } from "./model-selector";
 import { ToolInline } from "./tool-inline";
 
-export const EXCHANGE_SEPARATOR = "─ ─ ─";
-
-export interface ConversationPanelProps {
-  isFocused: boolean;
-  borderColor: string;
-}
-
 /**
- * Determine whether a separator should appear before a message.
- * A separator marks the boundary between exchanges: it appears before
- * a user message that follows an assistant or tool message, creating
- * a gentle visual break between conversational turns.
+ * Determine whether a message starts a new exchange turn.
+ * An exchange boundary occurs when a user message follows an assistant
+ * or tool message, indicating the start of a new conversational turn.
+ * Used to apply additional spacing between exchanges.
  */
-export function shouldShowSeparator(messages: readonly DisplayMessage[], index: number): boolean {
+export function isExchangeBoundary(messages: readonly DisplayMessage[], index: number): boolean {
   if (index === 0) return false;
 
   const current = messages[index];
@@ -36,6 +29,17 @@ export function shouldShowSeparator(messages: readonly DisplayMessage[], index: 
   }
 
   return false;
+}
+
+/** Spacing (in lines) between messages within the same exchange. */
+export const MESSAGE_GAP = 1;
+
+/** Additional spacing (in lines) at exchange boundaries between turns. */
+export const EXCHANGE_GAP = 2;
+
+export interface ConversationPanelProps {
+  isFocused: boolean;
+  borderColor: string;
 }
 
 const DISPLAY_TO_LIFECYCLE_STATUS: Record<DisplayToolCall["status"], ToolCallStatus> = {
@@ -55,16 +59,6 @@ export function displayToolCallToToolCall(dtc: DisplayToolCall): ToolCall {
     error: dtc.isError && dtc.result ? dtc.result : undefined,
     result: !dtc.isError && dtc.result ? dtc.result : undefined,
   };
-}
-
-function ExchangeSeparator() {
-  const { tokens } = useThemeTokens();
-
-  return (
-    <Box style={{ flexDirection: "row", marginTop: 1, marginBottom: 1 }}>
-      <Text style={{ color: tokens["border.subtle"] }}>{EXCHANGE_SEPARATOR}</Text>
-    </Box>
-  );
 }
 
 interface InlineToolCallsProps {
@@ -139,15 +133,22 @@ export function ConversationPanel({ isFocused, borderColor }: ConversationPanelP
             </Text>
           </Box>
         ) : (
-          messages.map((message, index) => (
-            <Box key={message.id} style={{ flexDirection: "column" }}>
-              {shouldShowSeparator(messages, index) ? <ExchangeSeparator /> : null}
-              <Message message={message} lifecycleStatus={message.isStreaming ? lifecycleStatus : undefined} />
-              {message.toolCalls && message.toolCalls.length > 0 ? (
-                <InlineToolCalls toolCalls={message.toolCalls} />
-              ) : null}
-            </Box>
-          ))
+          messages.map((message, index) => {
+            const gap = isExchangeBoundary(messages, index)
+              ? EXCHANGE_GAP
+              : index > 0
+                ? MESSAGE_GAP
+                : 0;
+
+            return (
+              <Box key={message.id} style={{ flexDirection: "column", marginTop: gap }}>
+                <Message message={message} lifecycleStatus={message.isStreaming ? lifecycleStatus : undefined} />
+                {message.toolCalls && message.toolCalls.length > 0 ? (
+                  <InlineToolCalls toolCalls={message.toolCalls} />
+                ) : null}
+              </Box>
+            );
+          })
         )}
 
         {isStreaming && !hasContent ? <Text style={{ color: tokens["text.secondary"] }}>Generating response...</Text> : null}

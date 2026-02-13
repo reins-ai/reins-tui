@@ -167,7 +167,7 @@ export function Message({ message, lifecycleStatus }: MessageProps) {
   const isSystem = message.role === "system";
 
   return (
-    <Box style={{ flexDirection: "column", marginBottom: 0 }}>
+    <Box style={{ flexDirection: "column" }}>
       {isUser ? (
         <Box style={{ flexDirection: "row" }}>
           <Text style={{ color: tokens["conversation.user.text"] }}>{message.content}</Text>

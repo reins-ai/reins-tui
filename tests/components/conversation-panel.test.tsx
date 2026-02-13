@@ -2,8 +2,9 @@ import { describe, expect, test } from "bun:test";
 
 import type { DisplayMessage, DisplayToolCall } from "../../src/store";
 import {
-  EXCHANGE_SEPARATOR,
-  shouldShowSeparator,
+  isExchangeBoundary,
+  MESSAGE_GAP,
+  EXCHANGE_GAP,
 } from "../../src/components/conversation-panel";
 import {
   GLYPH_REINS,
@@ -186,65 +187,61 @@ describe("tool glyph color mapping", () => {
   });
 });
 
-describe("exchange separator logic", () => {
-  test("no separator before first message", () => {
+describe("exchange boundary detection", () => {
+  test("no boundary before first message", () => {
     const messages = [makeMessage("user", "Hello")];
-    expect(shouldShowSeparator(messages, 0)).toBe(false);
+    expect(isExchangeBoundary(messages, 0)).toBe(false);
   });
 
-  test("separator before user message following assistant", () => {
+  test("boundary before user message following assistant", () => {
     const messages = [
       makeMessage("assistant", "Hi there"),
       makeMessage("user", "Thanks"),
     ];
-    expect(shouldShowSeparator(messages, 1)).toBe(true);
+    expect(isExchangeBoundary(messages, 1)).toBe(true);
   });
 
-  test("separator before user message following tool", () => {
+  test("boundary before user message following tool", () => {
     const messages = [
       makeMessage("tool", "result data"),
       makeMessage("user", "Got it"),
     ];
-    expect(shouldShowSeparator(messages, 1)).toBe(true);
+    expect(isExchangeBoundary(messages, 1)).toBe(true);
   });
 
-  test("no separator between consecutive user messages", () => {
+  test("no boundary between consecutive user messages", () => {
     const messages = [
       makeMessage("user", "First"),
       makeMessage("user", "Second"),
     ];
-    expect(shouldShowSeparator(messages, 1)).toBe(false);
+    expect(isExchangeBoundary(messages, 1)).toBe(false);
   });
 
-  test("no separator between consecutive assistant messages", () => {
+  test("no boundary between consecutive assistant messages", () => {
     const messages = [
       makeMessage("assistant", "Part 1"),
       makeMessage("assistant", "Part 2"),
     ];
-    expect(shouldShowSeparator(messages, 1)).toBe(false);
+    expect(isExchangeBoundary(messages, 1)).toBe(false);
   });
 
-  test("no separator before assistant message following user", () => {
+  test("no boundary before assistant message following user", () => {
     const messages = [
       makeMessage("user", "Question"),
       makeMessage("assistant", "Answer"),
     ];
-    expect(shouldShowSeparator(messages, 1)).toBe(false);
+    expect(isExchangeBoundary(messages, 1)).toBe(false);
   });
 
-  test("no separator before system message", () => {
+  test("no boundary before system message", () => {
     const messages = [
       makeMessage("assistant", "Done"),
       makeMessage("system", "Session started"),
     ];
-    expect(shouldShowSeparator(messages, 1)).toBe(false);
+    expect(isExchangeBoundary(messages, 1)).toBe(false);
   });
 
-  test("separator text is gentle dashed line", () => {
-    expect(EXCHANGE_SEPARATOR).toBe("─ ─ ─");
-  });
-
-  test("multi-turn conversation has correct separator placement", () => {
+  test("multi-turn conversation has correct boundary placement", () => {
     const messages = [
       makeMessage("user", "Hello"),
       makeMessage("assistant", "Hi!"),
@@ -253,11 +250,26 @@ describe("exchange separator logic", () => {
       makeMessage("user", "Bye"),
     ];
 
-    expect(shouldShowSeparator(messages, 0)).toBe(false);
-    expect(shouldShowSeparator(messages, 1)).toBe(false);
-    expect(shouldShowSeparator(messages, 2)).toBe(true);
-    expect(shouldShowSeparator(messages, 3)).toBe(false);
-    expect(shouldShowSeparator(messages, 4)).toBe(true);
+    expect(isExchangeBoundary(messages, 0)).toBe(false);
+    expect(isExchangeBoundary(messages, 1)).toBe(false);
+    expect(isExchangeBoundary(messages, 2)).toBe(true);
+    expect(isExchangeBoundary(messages, 3)).toBe(false);
+    expect(isExchangeBoundary(messages, 4)).toBe(true);
+  });
+});
+
+describe("message spacing rhythm", () => {
+  test("MESSAGE_GAP provides consistent intra-exchange spacing", () => {
+    expect(MESSAGE_GAP).toBeGreaterThan(0);
+  });
+
+  test("EXCHANGE_GAP is larger than MESSAGE_GAP for visual separation", () => {
+    expect(EXCHANGE_GAP).toBeGreaterThan(MESSAGE_GAP);
+  });
+
+  test("spacing values are whole numbers for terminal line alignment", () => {
+    expect(Number.isInteger(MESSAGE_GAP)).toBe(true);
+    expect(Number.isInteger(EXCHANGE_GAP)).toBe(true);
   });
 });
 
@@ -340,7 +352,7 @@ describe("conversation with tool calls", () => {
     expect(getToolGlyph(toolCalls[2].status)).toBe(GLYPH_TOOL_ERROR);
   });
 
-  test("separator appears before user reply after tool-bearing assistant message", () => {
+  test("exchange boundary detected before user reply after tool-bearing assistant message", () => {
     const messages = [
       makeMessage("assistant", "Checking...", {
         toolCalls: [makeToolCall("complete", { name: "search" })],
@@ -348,7 +360,7 @@ describe("conversation with tool calls", () => {
       makeMessage("user", "What did you find?"),
     ];
 
-    expect(shouldShowSeparator(messages, 1)).toBe(true);
+    expect(isExchangeBoundary(messages, 1)).toBe(true);
   });
 });
 

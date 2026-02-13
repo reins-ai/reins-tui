@@ -11,7 +11,7 @@ import {
   getToolGlyph,
   getToolGlyphColor,
 } from "../../src/components/message";
-import { EXCHANGE_SEPARATOR, shouldShowSeparator } from "../../src/components/conversation-panel";
+import { isExchangeBoundary, MESSAGE_GAP, EXCHANGE_GAP } from "../../src/components/conversation-panel";
 import type { ThemeTokens } from "../../src/theme/theme-schema";
 import { THEME_TOKEN_NAMES } from "../../src/theme/theme-schema";
 
@@ -44,9 +44,8 @@ describe("glyph vocabulary: character identity", () => {
     expect(GLYPH_TOOL_ERROR).toBe("✧");
   });
 
-  test("exchange separator uses spaced dashes ─ ─ ─", () => {
-    expect(EXCHANGE_SEPARATOR).toBe("─ ─ ─");
-    expect(EXCHANGE_SEPARATOR).toContain("─");
+  test("exchange boundary spacing uses gap constants instead of decorative separators", () => {
+    expect(EXCHANGE_GAP).toBeGreaterThan(MESSAGE_GAP);
   });
 });
 
@@ -317,45 +316,49 @@ describe("card border completeness", () => {
 // Exchange separator rendering
 // ---------------------------------------------------------------------------
 
-describe("exchange separator rendering", () => {
-  test("separator contains box-drawing horizontal dash", () => {
-    expect(EXCHANGE_SEPARATOR).toContain("─");
+describe("message spacing rhythm", () => {
+  test("exchange gap is larger than message gap for turn separation", () => {
+    expect(EXCHANGE_GAP).toBeGreaterThan(MESSAGE_GAP);
   });
 
-  test("separator is visually distinct from content text", () => {
-    // Separator uses box-drawing characters, not regular ASCII dashes
-    expect(EXCHANGE_SEPARATOR).not.toContain("-");
+  test("message gap provides non-zero intra-exchange spacing", () => {
+    expect(MESSAGE_GAP).toBeGreaterThan(0);
   });
 
-  test("shouldShowSeparator returns false for first message", () => {
+  test("spacing values are whole numbers for terminal line alignment", () => {
+    expect(Number.isInteger(MESSAGE_GAP)).toBe(true);
+    expect(Number.isInteger(EXCHANGE_GAP)).toBe(true);
+  });
+
+  test("isExchangeBoundary returns false for first message", () => {
     const messages = [
       { id: "1", role: "user" as const, content: "hello", isStreaming: false },
     ];
-    expect(shouldShowSeparator(messages, 0)).toBe(false);
+    expect(isExchangeBoundary(messages, 0)).toBe(false);
   });
 
-  test("shouldShowSeparator returns true for user after assistant", () => {
+  test("isExchangeBoundary returns true for user after assistant", () => {
     const messages = [
       { id: "1", role: "assistant" as const, content: "hi", isStreaming: false },
       { id: "2", role: "user" as const, content: "hello", isStreaming: false },
     ];
-    expect(shouldShowSeparator(messages, 1)).toBe(true);
+    expect(isExchangeBoundary(messages, 1)).toBe(true);
   });
 
-  test("shouldShowSeparator returns false for assistant after user", () => {
+  test("isExchangeBoundary returns false for assistant after user", () => {
     const messages = [
       { id: "1", role: "user" as const, content: "hello", isStreaming: false },
       { id: "2", role: "assistant" as const, content: "hi", isStreaming: false },
     ];
-    expect(shouldShowSeparator(messages, 1)).toBe(false);
+    expect(isExchangeBoundary(messages, 1)).toBe(false);
   });
 
-  test("shouldShowSeparator returns true for user after tool", () => {
+  test("isExchangeBoundary returns true for user after tool", () => {
     const messages = [
       { id: "1", role: "tool" as const, content: "result", isStreaming: false },
       { id: "2", role: "user" as const, content: "thanks", isStreaming: false },
     ];
-    expect(shouldShowSeparator(messages, 1)).toBe(true);
+    expect(isExchangeBoundary(messages, 1)).toBe(true);
   });
 });
 
