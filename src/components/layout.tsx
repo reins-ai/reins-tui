@@ -83,31 +83,36 @@ export interface LayoutProps {
  * Apply breakpoint constraints to the current layout mode.
  * When the terminal is too narrow for the user's chosen mode,
  * the breakpoint engine overrides it to a valid alternative.
+ * Also auto-collapses the sidebar drawer when the terminal shrinks
+ * below the minimum fit width.
  */
 function useBreakpointConstraints(columns: number): BreakpointState {
   const { state, dispatch } = useApp();
   const previousColumnsRef = useRef(columns);
 
+  const drawerVisible = state.panels.drawer.visible;
+
   const breakpointState = useMemo(
-    () => resolveBreakpointState(columns, state.layoutMode),
-    [columns, state.layoutMode],
+    () => resolveBreakpointState(columns, state.layoutMode, drawerVisible),
+    [columns, state.layoutMode, drawerVisible],
   );
 
   const applyBandConstraint = useCallback(
     (newColumns: number) => {
-      if (!didBandChange(previousColumnsRef.current, newColumns)) {
-        previousColumnsRef.current = newColumns;
-        return;
-      }
-
+      const bandChanged = didBandChange(previousColumnsRef.current, newColumns);
       previousColumnsRef.current = newColumns;
-      const nextState = resolveBreakpointState(newColumns, state.layoutMode);
 
-      if (nextState.constrainedMode !== state.layoutMode) {
+      const nextState = resolveBreakpointState(newColumns, state.layoutMode, drawerVisible);
+
+      if (bandChanged && nextState.constrainedMode !== state.layoutMode) {
         dispatch({ type: "SET_LAYOUT_MODE", payload: nextState.constrainedMode });
       }
+
+      if (drawerVisible && !nextState.sidebarVisible) {
+        dispatch({ type: "DISMISS_PANEL", payload: "drawer" });
+      }
     },
-    [state.layoutMode, dispatch],
+    [state.layoutMode, drawerVisible, dispatch],
   );
 
   const debouncerRef = useRef(createResizeDebouncer(applyBandConstraint));

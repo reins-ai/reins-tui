@@ -9,8 +9,15 @@ import {
   resolveBreakpointState,
   createResizeDebouncer,
   didBandChange,
+  shouldAutoCollapseSidebar,
   BREAKPOINT_THRESHOLDS,
   BAND_LABELS,
+  SIDEBAR_WIDTH,
+  ACTIVITY_WIDTH,
+  EXPANDED_WIDTH,
+  MIN_CONVERSATION_WIDTH,
+  PANEL_GAP,
+  MIN_SIDEBAR_FIT_WIDTH,
   type BreakpointBand,
 } from "../../src/layout/breakpoints";
 import type { LayoutMode } from "../../src/state/layout-mode";
@@ -136,26 +143,26 @@ describe("getPanelWidths", () => {
 
   test("narrow allocates sidebar and conversation", () => {
     const widths = getPanelWidths("narrow", 80);
-    expect(widths.sidebar).toBe(28);
-    expect(widths.conversation).toBe(80 - 28 - 1);
+    expect(widths.sidebar).toBe(SIDEBAR_WIDTH);
+    expect(widths.conversation).toBe(80 - SIDEBAR_WIDTH - PANEL_GAP);
     expect(widths.activity).toBe(0);
     expect(widths.expanded).toBe(0);
   });
 
   test("standard allocates sidebar, conversation, and activity", () => {
     const widths = getPanelWidths("standard", 140);
-    expect(widths.sidebar).toBe(28);
-    expect(widths.activity).toBe(32);
-    expect(widths.conversation).toBe(140 - 28 - 32 - 2);
+    expect(widths.sidebar).toBe(SIDEBAR_WIDTH);
+    expect(widths.activity).toBe(ACTIVITY_WIDTH);
+    expect(widths.conversation).toBe(140 - SIDEBAR_WIDTH - ACTIVITY_WIDTH - PANEL_GAP * 2);
     expect(widths.expanded).toBe(0);
   });
 
   test("wide allocates all four panels", () => {
     const widths = getPanelWidths("wide", 200);
-    expect(widths.sidebar).toBe(28);
-    expect(widths.activity).toBe(32);
-    expect(widths.expanded).toBe(36);
-    expect(widths.conversation).toBe(200 - 28 - 32 - 36 - 3);
+    expect(widths.sidebar).toBe(SIDEBAR_WIDTH);
+    expect(widths.activity).toBe(ACTIVITY_WIDTH);
+    expect(widths.expanded).toBe(EXPANDED_WIDTH);
+    expect(widths.conversation).toBe(200 - SIDEBAR_WIDTH - ACTIVITY_WIDTH - EXPANDED_WIDTH - PANEL_GAP * 3);
   });
 
   test("narrow enforces minimum conversation width", () => {
@@ -187,14 +194,19 @@ describe("getPanelWidths", () => {
       }
     }
   });
+
+  test("sidebar width matches contextual panel constant (40 chars)", () => {
+    expect(SIDEBAR_WIDTH).toBe(40);
+  });
 });
 
 describe("resolveBreakpointState", () => {
-  test("compact band forces zen mode", () => {
+  test("compact band forces zen mode and hides sidebar", () => {
     const state = resolveBreakpointState(40, "normal");
     expect(state.band).toBe("compact");
     expect(state.constrainedMode).toBe("zen");
     expect(state.showExpandedPanel).toBe(false);
+    expect(state.sidebarVisible).toBe(false);
   });
 
   test("narrow band downgrades activity to normal", () => {
@@ -204,18 +216,30 @@ describe("resolveBreakpointState", () => {
     expect(state.showExpandedPanel).toBe(false);
   });
 
-  test("standard band preserves all modes", () => {
+  test("narrow band hides sidebar by default", () => {
+    const state = resolveBreakpointState(80, "normal");
+    expect(state.sidebarVisible).toBe(false);
+  });
+
+  test("narrow band shows sidebar when user toggled and room available", () => {
+    const state = resolveBreakpointState(80, "normal", true);
+    expect(state.sidebarVisible).toBe(true);
+  });
+
+  test("standard band preserves all modes and shows sidebar", () => {
     const state = resolveBreakpointState(140, "activity");
     expect(state.band).toBe("standard");
     expect(state.constrainedMode).toBe("activity");
     expect(state.showExpandedPanel).toBe(false);
+    expect(state.sidebarVisible).toBe(true);
   });
 
-  test("wide band enables expanded panel", () => {
+  test("wide band enables expanded panel and shows sidebar", () => {
     const state = resolveBreakpointState(200, "normal");
     expect(state.band).toBe("wide");
     expect(state.constrainedMode).toBe("normal");
     expect(state.showExpandedPanel).toBe(true);
+    expect(state.sidebarVisible).toBe(true);
   });
 
   test("includes correct column count", () => {
@@ -225,8 +249,8 @@ describe("resolveBreakpointState", () => {
 
   test("includes panel widths matching band", () => {
     const state = resolveBreakpointState(140, "normal");
-    expect(state.panelWidths.sidebar).toBe(28);
-    expect(state.panelWidths.activity).toBe(32);
+    expect(state.panelWidths.sidebar).toBe(SIDEBAR_WIDTH);
+    expect(state.panelWidths.activity).toBe(ACTIVITY_WIDTH);
   });
 });
 
@@ -412,5 +436,128 @@ describe("BREAKPOINT_THRESHOLDS", () => {
     expect(BREAKPOINT_THRESHOLDS.compact).toBe(60);
     expect(BREAKPOINT_THRESHOLDS.narrow).toBe(100);
     expect(BREAKPOINT_THRESHOLDS.standard).toBe(161);
+  });
+});
+
+describe("panel width constants", () => {
+  test("sidebar width is 40 chars for contextual panel", () => {
+    expect(SIDEBAR_WIDTH).toBe(40);
+  });
+
+  test("activity width is 32 chars", () => {
+    expect(ACTIVITY_WIDTH).toBe(32);
+  });
+
+  test("expanded width is 36 chars", () => {
+    expect(EXPANDED_WIDTH).toBe(36);
+  });
+
+  test("minimum conversation width is 30 chars", () => {
+    expect(MIN_CONVERSATION_WIDTH).toBe(30);
+  });
+
+  test("MIN_SIDEBAR_FIT_WIDTH equals sidebar + min conversation + gap", () => {
+    expect(MIN_SIDEBAR_FIT_WIDTH).toBe(SIDEBAR_WIDTH + MIN_CONVERSATION_WIDTH + PANEL_GAP);
+  });
+});
+
+describe("shouldAutoCollapseSidebar", () => {
+  test("always collapses on compact band", () => {
+    expect(shouldAutoCollapseSidebar(40, "compact")).toBe(true);
+    expect(shouldAutoCollapseSidebar(59, "compact")).toBe(true);
+    expect(shouldAutoCollapseSidebar(40, "compact", true)).toBe(true);
+  });
+
+  test("collapses on narrow band by default (user has not toggled)", () => {
+    expect(shouldAutoCollapseSidebar(80, "narrow")).toBe(true);
+    expect(shouldAutoCollapseSidebar(99, "narrow")).toBe(true);
+    expect(shouldAutoCollapseSidebar(80, "narrow", false)).toBe(true);
+  });
+
+  test("shows on narrow band when user toggled and room available", () => {
+    const widthWithRoom = SIDEBAR_WIDTH + MIN_CONVERSATION_WIDTH + PANEL_GAP;
+    expect(shouldAutoCollapseSidebar(widthWithRoom, "narrow", true)).toBe(false);
+    expect(shouldAutoCollapseSidebar(99, "narrow", true)).toBe(false);
+  });
+
+  test("collapses on narrow band when user toggled but not enough room", () => {
+    const tooNarrow = SIDEBAR_WIDTH + MIN_CONVERSATION_WIDTH + PANEL_GAP - 1;
+    expect(shouldAutoCollapseSidebar(tooNarrow, "narrow", true)).toBe(true);
+  });
+
+  test("shows on standard band by default", () => {
+    expect(shouldAutoCollapseSidebar(120, "standard")).toBe(false);
+    expect(shouldAutoCollapseSidebar(140, "standard")).toBe(false);
+  });
+
+  test("shows on wide band by default", () => {
+    expect(shouldAutoCollapseSidebar(200, "wide")).toBe(false);
+    expect(shouldAutoCollapseSidebar(300, "wide")).toBe(false);
+  });
+
+  test("collapse decision is deterministic for same inputs", () => {
+    const inputs: [number, BreakpointBand, boolean][] = [
+      [80, "narrow", true],
+      [80, "narrow", false],
+      [120, "standard", false],
+      [40, "compact", true],
+    ];
+
+    for (const [cols, band, toggled] of inputs) {
+      const first = shouldAutoCollapseSidebar(cols, band, toggled);
+      const second = shouldAutoCollapseSidebar(cols, band, toggled);
+      expect(first).toBe(second);
+    }
+  });
+});
+
+describe("sidebar collapse across band transitions", () => {
+  test("sidebar visible on standard, collapses when shrinking to narrow", () => {
+    const standard = resolveBreakpointState(120, "normal");
+    expect(standard.sidebarVisible).toBe(true);
+
+    const narrow = resolveBreakpointState(80, "normal");
+    expect(narrow.sidebarVisible).toBe(false);
+  });
+
+  test("sidebar stays visible on narrow when user toggled and room available", () => {
+    const narrow = resolveBreakpointState(80, "normal", true);
+    expect(narrow.sidebarVisible).toBe(true);
+  });
+
+  test("sidebar collapses on compact regardless of user toggle", () => {
+    const compact = resolveBreakpointState(40, "normal", true);
+    expect(compact.sidebarVisible).toBe(false);
+  });
+
+  test("sidebar visible on wide band", () => {
+    const wide = resolveBreakpointState(200, "normal");
+    expect(wide.sidebarVisible).toBe(true);
+  });
+
+  test("growing from compact to standard restores sidebar visibility", () => {
+    const compact = resolveBreakpointState(40, "zen");
+    expect(compact.sidebarVisible).toBe(false);
+
+    const standard = resolveBreakpointState(120, "zen");
+    expect(standard.sidebarVisible).toBe(true);
+  });
+
+  test("zen mode fallback remains functional in compact band", () => {
+    const compact = resolveBreakpointState(40, "activity");
+    expect(compact.constrainedMode).toBe("zen");
+    expect(compact.sidebarVisible).toBe(false);
+    expect(compact.panelWidths.sidebar).toBe(0);
+    expect(compact.panelWidths.conversation).toBe(40);
+  });
+
+  test("sidebar visibility at exact threshold boundaries", () => {
+    const atNarrowStart = resolveBreakpointState(60, "normal");
+    expect(atNarrowStart.band).toBe("narrow");
+    expect(atNarrowStart.sidebarVisible).toBe(false);
+
+    const atStandardStart = resolveBreakpointState(100, "normal");
+    expect(atStandardStart.band).toBe("standard");
+    expect(atStandardStart.sidebarVisible).toBe(true);
   });
 });

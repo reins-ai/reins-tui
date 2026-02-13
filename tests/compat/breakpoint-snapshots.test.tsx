@@ -7,6 +7,9 @@ import {
   getPanelWidths,
   resolveBreakpointState,
   didBandChange,
+  SIDEBAR_WIDTH,
+  ACTIVITY_WIDTH,
+  EXPANDED_WIDTH,
   type BreakpointBand,
   type PanelWidths,
 } from "../../src/layout/breakpoints";
@@ -52,7 +55,7 @@ describe("narrow band (60-99) layout snapshots", () => {
   for (const width of NARROW_WIDTHS) {
     test(`width ${width}: sidebar + conversation, no activity`, () => {
       const widths = getPanelWidths("narrow", width);
-      expect(widths.sidebar).toBe(28);
+      expect(widths.sidebar).toBe(SIDEBAR_WIDTH);
       expect(widths.conversation).toBeGreaterThan(0);
       expect(widths.activity).toBe(0);
       expect(widths.expanded).toBe(0);
@@ -72,9 +75,9 @@ describe("standard band (100-160) layout snapshots", () => {
   for (const width of STANDARD_WIDTHS) {
     test(`width ${width}: sidebar + conversation + activity`, () => {
       const widths = getPanelWidths("standard", width);
-      expect(widths.sidebar).toBe(28);
+      expect(widths.sidebar).toBe(SIDEBAR_WIDTH);
       expect(widths.conversation).toBeGreaterThan(0);
-      expect(widths.activity).toBe(32);
+      expect(widths.activity).toBe(ACTIVITY_WIDTH);
       expect(widths.expanded).toBe(0);
     });
   }
@@ -93,10 +96,10 @@ describe("wide band (>160) layout snapshots", () => {
   for (const width of WIDE_WIDTHS) {
     test(`width ${width}: all four panels including expanded`, () => {
       const widths = getPanelWidths("wide", width);
-      expect(widths.sidebar).toBe(28);
+      expect(widths.sidebar).toBe(SIDEBAR_WIDTH);
       expect(widths.conversation).toBeGreaterThan(0);
-      expect(widths.activity).toBe(32);
-      expect(widths.expanded).toBe(36);
+      expect(widths.activity).toBe(ACTIVITY_WIDTH);
+      expect(widths.expanded).toBe(EXPANDED_WIDTH);
     });
 
     test(`width ${width}: showExpandedPanel is true`, () => {
