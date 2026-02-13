@@ -205,11 +205,13 @@ export function Layout({ version, dimensions, showHelp, connectionStatus, daemon
         <Text content="Settings and preferences" style={{ color: tokens["text.secondary"] }} />
       </ModalPanel>
 
-      {/* Status zone: anchored footer with connection/model/lifecycle info */}
+      {/* Status zone: anchored footer with connection/model/lifecycle info.
+          flexShrink 0 prevents the footer from being squeezed by content above. */}
       <ZoneShell
         borderSides={["top"]}
         borderColor={tokens["border.subtle"]}
         backgroundColor={tokens["surface.secondary"]}
+        style={{ flexShrink: 0 }}
       >
         <StatusBar version={version} dimensions={dimensions} showHelp={showHelp} connectionStatus={connectionStatus} daemonMode={daemonMode} />
       </ZoneShell>

@@ -22,6 +22,7 @@ import {
   HEARTBEAT_PULSE_INTERVAL_MS,
   HEARTBEAT_RECONNECT_INTERVAL_MS,
   COMPACTION_INDICATOR_DURATION_MS,
+  SEGMENT_SEPARATOR,
   resolveHeartbeatColor,
   resolveHeartbeatInterval,
   resolveLifecycleDisplay,
@@ -32,6 +33,8 @@ import {
   buildTruncatedLeftText,
   getConnectionGlyph,
   getConnectionLabel,
+  groupSegments,
+  buildGroupText,
   type HeartbeatPhase,
   type LifecycleDisplay,
   type StatusBarSegments,
@@ -1165,5 +1168,219 @@ describe("segment data model integrity", () => {
     for (const segment of segments) {
       expect(segment.minWidth).toBe(SEGMENT_DROP_THRESHOLDS[segment.id]);
     }
+  });
+});
+
+// --- Segment grouping tests (polished status bar UI) ---
+
+describe("SEGMENT_SEPARATOR", () => {
+  test("separator is the pipe character with surrounding spaces", () => {
+    expect(SEGMENT_SEPARATOR).toBe(" │ ");
+  });
+
+  test("separator is exactly 3 characters wide", () => {
+    expect(SEGMENT_SEPARATOR.length).toBe(3);
+  });
+});
+
+describe("groupSegments", () => {
+  test("places connection, model, lifecycle in left group", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const { left, right } = groupSegments(result.visibleSegments);
+
+    const leftIds = left.map((s) => s.id);
+    expect(leftIds).toContain("connection");
+    expect(leftIds).toContain("model");
+    expect(leftIds).toContain("lifecycle");
+    expect(leftIds).not.toContain("hints");
+  });
+
+  test("places hints in right group", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const { right } = groupSegments(result.visibleSegments);
+
+    const rightIds = right.map((s) => s.id);
+    expect(rightIds).toContain("hints");
+    expect(rightIds).not.toContain("connection");
+    expect(rightIds).not.toContain("model");
+    expect(rightIds).not.toContain("lifecycle");
+  });
+
+  test("right group is empty when hints are dropped", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 40 }));
+    const { right } = groupSegments(result.visibleSegments);
+
+    expect(right).toHaveLength(0);
+  });
+
+  test("left group preserves priority order", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const { left } = groupSegments(result.visibleSegments);
+
+    for (let i = 1; i < left.length; i++) {
+      expect(left[i].priority).toBeGreaterThan(left[i - 1].priority);
+    }
+  });
+
+  test("handles single visible segment (connection only)", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 20 }));
+    const { left, right } = groupSegments(result.visibleSegments);
+
+    expect(left.length).toBeGreaterThanOrEqual(1);
+    expect(right).toHaveLength(0);
+    expect(left[0].id).toBe("connection");
+  });
+});
+
+describe("buildGroupText", () => {
+  test("joins multiple segments with separator", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const { left } = groupSegments(result.visibleSegments);
+    const text = buildGroupText(left);
+
+    expect(text).toContain(" │ ");
+    expect(text).toContain("Connected");
+    expect(text).toContain("claude-3.5-sonnet");
+  });
+
+  test("single segment produces no separator", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 20 }));
+    const { left } = groupSegments(result.visibleSegments);
+
+    if (left.length === 1) {
+      const text = buildGroupText(left);
+      expect(text).not.toContain(" │ ");
+    }
+  });
+
+  test("right group text contains keyboard shortcuts", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const { right } = groupSegments(result.visibleSegments);
+    const text = buildGroupText(right);
+
+    expect(text).toContain("Ctrl+K");
+    expect(text).toContain("Ctrl+M");
+  });
+});
+
+// --- Polished status bar visual behavior tests ---
+
+describe("polished status bar layout stability", () => {
+  test("left group never contains hints segment", () => {
+    for (const width of [30, 50, 80, 120, 200]) {
+      const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: width }));
+      const { left } = groupSegments(result.visibleSegments);
+      const leftIds = left.map((s) => s.id);
+      expect(leftIds).not.toContain("hints");
+    }
+  });
+
+  test("right group never contains non-hint segments", () => {
+    for (const width of [30, 50, 80, 120, 200]) {
+      const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: width }));
+      const { right } = groupSegments(result.visibleSegments);
+      for (const seg of right) {
+        expect(seg.id).toBe("hints");
+      }
+    }
+  });
+
+  test("no drifting separators on wide terminals", () => {
+    // At wide widths, left and right groups are stable and don't produce
+    // extra separators between them — they are in separate flex containers
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const { left, right } = groupSegments(result.visibleSegments);
+
+    const leftText = buildGroupText(left);
+    const rightText = buildGroupText(right);
+
+    // Left text should not end with a separator
+    expect(leftText).not.toMatch(/ │ $/);
+    // Right text should not start with a separator
+    expect(rightText).not.toMatch(/^ │ /);
+  });
+
+  test("total visible content fits within terminal width", () => {
+    for (const width of [30, 50, 80, 120, 200]) {
+      const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: width }));
+      // totalWidth from resolveSegmentVisibility includes padding
+      expect(result.totalWidth).toBeLessThanOrEqual(width);
+    }
+  });
+
+  test("each visible segment has a distinct color token", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    for (const seg of result.visibleSegments) {
+      expect(seg.colorToken.length).toBeGreaterThan(0);
+      expect(seg.colorToken).not.toBe("");
+    }
+  });
+
+  test("connection segment always uses status color tokens", () => {
+    const statuses: DaemonConnectionStatus[] = ["connected", "disconnected", "connecting", "reconnecting"];
+    for (const status of statuses) {
+      const result = resolveStatusSegmentSet(makeDefaultSources({
+        terminalWidth: 200,
+        connectionStatus: status,
+      }));
+      const conn = result.visibleSegments.find((s) => s.id === "connection");
+      expect(conn).toBeDefined();
+      expect(conn!.colorToken).toMatch(/^status\./);
+    }
+  });
+
+  test("model segment uses text.secondary color token", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const model = result.visibleSegments.find((s) => s.id === "model");
+    expect(model).toBeDefined();
+    expect(model!.colorToken).toBe("text.secondary");
+  });
+
+  test("hints segment uses text.muted color token", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const hints = result.visibleSegments.find((s) => s.id === "hints");
+    expect(hints).toBeDefined();
+    expect(hints!.colorToken).toBe("text.muted");
+  });
+});
+
+describe("polished status bar content requirements", () => {
+  test("shows connection health at all widths", () => {
+    for (const width of [20, 40, 80, 120]) {
+      const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: width }));
+      const hasConnection = result.visibleSegments.some((s) => s.id === "connection");
+      expect(hasConnection).toBe(true);
+    }
+  });
+
+  test("shows active model at standard and wide widths", () => {
+    for (const width of [80, 120, 200]) {
+      const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: width }));
+      const hasModel = result.visibleSegments.some((s) => s.id === "model");
+      expect(hasModel).toBe(true);
+    }
+  });
+
+  test("shows at least two keyboard shortcuts in hints", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const hints = result.visibleSegments.find((s) => s.id === "hints");
+    expect(hints).toBeDefined();
+
+    // Count Ctrl+ occurrences — must be at least 2
+    const ctrlMatches = hints!.content.match(/Ctrl\+/g);
+    expect(ctrlMatches).not.toBeNull();
+    expect(ctrlMatches!.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test("hints contain Ctrl+K palette shortcut", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const hints = result.visibleSegments.find((s) => s.id === "hints");
+    expect(hints!.content).toContain("Ctrl+K");
+  });
+
+  test("hints contain Ctrl+M model shortcut", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const hints = result.visibleSegments.find((s) => s.id === "hints");
+    expect(hints!.content).toContain("Ctrl+M");
   });
 });

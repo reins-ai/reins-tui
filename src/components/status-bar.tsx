@@ -3,9 +3,11 @@ import { useEffect, useRef, useState } from "react";
 import type { DaemonConnectionStatus } from "../daemon/contracts";
 import type { DaemonMode } from "../daemon/daemon-context";
 import { useApp } from "../store";
+import type { StatusSegment, StatusSegmentSources } from "../store/types";
 import { useThemeTokens } from "../theme";
 import { Box, Text, type TerminalDimensions } from "../ui";
 import type { ConversationLifecycleStatus } from "../state/status-machine";
+import { resolveStatusSegmentSet } from "../state/status-machine";
 
 // --- Constants ---
 
@@ -13,6 +15,9 @@ export const HEARTBEAT_GLYPH = "·";
 export const HEARTBEAT_PULSE_INTERVAL_MS = 2_000;
 export const HEARTBEAT_RECONNECT_INTERVAL_MS = 500;
 export const COMPACTION_INDICATOR_DURATION_MS = 4_000;
+
+/** Separator glyph between status segments. */
+export const SEGMENT_SEPARATOR = " │ ";
 
 // --- Heartbeat helpers ---
 
@@ -222,6 +227,37 @@ export function buildTruncatedLeftText(
   return parts.join(" │ ");
 }
 
+// --- Segment grouping helpers ---
+
+/**
+ * Split resolved segments into left (connection, model, lifecycle) and
+ * right (hints) groups. Only visible segments are included.
+ * This produces stable two-zone layout with no drifting separators.
+ */
+export function groupSegments(
+  visibleSegments: StatusSegment[],
+): { left: StatusSegment[]; right: StatusSegment[] } {
+  const left: StatusSegment[] = [];
+  const right: StatusSegment[] = [];
+
+  for (const seg of visibleSegments) {
+    if (seg.id === "hints") {
+      right.push(seg);
+    } else {
+      left.push(seg);
+    }
+  }
+
+  return { left, right };
+}
+
+/**
+ * Build display text for a group of segments joined by separators.
+ */
+export function buildGroupText(segments: StatusSegment[]): string {
+  return segments.map((s) => s.content).join(SEGMENT_SEPARATOR);
+}
+
 // --- HeartbeatPulse component ---
 
 export interface HeartbeatPulseProps {
@@ -312,7 +348,6 @@ export interface StatusBarProps {
 export function StatusBar({
   dimensions,
   connectionStatus = "disconnected",
-  daemonMode,
   tokenCount = 0,
   cost = null,
   compactionActive: compactionProp,
@@ -346,42 +381,50 @@ export function StatusBar({
     };
   }, [compactionProp]);
 
-  const lifecycleStatus = state.streamingLifecycleStatus;
-  const lifecycleDisplay = resolveLifecycleDisplay(lifecycleStatus, tokenCount, cost, state.activeToolName);
-
-  const segments = buildSegments(
+  // Build segment sources from app state
+  const sources: StatusSegmentSources = {
     connectionStatus,
-    state.currentModel,
-    lifecycleDisplay,
-    compactionVisible,
-    daemonMode,
-  );
+    currentModel: state.currentModel,
+    lifecycleStatus: state.streamingLifecycleStatus,
+    activeToolName: state.activeToolName,
+    tokenCount,
+    cost,
+    compactionActive: compactionVisible,
+    terminalWidth: dimensions.width,
+  };
 
-  const truncation = resolveTruncation(segments, dimensions.width);
-  const leftText = buildTruncatedLeftText(segments, truncation);
-  const rightText = truncation.showHint ? buildRightZoneText(segments) : "";
+  // Resolve segments with width-aware visibility
+  const segmentSet = resolveStatusSegmentSet(sources);
+  const { left, right } = groupSegments(segmentSet.visibleSegments);
 
-  const lifecycleColor = tokens[lifecycleDisplay.colorToken as keyof typeof tokens] ?? tokens["text.primary"];
+  // Render per-segment colored spans for the left group
+  const leftElements = left.map((seg, i) => {
+    const color = tokens[seg.colorToken as keyof typeof tokens] ?? tokens["text.primary"];
+    const separator = i < left.length - 1 ? SEGMENT_SEPARATOR : "";
+    return (
+      <Text key={seg.id} style={{ color }}>
+        {`${seg.content}${separator}`}
+      </Text>
+    );
+  });
+
+  // Right group: hints in muted color
+  const hasRight = right.length > 0;
 
   return (
     <Box style={{
       height: 1,
-      backgroundColor: tokens["surface.primary"],
-      color: tokens["text.primary"],
-      marginTop: 1,
       paddingLeft: 1,
       paddingRight: 1,
       flexDirection: "row",
     }}>
-      <Box style={{ flexGrow: 1 }}>
-        <Text style={{ color: lifecycleColor }}>
-          {leftText}
-        </Text>
+      <Box style={{ flexGrow: 1, flexDirection: "row" }}>
+        {leftElements}
       </Box>
-      {rightText.length > 0 && (
+      {hasRight && (
         <Box>
           <Text style={{ color: tokens["text.muted"] }}>
-            {rightText}
+            {buildGroupText(right)}
           </Text>
         </Box>
       )}
