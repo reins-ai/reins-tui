@@ -916,6 +916,216 @@ describe("multi-tool sequence rendering", () => {
   });
 });
 
+describe("streaming block rendering metadata", () => {
+  test("in-progress streaming turn preserves assistant message in messages array", () => {
+    const base = createStreamingBase();
+
+    const streaming = applyEvents(base, [
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "Working on it...",
+      },
+    ]);
+
+    expect(streaming.status).toBe("streaming");
+    const assistantMsg = streaming.messages.find((m) => m.id === "assistant-1");
+    expect(assistantMsg).toBeDefined();
+    expect(assistantMsg!.role).toBe("assistant");
+    expect(assistantMsg!.content).toBe("Working on it...");
+  });
+
+  test("streaming turn with tools has content blocks suitable for block rendering", () => {
+    const base = createStreamingBase();
+
+    const withTools = applyEvents(base, [
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:02.500Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "Let me check...",
+      },
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        name: "bash",
+        args: { command: "ls" },
+      },
+    ]);
+
+    expect(withTools.turnState.hasToolCalls).toBe(true);
+    expect(withTools.turnState.contentBlocks.length).toBeGreaterThanOrEqual(2);
+    // First block is text before tools
+    expect(withTools.turnState.contentBlocks[0].type).toBe("text");
+    expect(withTools.turnState.contentBlocks[0].text).toBe("Let me check...");
+    // Second block is tool-call placeholder
+    expect(withTools.turnState.contentBlocks[1].type).toBe("tool-call");
+    expect(withTools.turnState.contentBlocks[1].toolCallId).toBe("tool-1");
+  });
+
+  test("tool-call content blocks carry toolCallId for block-level rendering", () => {
+    const base = createStreamingBase();
+
+    const withTools = applyEvents(base, [
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-abc",
+        name: "read",
+      },
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.001Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-def",
+        name: "grep",
+      },
+    ]);
+
+    const toolBlocks = withTools.turnState.contentBlocks.filter((b) => b.type === "tool-call");
+    expect(toolBlocks).toHaveLength(2);
+    expect(toolBlocks[0].toolCallId).toBe("tool-abc");
+    expect(toolBlocks[1].toolCallId).toBe("tool-def");
+  });
+
+  test("multi-turn does not mix content blocks across turns", () => {
+    const base = createStreamingBase();
+
+    // First turn with tools
+    const firstTurn = applyEvents(base, [
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        name: "bash",
+      },
+      {
+        type: "tool-call-complete",
+        timestamp: "2026-02-11T00:00:04.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        result: "ok",
+      },
+      {
+        type: "complete",
+        timestamp: "2026-02-11T00:00:05.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        content: "Done.",
+      },
+      {
+        type: "complete-timeout",
+        timestamp: "2026-02-11T00:00:06.000Z",
+      },
+    ]);
+
+    // After complete-timeout, turn state is reset
+    expect(firstTurn.status).toBe("idle");
+    expect(firstTurn.turnState.contentBlocks).toHaveLength(0);
+    expect(firstTurn.turnState.hasToolCalls).toBe(false);
+    expect(firstTurn.toolCalls).toHaveLength(0);
+
+    // Second turn starts fresh
+    const secondTurn = applyEvents(firstTurn, [
+      {
+        type: "user-send",
+        timestamp: "2026-02-11T00:00:07.000Z",
+        conversationId: "conv-1",
+        userMessage: {
+          id: "user-2",
+          role: "user",
+          content: "next",
+          createdAt: "2026-02-11T00:00:07.000Z",
+        },
+      },
+      {
+        type: "message-ack",
+        timestamp: "2026-02-11T00:00:08.000Z",
+        conversationId: "conv-1",
+        assistantMessageId: "assistant-2",
+      },
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:09.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-2",
+        delta: "Fresh response",
+      },
+    ]);
+
+    expect(secondTurn.turnState.contentBlocks).toHaveLength(1);
+    expect(secondTurn.turnState.contentBlocks[0].type).toBe("text");
+    expect(secondTurn.turnState.contentBlocks[0].text).toBe("Fresh response");
+    expect(secondTurn.turnState.hasToolCalls).toBe(false);
+  });
+
+  test("streaming state messages array preserves ordering for block rendering", () => {
+    const base = createStreamingBase();
+
+    const afterDelta = applyEvents(base, [
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "Hello",
+      },
+    ]);
+
+    // User message comes first, then assistant
+    expect(afterDelta.messages).toHaveLength(2);
+    expect(afterDelta.messages[0].role).toBe("user");
+    expect(afterDelta.messages[0].id).toBe("user-1");
+    expect(afterDelta.messages[1].role).toBe("assistant");
+    expect(afterDelta.messages[1].id).toBe("assistant-1");
+  });
+
+  test("tool placeholders in content blocks align with toolCalls array", () => {
+    const base = createStreamingBase();
+
+    const withTools = applyEvents(base, [
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        name: "bash",
+      },
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.001Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-2",
+        name: "read",
+      },
+    ]);
+
+    // Every tool-call content block should reference a tool in toolCalls
+    const toolBlockIds = withTools.turnState.contentBlocks
+      .filter((b) => b.type === "tool-call")
+      .map((b) => b.toolCallId);
+    const toolCallIds = withTools.toolCalls.map((tc) => tc.id);
+
+    for (const blockId of toolBlockIds) {
+      expect(toolCallIds).toContain(blockId);
+    }
+  });
+});
+
 describe("conversation store pipeline", () => {
   test("streams daemon events and auto-returns to idle after complete", async () => {
     const streamEvents: DaemonStreamEvent[] = [

@@ -306,24 +306,6 @@ describe("DisplayToolCall to ToolCall bridge", () => {
 });
 
 describe("ToolInline integration with conversation panel", () => {
-  test("conversation-panel.tsx imports ToolInline", () => {
-    const source = readFileSync(
-      resolve(import.meta.dir, "../../src/components/conversation-panel.tsx"),
-      "utf-8",
-    );
-    expect(source).toContain("ToolInline");
-    expect(source).toContain("tool-inline");
-  });
-
-  test("conversation-panel.tsx imports tool-detail-store", () => {
-    const source = readFileSync(
-      resolve(import.meta.dir, "../../src/components/conversation-panel.tsx"),
-      "utf-8",
-    );
-    expect(source).toContain("tool-detail-store");
-    expect(source).toContain("toolDetailReducer");
-  });
-
   test("conversation-panel.tsx imports tool-lifecycle types", () => {
     const source = readFileSync(
       resolve(import.meta.dir, "../../src/components/conversation-panel.tsx"),
@@ -332,17 +314,37 @@ describe("ToolInline integration with conversation panel", () => {
     expect(source).toContain("tool-lifecycle");
   });
 
-  test("conversation-panel.tsx renders InlineToolCalls for messages with tool calls", () => {
+  test("conversation-panel.tsx delegates tool rendering to Message component", () => {
     const source = readFileSync(
       resolve(import.meta.dir, "../../src/components/conversation-panel.tsx"),
       "utf-8",
     );
-    expect(source).toContain("InlineToolCalls");
-    expect(source).toContain("message.toolCalls");
+    expect(source).toContain("Message");
+    expect(source).toContain("message={message}");
+  });
+
+  test("message.tsx renders tool calls inside FramedBlock", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/message.tsx"),
+      "utf-8",
+    );
+    expect(source).toContain("FramedBlock");
+    expect(source).toContain("toolCalls");
+    expect(source).toContain("ToolCallAnchor");
   });
 
   test("displayToolCallToToolCall is exported from conversation-panel", () => {
     expect(typeof displayToolCallToToolCall).toBe("function");
+  });
+
+  test("streaming placeholder uses FramedBlock with assistant styling", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/conversation-panel.tsx"),
+      "utf-8",
+    );
+    expect(source).toContain("FramedBlock");
+    expect(source).toContain("getStreamingPlaceholderStyle");
+    expect(source).toContain("Generating response...");
   });
 });
 

@@ -1,16 +1,15 @@
-import { useReducer } from "react";
-
 import type { DisplayMessage, DisplayToolCall } from "../store";
 import { useApp } from "../store";
 import { useConversation } from "../hooks";
 import { useThemeTokens } from "../theme";
+import type { MessageRole } from "../theme/use-theme-tokens";
 import type { ToolCall, ToolCallStatus } from "../tools/tool-lifecycle";
-import { createInitialToolDetailState, toolDetailReducer } from "../tools/tool-detail-store";
+import type { FramedBlockStyle } from "../ui/types";
 import { Box, ScrollBox, Text } from "../ui";
+import { ACCENT_BORDER_CHARS, FramedBlock } from "../ui/primitives";
 import { LogoAscii } from "./logo-ascii";
 import { Message } from "./message";
 import { formatModelDisplayName } from "./model-selector";
-import { ToolInline } from "./tool-inline";
 
 /**
  * Determine whether a message starts a new exchange turn.
@@ -49,6 +48,10 @@ const DISPLAY_TO_LIFECYCLE_STATUS: Record<DisplayToolCall["status"], ToolCallSta
   error: "error",
 };
 
+/**
+ * Bridge between DisplayToolCall (store/UI shape) and ToolCall (lifecycle shape).
+ * Used by tool rendering components to map display state into lifecycle-aware props.
+ */
 export function displayToolCallToToolCall(dtc: DisplayToolCall): ToolCall {
   const status = DISPLAY_TO_LIFECYCLE_STATUS[dtc.status];
   return {
@@ -61,35 +64,31 @@ export function displayToolCallToToolCall(dtc: DisplayToolCall): ToolCall {
   };
 }
 
-interface InlineToolCallsProps {
-  toolCalls: DisplayToolCall[];
-}
-
-function InlineToolCalls({ toolCalls }: InlineToolCallsProps) {
-  const [detailState] = useReducer(toolDetailReducer, createInitialToolDetailState());
-
-  return (
-    <>
-      {toolCalls.map((dtc) => {
-        const call = displayToolCallToToolCall(dtc);
-        const isCollapsed = detailState.collapsed.has(dtc.id);
-
-        return (
-          <ToolInline
-            key={dtc.id}
-            call={call}
-            collapsed={isCollapsed}
-          />
-        );
-      })}
-    </>
-  );
+/**
+ * Resolve the FramedBlock style for the streaming placeholder.
+ * Uses assistant styling so the "Generating response..." indicator
+ * visually belongs to the same block language as assistant messages.
+ */
+export function getStreamingPlaceholderStyle(
+  tokens: Record<string, string>,
+  getRoleBorder: (role: MessageRole) => string,
+): FramedBlockStyle {
+  return {
+    accentColor: getRoleBorder("assistant"),
+    backgroundColor: tokens["conversation.assistant.bg"],
+    paddingLeft: 2,
+    paddingRight: 1,
+    paddingTop: 0,
+    paddingBottom: 0,
+    marginTop: 0,
+    marginBottom: 0,
+  };
 }
 
 export function ConversationPanel({ isFocused, borderColor }: ConversationPanelProps) {
   const { messages, isStreaming, lifecycleStatus } = useConversation();
   const { state } = useApp();
-  const { tokens } = useThemeTokens();
+  const { tokens, getRoleBorder } = useThemeTokens();
   const hasContent = messages.some(
     (message) => message.content.trim().length > 0 || (message.toolCalls && message.toolCalls.length > 0),
   );
@@ -143,15 +142,21 @@ export function ConversationPanel({ isFocused, borderColor }: ConversationPanelP
             return (
               <Box key={message.id} style={{ flexDirection: "column", marginTop: gap }}>
                 <Message message={message} lifecycleStatus={message.isStreaming ? lifecycleStatus : undefined} />
-                {message.toolCalls && message.toolCalls.length > 0 ? (
-                  <InlineToolCalls toolCalls={message.toolCalls} />
-                ) : null}
               </Box>
             );
           })
         )}
 
-        {isStreaming && !hasContent ? <Text style={{ color: tokens["text.secondary"] }}>Generating response...</Text> : null}
+        {isStreaming && !hasContent ? (
+          <Box style={{ marginTop: MESSAGE_GAP }}>
+            <FramedBlock
+              style={getStreamingPlaceholderStyle(tokens, getRoleBorder)}
+              borderChars={ACCENT_BORDER_CHARS}
+            >
+              <Text style={{ color: tokens["text.secondary"] }}>Generating response...</Text>
+            </FramedBlock>
+          </Box>
+        ) : null}
       </ScrollBox>
     </Box>
   );

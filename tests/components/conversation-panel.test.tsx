@@ -1,10 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import type { DisplayMessage, DisplayToolCall } from "../../src/store";
 import {
   isExchangeBoundary,
   MESSAGE_GAP,
   EXCHANGE_GAP,
+  getStreamingPlaceholderStyle,
 } from "../../src/components/conversation-panel";
 import {
   GLYPH_REINS,
@@ -16,8 +19,10 @@ import {
   getRoleColor,
   getToolGlyph,
   getToolGlyphColor,
+  getMessageBlockStyle,
 } from "../../src/components/message";
 import type { ThemeTokens } from "../../src/theme/theme-schema";
+import type { MessageRole } from "../../src/theme/use-theme-tokens";
 
 function makeMessage(
   role: DisplayMessage["role"],
@@ -435,5 +440,134 @@ describe("tool lifecycle rendering in conversation", () => {
 
     expect(withArgs.args).toBeDefined();
     expect(withoutArgs.args).toBeUndefined();
+  });
+});
+
+const mockGetRoleBorder = (role: MessageRole): string => {
+  const borders: Record<MessageRole, string> = {
+    user: "#f0c674",
+    assistant: "#e8976c",
+    system: "#6b6360",
+    tool: "#6ca8e8",
+  };
+  return borders[role];
+};
+
+describe("streaming placeholder block styling", () => {
+  test("streaming placeholder uses assistant accent color", () => {
+    const style = getStreamingPlaceholderStyle(MOCK_TOKENS, mockGetRoleBorder);
+    expect(style.accentColor).toBe(mockGetRoleBorder("assistant"));
+  });
+
+  test("streaming placeholder uses assistant background", () => {
+    const style = getStreamingPlaceholderStyle(MOCK_TOKENS, mockGetRoleBorder);
+    expect(style.backgroundColor).toBe(MOCK_TOKENS["conversation.assistant.bg"]);
+  });
+
+  test("streaming placeholder matches assistant message block padding", () => {
+    const placeholderStyle = getStreamingPlaceholderStyle(MOCK_TOKENS, mockGetRoleBorder);
+    const assistantStyle = getMessageBlockStyle("assistant", MOCK_TOKENS, mockGetRoleBorder);
+    expect(placeholderStyle.paddingLeft).toBe(assistantStyle.paddingLeft);
+    expect(placeholderStyle.paddingRight).toBe(assistantStyle.paddingRight);
+  });
+
+  test("streaming placeholder style has consistent spacing with message blocks", () => {
+    const style = getStreamingPlaceholderStyle(MOCK_TOKENS, mockGetRoleBorder);
+    expect(style.paddingLeft).toBe(2);
+    expect(style.paddingRight).toBe(1);
+    expect(style.marginTop).toBe(0);
+    expect(style.marginBottom).toBe(0);
+  });
+});
+
+describe("tool calls render inside framed message blocks", () => {
+  test("message.tsx renders ToolCallAnchor inside FramedBlock", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/message.tsx"),
+      "utf-8",
+    );
+    // ToolCallAnchor is rendered inside FramedBlock (before closing tag)
+    const framedBlockClose = source.indexOf("</FramedBlock>");
+    const toolCallAnchorPos = source.indexOf("ToolCallAnchor");
+    expect(toolCallAnchorPos).toBeGreaterThan(-1);
+    expect(framedBlockClose).toBeGreaterThan(toolCallAnchorPos);
+  });
+
+  test("conversation-panel.tsx does not render tool calls outside Message component", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/conversation-panel.tsx"),
+      "utf-8",
+    );
+    // No InlineToolCalls or ToolInline rendered directly in conversation panel
+    expect(source).not.toContain("InlineToolCalls");
+    expect(source).not.toContain("<ToolInline");
+  });
+
+  test("conversation-panel.tsx wraps streaming placeholder in FramedBlock", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/conversation-panel.tsx"),
+      "utf-8",
+    );
+    expect(source).toContain("FramedBlock");
+    expect(source).toContain("ACCENT_BORDER_CHARS");
+    expect(source).toContain("getStreamingPlaceholderStyle");
+  });
+});
+
+describe("multi-turn message ordering with tools", () => {
+  test("exchange boundary detected after tool-bearing assistant before next user message", () => {
+    const messages = [
+      makeMessage("assistant", "Let me check...", {
+        toolCalls: [
+          makeToolCall("complete", { name: "bash" }),
+          makeToolCall("complete", { name: "read" }),
+        ],
+      }),
+      makeMessage("user", "What did you find?"),
+    ];
+    expect(isExchangeBoundary(messages, 1)).toBe(true);
+  });
+
+  test("no exchange boundary between assistant messages with and without tools", () => {
+    const messages = [
+      makeMessage("assistant", "Running tools...", {
+        toolCalls: [makeToolCall("complete", { name: "bash" })],
+      }),
+      makeMessage("assistant", "Here are the results"),
+    ];
+    expect(isExchangeBoundary(messages, 1)).toBe(false);
+  });
+
+  test("streaming message with tools preserves ordering in multi-turn", () => {
+    const messages = [
+      makeMessage("user", "Run some tools"),
+      makeMessage("assistant", "On it...", {
+        isStreaming: true,
+        toolCalls: [
+          makeToolCall("running", { name: "bash" }),
+          makeToolCall("pending", { name: "read" }),
+        ],
+      }),
+    ];
+    // No exchange boundary between user and streaming assistant
+    expect(isExchangeBoundary(messages, 1)).toBe(false);
+    // Streaming message preserves tool calls
+    expect(messages[1].toolCalls).toHaveLength(2);
+    expect(messages[1].isStreaming).toBe(true);
+  });
+
+  test("completed tool-bearing turn followed by new user turn has correct boundary", () => {
+    const messages = [
+      makeMessage("user", "First question"),
+      makeMessage("assistant", "Let me check", {
+        toolCalls: [makeToolCall("complete", { name: "grep" })],
+      }),
+      makeMessage("user", "Second question"),
+      makeMessage("assistant", "Sure thing"),
+    ];
+    expect(isExchangeBoundary(messages, 0)).toBe(false);
+    expect(isExchangeBoundary(messages, 1)).toBe(false);
+    expect(isExchangeBoundary(messages, 2)).toBe(true);
+    expect(isExchangeBoundary(messages, 3)).toBe(false);
   });
 });
