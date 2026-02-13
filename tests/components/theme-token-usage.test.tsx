@@ -399,3 +399,226 @@ describe("theme token coverage for framed layout components", () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// WCAG contrast ratio utilities for quantitative audit (MH6)
+// ---------------------------------------------------------------------------
+
+function hexToLinearChannel(hex: string, offset: number): number {
+  const c = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+function relativeLuminance(hex: string): number {
+  return (
+    0.2126 * hexToLinearChannel(hex, 1) +
+    0.7152 * hexToLinearChannel(hex, 3) +
+    0.0722 * hexToLinearChannel(hex, 5)
+  );
+}
+
+function contrastRatio(fg: string, bg: string): number {
+  const l1 = relativeLuminance(fg);
+  const l2 = relativeLuminance(bg);
+  const lighter = Math.max(l1, l2);
+  const darker = Math.min(l1, l2);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+// ---------------------------------------------------------------------------
+// Component-by-component three-theme contrast audit (MH6)
+// ---------------------------------------------------------------------------
+
+describe("three-theme contrast audit: message component", () => {
+  const TEXT_BG_PAIRS: [ThemeTokenName, ThemeTokenName, number][] = [
+    ["conversation.user.text", "conversation.user.bg", 4.5],
+    ["conversation.assistant.text", "conversation.assistant.bg", 4.5],
+    ["text.muted", "conversation.user.bg", 2.0],
+    ["text.muted", "conversation.assistant.bg", 2.0],
+  ];
+
+  const GLYPH_BG_PAIRS: [ThemeTokenName, ThemeTokenName, number][] = [
+    ["glyph.user", "conversation.user.bg", 2.5],
+    ["glyph.reins", "conversation.assistant.bg", 2.5],
+    ["glyph.tool.running", "surface.secondary", 3.0],
+    ["glyph.tool.done", "surface.secondary", 3.0],
+    ["glyph.tool.error", "surface.secondary", 3.0],
+  ];
+
+  for (const [themeName, source] of Object.entries(ALL_THEMES)) {
+    for (const [fgToken, bgToken, minRatio] of TEXT_BG_PAIRS) {
+      test(`${themeName}: ${fgToken} on ${bgToken} meets ${minRatio}:1 contrast`, () => {
+        const result = validateThemeTokens(source);
+        if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+        const ratio = contrastRatio(result.value[fgToken], result.value[bgToken]);
+        expect(ratio).toBeGreaterThanOrEqual(minRatio);
+      });
+    }
+
+    for (const [fgToken, bgToken, minRatio] of GLYPH_BG_PAIRS) {
+      test(`${themeName}: ${fgToken} on ${bgToken} meets ${minRatio}:1 contrast`, () => {
+        const result = validateThemeTokens(source);
+        if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+        const ratio = contrastRatio(result.value[fgToken], result.value[bgToken]);
+        expect(ratio).toBeGreaterThanOrEqual(minRatio);
+      });
+    }
+
+    test(`${themeName}: role borders are distinguishable from message backgrounds`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+
+      const userBorderRatio = contrastRatio(
+        result.value["role.user.border"],
+        result.value["conversation.user.bg"],
+      );
+      const assistantBorderRatio = contrastRatio(
+        result.value["role.assistant.border"],
+        result.value["conversation.assistant.bg"],
+      );
+      expect(userBorderRatio).toBeGreaterThanOrEqual(2.0);
+      expect(assistantBorderRatio).toBeGreaterThanOrEqual(2.0);
+    });
+  }
+});
+
+describe("three-theme contrast audit: input component", () => {
+  for (const [themeName, source] of Object.entries(ALL_THEMES)) {
+    test(`${themeName}: input text readable on input background`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(contrastRatio(result.value["input.text"], result.value["input.bg"])).toBeGreaterThanOrEqual(4.5);
+    });
+
+    test(`${themeName}: input placeholder visible on input background`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(contrastRatio(result.value["input.placeholder"], result.value["input.bg"])).toBeGreaterThanOrEqual(2.5);
+    });
+
+    test(`${themeName}: focus border visible on input background`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(contrastRatio(result.value["border.focus"], result.value["input.bg"])).toBeGreaterThanOrEqual(2.0);
+    });
+
+    test(`${themeName}: hint text (text.muted) readable on input background`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(contrastRatio(result.value["text.muted"], result.value["input.bg"])).toBeGreaterThanOrEqual(2.5);
+    });
+
+    test(`${themeName}: warning accent visible on secondary surface (disabled state)`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(contrastRatio(result.value["status.warning"], result.value["surface.secondary"])).toBeGreaterThanOrEqual(3.0);
+    });
+  }
+});
+
+describe("three-theme contrast audit: status bar component", () => {
+  const STATUS_ON_SECONDARY: [ThemeTokenName, number][] = [
+    ["status.error", 3.0],
+    ["status.success", 3.0],
+    ["status.warning", 3.0],
+    ["status.info", 3.0],
+    ["glyph.heartbeat", 3.0],
+    ["text.primary", 4.5],
+    ["text.muted", 2.5],
+  ];
+
+  for (const [themeName, source] of Object.entries(ALL_THEMES)) {
+    for (const [token, minRatio] of STATUS_ON_SECONDARY) {
+      test(`${themeName}: ${token} on surface.secondary meets ${minRatio}:1`, () => {
+        const result = validateThemeTokens(source);
+        if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+        const ratio = contrastRatio(result.value[token], result.value["surface.secondary"]);
+        expect(ratio).toBeGreaterThanOrEqual(minRatio);
+      });
+    }
+  }
+});
+
+describe("three-theme contrast audit: sidebar component", () => {
+  for (const [themeName, source] of Object.entries(ALL_THEMES)) {
+    test(`${themeName}: sidebar text readable on sidebar background`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(contrastRatio(result.value["sidebar.text"], result.value["sidebar.bg"])).toBeGreaterThanOrEqual(4.5);
+    });
+
+    test(`${themeName}: accent.primary visible on sidebar background`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(contrastRatio(result.value["accent.primary"], result.value["sidebar.bg"])).toBeGreaterThanOrEqual(3.0);
+    });
+
+    test(`${themeName}: text.muted readable on sidebar background`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(contrastRatio(result.value["text.muted"], result.value["sidebar.bg"])).toBeGreaterThanOrEqual(2.5);
+    });
+
+    test(`${themeName}: sidebar active state differs from sidebar background`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(result.value["sidebar.active"]).not.toBe(result.value["sidebar.bg"]);
+    });
+  }
+});
+
+describe("three-theme contrast audit: tool block component", () => {
+  for (const [themeName, source] of Object.entries(ALL_THEMES)) {
+    test(`${themeName}: tool running glyph visible on tool block background`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(contrastRatio(result.value["glyph.tool.running"], result.value["surface.secondary"])).toBeGreaterThanOrEqual(3.0);
+    });
+
+    test(`${themeName}: tool done glyph visible on tool block background`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(contrastRatio(result.value["glyph.tool.done"], result.value["surface.secondary"])).toBeGreaterThanOrEqual(3.0);
+    });
+
+    test(`${themeName}: tool error glyph visible on tool block background`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(contrastRatio(result.value["glyph.tool.error"], result.value["surface.secondary"])).toBeGreaterThanOrEqual(3.0);
+    });
+
+    test(`${themeName}: tool label text readable on tool block background`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(contrastRatio(result.value["text.secondary"], result.value["surface.secondary"])).toBeGreaterThanOrEqual(3.0);
+    });
+
+    test(`${themeName}: tool detail text visible on tool block background`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(contrastRatio(result.value["text.muted"], result.value["surface.secondary"])).toBeGreaterThanOrEqual(2.5);
+    });
+  }
+});
+
+describe("three-theme contrast audit: border visibility", () => {
+  for (const [themeName, source] of Object.entries(ALL_THEMES)) {
+    test(`${themeName}: border.primary visible on surface.primary`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(contrastRatio(result.value["border.primary"], result.value["surface.primary"])).toBeGreaterThanOrEqual(1.5);
+    });
+
+    test(`${themeName}: border.subtle visible on surface.primary`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(contrastRatio(result.value["border.subtle"], result.value["surface.primary"])).toBeGreaterThanOrEqual(1.2);
+    });
+
+    test(`${themeName}: border.focus visible on surface.primary`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(contrastRatio(result.value["border.focus"], result.value["surface.primary"])).toBeGreaterThanOrEqual(3.0);
+    });
+  }
+});

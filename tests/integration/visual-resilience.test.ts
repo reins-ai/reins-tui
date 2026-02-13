@@ -697,3 +697,142 @@ describe("Status bar indicator display at various widths", () => {
     expect(leftText).toContain("Connected");
   });
 });
+
+// ---------------------------------------------------------------------------
+// 6. Three-theme audit: quantitative contrast checks (MH6)
+// ---------------------------------------------------------------------------
+
+function hexToLinearChannel(hex: string, offset: number): number {
+  const c = parseInt(hex.slice(offset, offset + 2), 16) / 255;
+  return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+}
+
+function relativeLuminance(hex: string): number {
+  return (
+    0.2126 * hexToLinearChannel(hex, 1) +
+    0.7152 * hexToLinearChannel(hex, 3) +
+    0.0722 * hexToLinearChannel(hex, 5)
+  );
+}
+
+function contrastRatio(fg: string, bg: string): number {
+  const l1 = relativeLuminance(fg);
+  const l2 = relativeLuminance(bg);
+  return (Math.max(l1, l2) + 0.05) / (Math.min(l1, l2) + 0.05);
+}
+
+describe("Three-theme audit: primary text readability", () => {
+  for (const [themeName, source] of Object.entries(ALL_THEMES)) {
+    test(`${themeName}: text.primary on surface.primary meets WCAG AA (4.5:1)`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(contrastRatio(result.value["text.primary"], result.value["surface.primary"])).toBeGreaterThanOrEqual(4.5);
+    });
+
+    test(`${themeName}: text.secondary on surface.primary meets 3:1`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(contrastRatio(result.value["text.secondary"], result.value["surface.primary"])).toBeGreaterThanOrEqual(3.0);
+    });
+
+    test(`${themeName}: text.muted on surface.primary meets 2.5:1`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(contrastRatio(result.value["text.muted"], result.value["surface.primary"])).toBeGreaterThanOrEqual(2.5);
+    });
+  }
+});
+
+describe("Three-theme audit: status indicator visibility", () => {
+  const STATUS_TOKENS: ThemeTokenName[] = [
+    "status.error",
+    "status.success",
+    "status.warning",
+    "status.info",
+  ];
+
+  for (const [themeName, source] of Object.entries(ALL_THEMES)) {
+    for (const token of STATUS_TOKENS) {
+      test(`${themeName}: ${token} on surface.primary meets 3:1`, () => {
+        const result = validateThemeTokens(source);
+        if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+        expect(contrastRatio(result.value[token], result.value["surface.primary"])).toBeGreaterThanOrEqual(3.0);
+      });
+
+      test(`${themeName}: ${token} on surface.secondary meets 3:1`, () => {
+        const result = validateThemeTokens(source);
+        if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+        expect(contrastRatio(result.value[token], result.value["surface.secondary"])).toBeGreaterThanOrEqual(3.0);
+      });
+    }
+  }
+});
+
+describe("Three-theme audit: accent and glyph visibility", () => {
+  for (const [themeName, source] of Object.entries(ALL_THEMES)) {
+    test(`${themeName}: accent.primary on surface.primary meets 3:1`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(contrastRatio(result.value["accent.primary"], result.value["surface.primary"])).toBeGreaterThanOrEqual(3.0);
+    });
+
+    test(`${themeName}: glyph.reins on surface.primary meets 3:1`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(contrastRatio(result.value["glyph.reins"], result.value["surface.primary"])).toBeGreaterThanOrEqual(3.0);
+    });
+
+    test(`${themeName}: glyph.user on surface.primary meets 3:1`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+      expect(contrastRatio(result.value["glyph.user"], result.value["surface.primary"])).toBeGreaterThanOrEqual(3.0);
+    });
+  }
+});
+
+describe("Three-theme audit: no theme-specific layout regressions", () => {
+  test("all themes produce identical token key sets (no missing tokens)", () => {
+    const keySets: string[][] = [];
+    for (const source of Object.values(ALL_THEMES)) {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error("Theme invalid");
+      keySets.push(Object.keys(result.value).sort());
+    }
+    for (let i = 1; i < keySets.length; i++) {
+      expect(keySets[i]).toEqual(keySets[0]);
+    }
+  });
+
+  test("all themes have valid 256-color fallbacks (no rendering gaps)", () => {
+    for (const [name, source] of Object.entries(ALL_THEMES)) {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${name}' invalid`);
+      const fallback = resolveTheme256(result.value);
+      for (const tokenName of THEME_TOKEN_NAMES) {
+        expect(Number.isInteger(fallback[tokenName])).toBe(true);
+        expect(fallback[tokenName]).toBeGreaterThanOrEqual(16);
+        expect(fallback[tokenName]).toBeLessThanOrEqual(255);
+      }
+    }
+  });
+
+  test("theme switching round-trip preserves all tokens", () => {
+    const registryResult = createThemeRegistry();
+    if (!registryResult.ok) throw new Error("Registry creation failed");
+    const registry = registryResult.value;
+
+    for (const themeName of BUILTIN_THEME_NAMES) {
+      registry.setTheme(themeName);
+      const theme = registry.getTheme();
+      expect(theme.name).toBe(themeName);
+      for (const tokenName of THEME_TOKEN_NAMES) {
+        expect(theme.tokens[tokenName]).toBeDefined();
+        expect(theme.tokens[tokenName]).toMatch(/^#[0-9a-fA-F]{6}$/);
+      }
+    }
+
+    // Switch back to default and verify
+    registry.setTheme("reins-dark");
+    expect(registry.getActiveThemeName()).toBe("reins-dark");
+  });
+});
