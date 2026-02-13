@@ -52,7 +52,6 @@ export function ChatScreen({
         >
           <InputArea
             isFocused={focusedPanel === "input"}
-            borderColor={panelBorders.input}
             onSubmit={onSubmitMessage}
           />
         </ZoneShell>
