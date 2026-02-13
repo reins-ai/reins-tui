@@ -57,6 +57,14 @@ export function useConversation() {
       dispatch({ type: "SET_TOOL_CALL_STATUS", payload });
     },
 
+    toggleToolExpand(toolCallId: string): void {
+      dispatch({ type: "TOGGLE_TOOL_EXPAND", payload: { toolCallId } });
+    },
+
+    collapseAllTools(): void {
+      dispatch({ type: "COLLAPSE_ALL_TOOLS" });
+    },
+
     clearMessages(): void {
       dispatch({ type: "CLEAR_MESSAGES" });
     },

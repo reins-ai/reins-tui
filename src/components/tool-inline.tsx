@@ -236,7 +236,7 @@ export function ToolBlock({ visualState }: ToolBlockProps) {
 
   return (
     <FramedBlock style={blockStyle} borderChars={SUBTLE_BORDER_CHARS}>
-      {/* Header: glyph + tool name + status */}
+      {/* Header: glyph + tool name + status + expand indicator */}
       <Box style={{ flexDirection: "row" }}>
         <Text style={{ color: accentColor }}>{visualState.glyph}</Text>
         <Text style={{ color: tokens["text.secondary"] }}>{` ${visualState.toolName}`}</Text>

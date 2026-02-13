@@ -125,6 +125,7 @@ export interface AppState {
   isStreaming: boolean;
   streamingLifecycleStatus: ConversationLifecycleStatus;
   activeToolName: string | null;
+  expandedToolCalls: Set<string>;
   isCommandPaletteOpen: boolean;
   isConnectFlowOpen: boolean;
   isModelSelectorOpen: boolean;
@@ -147,6 +148,7 @@ export const DEFAULT_STATE: AppState = {
   isStreaming: false,
   streamingLifecycleStatus: "idle",
   activeToolName: null,
+  expandedToolCalls: new Set<string>(),
   isCommandPaletteOpen: false,
   isConnectFlowOpen: false,
   isModelSelectorOpen: false,

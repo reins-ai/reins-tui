@@ -116,13 +116,33 @@ export function resolveToolBlockAccent(
 }
 
 /**
+ * Determine whether a tool call should be auto-expanded regardless of
+ * user toggle state. Error-state tool blocks always show diagnostics
+ * to preserve visibility of failure information.
+ */
+export function shouldAutoExpand(dtc: DisplayToolCall): boolean {
+  return dtc.status === "error" || (dtc.isError === true);
+}
+
+export interface ToolBlockListProps {
+  toolCalls: readonly DisplayToolCall[];
+  expandedSet: ReadonlySet<string>;
+}
+
+/**
  * Renders a list of tool calls as standalone ToolBlock components.
  * Each block gets its own FramedBlock with lifecycle-aware styling.
  * Used when tool calls should appear as distinct visual blocks
  * rather than inline anchors within a message.
+ *
+ * Error-state blocks are always expanded to preserve diagnostics
+ * visibility. Other blocks respect the expandedSet toggle state.
  */
-export function ToolBlockList({ toolCalls }: { toolCalls: readonly DisplayToolCall[] }) {
-  const visualStates = toolCallsToVisualStates(toolCalls);
+export function ToolBlockList({ toolCalls, expandedSet }: ToolBlockListProps) {
+  const visualStates = toolCalls.map((dtc) => {
+    const expanded = shouldAutoExpand(dtc) || expandedSet.has(dtc.id);
+    return displayToolCallToVisualState(dtc, expanded);
+  });
 
   return (
     <>
@@ -158,6 +178,7 @@ export function ConversationPanel({ isFocused, borderColor }: ConversationPanelP
   const { messages, isStreaming, lifecycleStatus } = useConversation();
   const { state } = useApp();
   const { tokens, getRoleBorder } = useThemeTokens();
+  const expandedToolCalls = state.expandedToolCalls;
   const hasContent = messages.some(
     (message) => message.content.trim().length > 0 || (message.toolCalls && message.toolCalls.length > 0),
   );
@@ -218,7 +239,10 @@ export function ConversationPanel({ isFocused, borderColor }: ConversationPanelP
                   renderToolBlocks={useToolBlocks}
                 />
                 {useToolBlocks && message.toolCalls ? (
-                  <ToolBlockList toolCalls={message.toolCalls} />
+                  <ToolBlockList
+                    toolCalls={message.toolCalls}
+                    expandedSet={expandedToolCalls}
+                  />
                 ) : null}
               </Box>
             );

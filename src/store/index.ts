@@ -90,6 +90,8 @@ export type AppAction =
         contentBlocks: TurnContentBlock[];
       };
     }
+  | { type: "TOGGLE_TOOL_EXPAND"; payload: { toolCallId: string } }
+  | { type: "COLLAPSE_ALL_TOOLS" }
   | { type: "CLEAR_MESSAGES" }
   | LayoutModeAction
   | LayoutAction;
@@ -153,6 +155,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         activeConversationId: action.payload,
+        expandedToolCalls: new Set<string>(),
       };
     case "SET_CONVERSATION_FILTER":
       return {
@@ -328,12 +331,31 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         isStreaming: false,
       };
     }
+    case "TOGGLE_TOOL_EXPAND": {
+      const { toolCallId } = action.payload;
+      const nextExpanded = new Set(state.expandedToolCalls);
+      if (nextExpanded.has(toolCallId)) {
+        nextExpanded.delete(toolCallId);
+      } else {
+        nextExpanded.add(toolCallId);
+      }
+      return {
+        ...state,
+        expandedToolCalls: nextExpanded,
+      };
+    }
+    case "COLLAPSE_ALL_TOOLS":
+      return {
+        ...state,
+        expandedToolCalls: new Set<string>(),
+      };
     case "CLEAR_MESSAGES":
       return {
         ...state,
         messages: [],
         streamingMessageId: null,
         isStreaming: false,
+        expandedToolCalls: new Set<string>(),
       };
     case "TOGGLE_PANEL":
     case "DISMISS_PANEL":
