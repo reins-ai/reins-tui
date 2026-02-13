@@ -15,6 +15,10 @@ export type SemanticColor =
   | "warning"
   | "info";
 
+export type DepthLevel = "panel1" | "panel2" | "panel3" | "interactive";
+
+export type MessageRole = "user" | "assistant" | "system";
+
 const SEMANTIC_COLOR_MAP: Record<SemanticColor, ThemeTokenName> = {
   primary: "text.primary",
   secondary: "text.secondary",
@@ -34,6 +38,19 @@ const TEXT_VARIANT_MAP: Record<TextVariant, ThemeTokenName> = {
   error: "status.error",
 };
 
+const DEPTH_LEVEL_MAP: Record<DepthLevel, ThemeTokenName> = {
+  panel1: "depth.panel1",
+  panel2: "depth.panel2",
+  panel3: "depth.panel3",
+  interactive: "depth.interactive",
+};
+
+const ROLE_BORDER_MAP: Record<MessageRole, ThemeTokenName> = {
+  user: "role.user.border",
+  assistant: "role.assistant.border",
+  system: "role.system.border",
+};
+
 export interface ResolvedTokens {
   readonly tokens: Readonly<ThemeTokens>;
   readonly colorMode: ColorMode;
@@ -41,6 +58,8 @@ export interface ResolvedTokens {
   getColor(semantic: SemanticColor): string;
   getSpacing(size: SpacingSize): number;
   getTextVariantColor(variant: TextVariant): string;
+  getDepthColor(level: DepthLevel): string;
+  getRoleBorder(role: MessageRole): string;
 }
 
 export function useThemeTokens(): ResolvedTokens {
@@ -69,6 +88,16 @@ export function useThemeTokens(): ResolvedTokens {
       return token(tokenName);
     };
 
+    const getDepthColor = (level: DepthLevel): string => {
+      const tokenName = DEPTH_LEVEL_MAP[level];
+      return token(tokenName);
+    };
+
+    const getRoleBorder = (role: MessageRole): string => {
+      const tokenName = ROLE_BORDER_MAP[role];
+      return token(tokenName);
+    };
+
     return {
       tokens,
       colorMode,
@@ -76,8 +105,10 @@ export function useThemeTokens(): ResolvedTokens {
       getColor,
       getSpacing,
       getTextVariantColor,
+      getDepthColor,
+      getRoleBorder,
     };
   }, [tokens, fallback256, colorMode]);
 }
 
-export { SEMANTIC_COLOR_MAP, TEXT_VARIANT_MAP };
+export { SEMANTIC_COLOR_MAP, TEXT_VARIANT_MAP, DEPTH_LEVEL_MAP, ROLE_BORDER_MAP };

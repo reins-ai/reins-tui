@@ -30,6 +30,10 @@ import {
   type ThemeTokenName,
 } from "../../src/theme/theme-schema";
 import { resolveTheme256 } from "../../src/theme/fallback-256";
+import {
+  resolveBreakpointState,
+  type BreakpointBand,
+} from "../../src/layout/breakpoints";
 import type { ConversationLifecycleStatus } from "../../src/state/status-machine";
 
 import reinsDarkTheme from "../../src/theme/builtins/reins-dark.json";
@@ -384,7 +388,197 @@ describe("Theme coverage: status bar readability across themes", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 3. Cross-theme token consistency tests (MH1)
+// 3. Framed layout zone resilience across themes and breakpoints (MH3, MH6)
+// ---------------------------------------------------------------------------
+
+describe("Framed layout zone resilience across themes", () => {
+  const DEPTH_TOKENS: ThemeTokenName[] = [
+    "depth.panel1",
+    "depth.panel2",
+    "depth.panel3",
+    "depth.interactive",
+  ];
+
+  const ROLE_BORDER_TOKENS: ThemeTokenName[] = [
+    "role.user.border",
+    "role.assistant.border",
+    "role.system.border",
+  ];
+
+  const ZONE_SURFACE_TOKENS: ThemeTokenName[] = [
+    "surface.primary",
+    "surface.secondary",
+    "surface.elevated",
+    "sidebar.bg",
+    "input.bg",
+    "conversation.user.bg",
+    "conversation.assistant.bg",
+  ];
+
+  for (const [themeName, source] of Object.entries(ALL_THEMES)) {
+    test(`${themeName}: all depth tokens are defined and valid hex`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+
+      for (const token of DEPTH_TOKENS) {
+        expect(result.value[token]).toBeDefined();
+        expect(result.value[token]).toMatch(/^#[0-9a-fA-F]{6}$/);
+      }
+    });
+
+    test(`${themeName}: all role border tokens are defined and valid hex`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+
+      for (const token of ROLE_BORDER_TOKENS) {
+        expect(result.value[token]).toBeDefined();
+        expect(result.value[token]).toMatch(/^#[0-9a-fA-F]{6}$/);
+      }
+    });
+
+    test(`${themeName}: depth tokens differ from surface.primary (visible layering)`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+
+      const bg = result.value["surface.primary"];
+      // At least panel2 and panel3 should differ from primary background
+      // to create visible depth layering
+      const distinctDepthTokens = DEPTH_TOKENS.filter(
+        (token) => result.value[token] !== bg,
+      );
+      expect(distinctDepthTokens.length).toBeGreaterThanOrEqual(2);
+    });
+
+    test(`${themeName}: role border tokens differ from surface.primary (visible framing)`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+
+      const bg = result.value["surface.primary"];
+      for (const token of ROLE_BORDER_TOKENS) {
+        expect(result.value[token]).not.toBe(bg);
+      }
+    });
+
+    test(`${themeName}: role border tokens are mutually distinguishable`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+
+      const userBorder = result.value["role.user.border"];
+      const assistantBorder = result.value["role.assistant.border"];
+      // User and assistant borders should differ for role distinction
+      expect(userBorder).not.toBe(assistantBorder);
+    });
+
+    test(`${themeName}: zone surfaces create at least 3 distinct background layers`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+
+      const uniqueSurfaces = new Set(
+        ZONE_SURFACE_TOKENS.map((token) => result.value[token]),
+      );
+      // Need at least 3 distinct backgrounds for clear zone separation
+      expect(uniqueSurfaces.size).toBeGreaterThanOrEqual(3);
+    });
+  }
+});
+
+describe("Framed layout zone structure across breakpoints", () => {
+  const BANDS_WITH_WIDTHS: { band: BreakpointBand; width: number }[] = [
+    { band: "compact", width: 40 },
+    { band: "narrow", width: 80 },
+    { band: "standard", width: 140 },
+    { band: "wide", width: 200 },
+  ];
+
+  for (const { band, width } of BANDS_WITH_WIDTHS) {
+    test(`${band} (${width} cols): zone structure is valid for framed layout`, () => {
+      const state = resolveBreakpointState(width, "normal");
+      const { panelWidths } = state;
+
+      // Conversation zone always has room for framed content (border + padding + text)
+      // Minimum: 2 border chars + 2 padding chars + 10 text chars = 14
+      expect(panelWidths.conversation).toBeGreaterThanOrEqual(14);
+
+      // If sidebar is visible, it must have room for framed sections
+      if (panelWidths.sidebar > 0) {
+        // Minimum: 2 border + 2 padding + 8 text = 12
+        expect(panelWidths.sidebar).toBeGreaterThanOrEqual(12);
+      }
+
+      // If activity panel is visible, it must have room for content
+      if (panelWidths.activity > 0) {
+        expect(panelWidths.activity).toBeGreaterThanOrEqual(12);
+      }
+    });
+
+    test(`${band} (${width} cols): total panel allocation leaves no negative remainder`, () => {
+      const state = resolveBreakpointState(width, "normal");
+      const { panelWidths } = state;
+      const total =
+        panelWidths.sidebar +
+        panelWidths.conversation +
+        panelWidths.activity +
+        panelWidths.expanded;
+      expect(total).toBeLessThanOrEqual(width);
+      expect(total).toBeGreaterThan(0);
+    });
+  }
+
+  test("framed content fits at minimum compact width (20 cols)", () => {
+    const state = resolveBreakpointState(20, "zen");
+    expect(state.band).toBe("compact");
+    expect(state.panelWidths.conversation).toBe(20);
+    // Even at 20 cols, conversation gets full width for framed blocks
+    expect(state.panelWidths.conversation).toBeGreaterThanOrEqual(14);
+  });
+
+  test("all four bands produce distinct zone configurations", () => {
+    const configs = BANDS_WITH_WIDTHS.map(({ band, width }) => {
+      const state = resolveBreakpointState(width, "normal");
+      return {
+        band: state.band,
+        hasSidebar: state.panelWidths.sidebar > 0,
+        hasActivity: state.panelWidths.activity > 0,
+        hasExpanded: state.panelWidths.expanded > 0,
+      };
+    });
+
+    // compact: no sidebar, no activity, no expanded
+    expect(configs[0]).toEqual({
+      band: "compact",
+      hasSidebar: false,
+      hasActivity: false,
+      hasExpanded: false,
+    });
+
+    // narrow: sidebar, no activity, no expanded
+    expect(configs[1]).toEqual({
+      band: "narrow",
+      hasSidebar: true,
+      hasActivity: false,
+      hasExpanded: false,
+    });
+
+    // standard: sidebar + activity, no expanded
+    expect(configs[2]).toEqual({
+      band: "standard",
+      hasSidebar: true,
+      hasActivity: true,
+      hasExpanded: false,
+    });
+
+    // wide: sidebar + activity + expanded
+    expect(configs[3]).toEqual({
+      band: "wide",
+      hasSidebar: true,
+      hasActivity: true,
+      hasExpanded: true,
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. Cross-theme token consistency tests (MH1, MH6)
 // ---------------------------------------------------------------------------
 
 describe("Cross-theme token consistency", () => {
@@ -449,7 +643,7 @@ describe("Cross-theme token consistency", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4. Status bar indicator display at various widths (MH5)
+// 5. Status bar indicator display at various widths (MH5)
 // ---------------------------------------------------------------------------
 
 describe("Status bar indicator display at various widths", () => {

@@ -34,5 +34,12 @@
   "input.bg": "#0b1120",
   "input.text": "#e2e8f0",
   "input.placeholder": "#64748b",
-  "input.border": "#334155"
+  "input.border": "#334155",
+  "depth.panel1": "#0f1729",
+  "depth.panel2": "#141d33",
+  "depth.panel3": "#1a253d",
+  "depth.interactive": "#1f2d47",
+  "role.user.border": "#a78bfa",
+  "role.assistant.border": "#818cf8",
+  "role.system.border": "#fbbf24"
 }

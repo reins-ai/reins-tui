@@ -6,8 +6,21 @@ import {
   TEXT_VARIANT_MAP,
   type SemanticColor,
 } from "../../src/theme/use-theme-tokens";
-import type { TextVariant, SpacingSize } from "../../src/ui/types";
+import type {
+  AccentPosition,
+  BorderCharacters,
+  BorderSide,
+  FramedBlockStyle,
+  TextVariant,
+  SpacingSize,
+  ZoneShellStyle,
+} from "../../src/ui/types";
 import { SPACING_SCALE } from "../../src/ui/types";
+import {
+  ACCENT_BORDER_CHARS,
+  SUBTLE_BORDER_CHARS,
+  ASCII_BORDER_CHARS,
+} from "../../src/ui/primitives";
 
 const MOCK_TOKENS: ThemeTokens = {
   "surface.primary": "#1a1a2e",
@@ -46,6 +59,13 @@ const MOCK_TOKENS: ThemeTokens = {
   "input.text": "#e8e0d4",
   "input.placeholder": "#6b6360",
   "input.border": "#4a4a6a",
+  "depth.panel1": "#1a1a2e",
+  "depth.panel2": "#252540",
+  "depth.panel3": "#2e2e4a",
+  "depth.interactive": "#353555",
+  "role.user.border": "#f0c674",
+  "role.assistant.border": "#e8976c",
+  "role.system.border": "#6ca8e8",
 };
 
 describe("TextVariant mapping", () => {

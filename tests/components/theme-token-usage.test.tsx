@@ -2,8 +2,16 @@ import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { createThemeRegistry } from "../../src/theme/theme-registry";
-import { THEME_TOKEN_NAMES } from "../../src/theme/theme-schema";
+import { createThemeRegistry, BUILTIN_THEME_NAMES } from "../../src/theme/theme-registry";
+import {
+  THEME_TOKEN_NAMES,
+  validateThemeTokens,
+  type ThemeTokenName,
+} from "../../src/theme/theme-schema";
+
+import reinsDarkTheme from "../../src/theme/builtins/reins-dark.json";
+import reinsLightTheme from "../../src/theme/builtins/reins-light.json";
+import tokyonightTheme from "../../src/theme/builtins/tokyonight.json";
 
 const COMPONENT_DIR = resolve(import.meta.dir, "../../src/components");
 
@@ -163,5 +171,231 @@ describe("app root wraps with ThemeProvider", () => {
     const appSource = readFileSync(resolve(import.meta.dir, "../../src/app.tsx"), "utf-8");
     expect(appSource).toContain("ThemeProvider");
     expect(appSource).toContain("<ThemeProvider>");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Depth and role token consumption across themes (MH6)
+// ---------------------------------------------------------------------------
+
+const ALL_THEMES = {
+  "reins-dark": reinsDarkTheme,
+  "reins-light": reinsLightTheme,
+  tokyonight: tokyonightTheme,
+} as const;
+
+const DEPTH_TOKENS: ThemeTokenName[] = [
+  "depth.panel1",
+  "depth.panel2",
+  "depth.panel3",
+  "depth.interactive",
+];
+
+const ROLE_BORDER_TOKENS: ThemeTokenName[] = [
+  "role.user.border",
+  "role.assistant.border",
+  "role.system.border",
+];
+
+describe("depth token consumption across themes", () => {
+  for (const [themeName, source] of Object.entries(ALL_THEMES)) {
+    test(`${themeName}: all depth tokens are present and valid hex`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+
+      for (const token of DEPTH_TOKENS) {
+        expect(result.value[token]).toBeDefined();
+        expect(result.value[token]).toMatch(/^#[0-9a-fA-F]{6}$/);
+      }
+    });
+
+    test(`${themeName}: depth tokens form a progression (not all identical)`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+
+      const depthValues = DEPTH_TOKENS.map((token) => result.value[token]);
+      const uniqueValues = new Set(depthValues);
+      // At least 2 distinct depth levels for visible layering
+      expect(uniqueValues.size).toBeGreaterThanOrEqual(2);
+    });
+
+    test(`${themeName}: depth.interactive differs from depth.panel1 (interactive feedback)`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+
+      expect(result.value["depth.interactive"]).not.toBe(result.value["depth.panel1"]);
+    });
+  }
+
+  test("depth tokens are included in THEME_TOKEN_NAMES schema", () => {
+    for (const token of DEPTH_TOKENS) {
+      expect(THEME_TOKEN_NAMES).toContain(token);
+    }
+  });
+
+  test("depth tokens resolve correctly through registry for all themes", () => {
+    const registryResult = createThemeRegistry();
+    if (!registryResult.ok) throw new Error("Registry creation failed");
+
+    const registry = registryResult.value;
+    for (const themeName of BUILTIN_THEME_NAMES) {
+      registry.setTheme(themeName);
+      const theme = registry.getTheme();
+
+      for (const token of DEPTH_TOKENS) {
+        expect(theme.tokens[token]).toBeDefined();
+        expect(theme.tokens[token]).toMatch(/^#[0-9a-fA-F]{6}$/);
+        // Fallback 256 also resolves
+        expect(theme.fallback256[token]).toBeDefined();
+        expect(theme.fallback256[token]).toBeGreaterThanOrEqual(16);
+        expect(theme.fallback256[token]).toBeLessThanOrEqual(255);
+      }
+    }
+  });
+});
+
+describe("role border token consumption across themes", () => {
+  for (const [themeName, source] of Object.entries(ALL_THEMES)) {
+    test(`${themeName}: all role border tokens are present and valid hex`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+
+      for (const token of ROLE_BORDER_TOKENS) {
+        expect(result.value[token]).toBeDefined();
+        expect(result.value[token]).toMatch(/^#[0-9a-fA-F]{6}$/);
+      }
+    });
+
+    test(`${themeName}: user and assistant borders are visually distinct`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+
+      expect(result.value["role.user.border"]).not.toBe(
+        result.value["role.assistant.border"],
+      );
+    });
+
+    test(`${themeName}: role borders contrast against conversation backgrounds`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+
+      const userBg = result.value["conversation.user.bg"];
+      const assistantBg = result.value["conversation.assistant.bg"];
+
+      // User border should differ from user message background
+      expect(result.value["role.user.border"]).not.toBe(userBg);
+      // Assistant border should differ from assistant message background
+      expect(result.value["role.assistant.border"]).not.toBe(assistantBg);
+    });
+
+    test(`${themeName}: system border differs from primary surface`, () => {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+
+      expect(result.value["role.system.border"]).not.toBe(
+        result.value["surface.primary"],
+      );
+    });
+  }
+
+  test("role border tokens are included in THEME_TOKEN_NAMES schema", () => {
+    for (const token of ROLE_BORDER_TOKENS) {
+      expect(THEME_TOKEN_NAMES).toContain(token);
+    }
+  });
+
+  test("role border tokens resolve correctly through registry for all themes", () => {
+    const registryResult = createThemeRegistry();
+    if (!registryResult.ok) throw new Error("Registry creation failed");
+
+    const registry = registryResult.value;
+    for (const themeName of BUILTIN_THEME_NAMES) {
+      registry.setTheme(themeName);
+      const theme = registry.getTheme();
+
+      for (const token of ROLE_BORDER_TOKENS) {
+        expect(theme.tokens[token]).toBeDefined();
+        expect(theme.tokens[token]).toMatch(/^#[0-9a-fA-F]{6}$/);
+        expect(theme.fallback256[token]).toBeDefined();
+        expect(theme.fallback256[token]).toBeGreaterThanOrEqual(16);
+        expect(theme.fallback256[token]).toBeLessThanOrEqual(255);
+      }
+    }
+  });
+});
+
+describe("theme token coverage for framed layout components", () => {
+  /**
+   * Framed layout components (message blocks, zone shells, input frames)
+   * consume specific token groups. Verify that all required token groups
+   * are present and valid across all themes.
+   */
+
+  const FRAMED_COMPONENT_TOKEN_GROUPS: Record<string, ThemeTokenName[]> = {
+    "message blocks": [
+      "conversation.user.bg",
+      "conversation.user.text",
+      "conversation.assistant.bg",
+      "conversation.assistant.text",
+      "role.user.border",
+      "role.assistant.border",
+    ],
+    "input frame": [
+      "input.bg",
+      "input.text",
+      "input.placeholder",
+      "input.border",
+    ],
+    "sidebar panel": [
+      "sidebar.bg",
+      "sidebar.text",
+      "sidebar.active",
+      "sidebar.hover",
+    ],
+    "zone depth layers": [
+      "depth.panel1",
+      "depth.panel2",
+      "depth.panel3",
+      "depth.interactive",
+    ],
+    "status indicators": [
+      "status.error",
+      "status.success",
+      "status.warning",
+      "status.info",
+    ],
+  };
+
+  for (const [groupName, tokens] of Object.entries(FRAMED_COMPONENT_TOKEN_GROUPS)) {
+    for (const [themeName, source] of Object.entries(ALL_THEMES)) {
+      test(`${themeName}: ${groupName} tokens are all valid`, () => {
+        const result = validateThemeTokens(source);
+        if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+
+        for (const token of tokens) {
+          expect(result.value[token]).toBeDefined();
+          expect(result.value[token]).toMatch(/^#[0-9a-fA-F]{6}$/);
+        }
+      });
+    }
+  }
+
+  test("all framed component token groups have text/bg contrast", () => {
+    const contrastPairs: [ThemeTokenName, ThemeTokenName][] = [
+      ["conversation.user.text", "conversation.user.bg"],
+      ["conversation.assistant.text", "conversation.assistant.bg"],
+      ["input.text", "input.bg"],
+      ["sidebar.text", "sidebar.bg"],
+      ["text.primary", "surface.primary"],
+    ];
+
+    for (const [themeName, source] of Object.entries(ALL_THEMES)) {
+      const result = validateThemeTokens(source);
+      if (!result.ok) throw new Error(`Theme '${themeName}' invalid`);
+
+      for (const [textToken, bgToken] of contrastPairs) {
+        expect(result.value[textToken]).not.toBe(result.value[bgToken]);
+      }
+    }
   });
 });

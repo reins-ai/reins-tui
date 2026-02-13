@@ -114,6 +114,124 @@ describe("wide band (>160) layout snapshots", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Zone frame structural snapshots per band
+// ---------------------------------------------------------------------------
+
+describe("zone frame structural snapshots", () => {
+  /**
+   * Verify that each breakpoint band produces a zone configuration
+   * compatible with framed surfaces (bordered blocks, left-border accents).
+   * These snapshots gate the redesign: if zone structure changes, these
+   * tests catch regressions before visual review.
+   */
+
+  test("compact: single-zone frame (conversation only)", () => {
+    const widths = getPanelWidths("compact", 50);
+    const visibility = getLayoutVisibility(constrainMode("compact", "normal"));
+
+    // Compact is a single framed zone: conversation fills everything
+    expect(visibility.showSidebar).toBe(false);
+    expect(visibility.showConversation).toBe(true);
+    expect(visibility.showActivityPanel).toBe(false);
+    expect(widths.conversation).toBe(50);
+
+    // Framed content needs at least border + padding + minimal text
+    expect(widths.conversation).toBeGreaterThanOrEqual(14);
+  });
+
+  test("narrow: two-zone frame (sidebar + conversation)", () => {
+    const widths = getPanelWidths("narrow", 80);
+    const visibility = getLayoutVisibility(constrainMode("narrow", "normal"));
+
+    expect(visibility.showSidebar).toBe(true);
+    expect(visibility.showConversation).toBe(true);
+    expect(visibility.showActivityPanel).toBe(false);
+
+    // Both zones must accommodate framed content
+    expect(widths.sidebar).toBeGreaterThanOrEqual(12);
+    expect(widths.conversation).toBeGreaterThanOrEqual(20);
+
+    // Gap between zones is accounted for
+    expect(widths.sidebar + widths.conversation).toBeLessThanOrEqual(80);
+  });
+
+  test("standard: three-zone frame (sidebar + conversation + activity)", () => {
+    const widths = getPanelWidths("standard", 140);
+    const visibility = getLayoutVisibility(constrainMode("standard", "activity"));
+
+    expect(visibility.showSidebar).toBe(true);
+    expect(visibility.showConversation).toBe(true);
+    expect(visibility.showActivityPanel).toBe(true);
+
+    // All three zones must accommodate framed content
+    expect(widths.sidebar).toBeGreaterThanOrEqual(12);
+    expect(widths.conversation).toBeGreaterThanOrEqual(20);
+    expect(widths.activity).toBeGreaterThanOrEqual(12);
+
+    // Total allocation respects terminal width
+    const total = widths.sidebar + widths.conversation + widths.activity;
+    expect(total).toBeLessThanOrEqual(140);
+  });
+
+  test("wide: four-zone frame (sidebar + conversation + activity + expanded)", () => {
+    const widths = getPanelWidths("wide", 200);
+    const state = resolveBreakpointState(200, "normal");
+
+    expect(state.showExpandedPanel).toBe(true);
+
+    // All four zones must accommodate framed content
+    expect(widths.sidebar).toBeGreaterThanOrEqual(12);
+    expect(widths.conversation).toBeGreaterThanOrEqual(30);
+    expect(widths.activity).toBeGreaterThanOrEqual(12);
+    expect(widths.expanded).toBeGreaterThanOrEqual(12);
+
+    // Total allocation respects terminal width
+    const total = widths.sidebar + widths.conversation + widths.activity + widths.expanded;
+    expect(total).toBeLessThanOrEqual(200);
+  });
+
+  test("zone count increases monotonically with band progression", () => {
+    const bandWidths: { band: BreakpointBand; width: number }[] = [
+      { band: "compact", width: 40 },
+      { band: "narrow", width: 80 },
+      { band: "standard", width: 140 },
+      { band: "wide", width: 200 },
+    ];
+
+    const zoneCounts = bandWidths.map(({ band, width }) => {
+      const widths = getPanelWidths(band, width);
+      return [widths.sidebar, widths.conversation, widths.activity, widths.expanded]
+        .filter((w) => w > 0).length;
+    });
+
+    // compact=1, narrow=2, standard=3, wide=4
+    expect(zoneCounts).toEqual([1, 2, 3, 4]);
+  });
+
+  test("conversation zone always has room for left-border framed message blocks", () => {
+    // Left-border frame: 1 border char + 1 padding + text content
+    // Minimum readable: 1 + 1 + 10 = 12 chars
+    const MIN_FRAMED_WIDTH = 12;
+
+    const testCases: { band: BreakpointBand; width: number }[] = [
+      { band: "compact", width: 20 },
+      { band: "compact", width: 59 },
+      { band: "narrow", width: 60 },
+      { band: "narrow", width: 99 },
+      { band: "standard", width: 100 },
+      { band: "standard", width: 160 },
+      { band: "wide", width: 161 },
+      { band: "wide", width: 300 },
+    ];
+
+    for (const { band, width } of testCases) {
+      const widths = getPanelWidths(band, width);
+      expect(widths.conversation).toBeGreaterThanOrEqual(MIN_FRAMED_WIDTH);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Mode × breakpoint combination matrix
 // ---------------------------------------------------------------------------
 
