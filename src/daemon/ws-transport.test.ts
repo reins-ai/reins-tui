@@ -7,6 +7,16 @@ import {
   mapDaemonMessageToRawHistory,
   sanitizeLegacyContent,
 } from "./ws-transport";
+import {
+  DAEMON_MSG_BOM,
+  DAEMON_MSG_DOUBLE_ENCODED,
+  DAEMON_MSG_ESCAPED,
+  DAEMON_MSG_JSON,
+  DAEMON_MSG_LEGACY_SEQUENCE,
+  DAEMON_MSG_MIXED_SEQUENCE,
+  DAEMON_MSG_PLAIN,
+  DAEMON_MSG_TOOL,
+} from "../__fixtures__/history-payloads";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -685,5 +695,205 @@ describe("classifyHistoryPayload legacy compatibility", () => {
         encoding: "json-escaped",
       });
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Reconnect history mapping regression tests (shared fixtures)
+// ---------------------------------------------------------------------------
+
+describe("reconnect mapping regression — mixed content types", () => {
+  it("maps mixed DaemonMessage sequence preserving order", () => {
+    const result = mapConversationHistory(DAEMON_MSG_MIXED_SEQUENCE);
+
+    expect(result).toHaveLength(4);
+    expect(result[0].id).toBe("dmsg-plain-1");
+    expect(result[1].id).toBe("dmsg-json-1");
+    expect(result[2].id).toBe("dmsg-escaped-1");
+    expect(result[3].id).toBe("dmsg-tool-1");
+  });
+
+  it("classifies plain text DaemonMessage as plain-text encoding", () => {
+    const result = mapDaemonMessageToRawHistory(DAEMON_MSG_PLAIN);
+
+    expect(result.payload.kind).toBe("serialized");
+    if (result.payload.kind === "serialized") {
+      expect(result.payload.encoding).toBe("plain-text");
+      expect(result.payload.value).toBe("What is 2+2?");
+    }
+  });
+
+  it("classifies JSON structured DaemonMessage as json encoding", () => {
+    const result = mapDaemonMessageToRawHistory(DAEMON_MSG_JSON);
+
+    expect(result.payload.kind).toBe("serialized");
+    if (result.payload.kind === "serialized") {
+      expect(result.payload.encoding).toBe("json");
+    }
+  });
+
+  it("classifies escaped DaemonMessage as json-escaped encoding", () => {
+    const result = mapDaemonMessageToRawHistory(DAEMON_MSG_ESCAPED);
+
+    expect(result.payload.kind).toBe("serialized");
+    if (result.payload.kind === "serialized") {
+      expect(result.payload.encoding).toBe("json-escaped");
+    }
+  });
+
+  it("classifies tool output DaemonMessage as json encoding", () => {
+    const result = mapDaemonMessageToRawHistory(DAEMON_MSG_TOOL);
+
+    expect(result.payload.kind).toBe("serialized");
+    if (result.payload.kind === "serialized") {
+      expect(result.payload.encoding).toBe("json");
+    }
+  });
+
+  it("preserves role for each message in mixed sequence", () => {
+    const result = mapConversationHistory(DAEMON_MSG_MIXED_SEQUENCE);
+
+    expect(result[0].role).toBe("user");
+    expect(result[1].role).toBe("assistant");
+    expect(result[2].role).toBe("assistant");
+    expect(result[3].role).toBe("assistant");
+  });
+
+  it("preserves createdAt for each message in mixed sequence", () => {
+    const result = mapConversationHistory(DAEMON_MSG_MIXED_SEQUENCE);
+
+    expect(result[0].createdAt).toBe("2026-02-13T10:00:00.000Z");
+    expect(result[1].createdAt).toBe("2026-02-13T10:00:01.000Z");
+    expect(result[2].createdAt).toBe("2026-02-13T10:00:02.000Z");
+    expect(result[3].createdAt).toBe("2026-02-13T10:00:03.000Z");
+  });
+
+  it("does not introduce transport-level parsing artifacts in plain text", () => {
+    const result = mapDaemonMessageToRawHistory(DAEMON_MSG_PLAIN);
+
+    if (result.payload.kind === "serialized") {
+      // Plain text should pass through without modification
+      expect(result.payload.value).toBe(DAEMON_MSG_PLAIN.content);
+      expect(result.payload.value).not.toContain("\\n");
+      expect(result.payload.value).not.toContain("\\t");
+    }
+  });
+
+  it("does not introduce transport-level parsing artifacts in JSON", () => {
+    const result = mapDaemonMessageToRawHistory(DAEMON_MSG_JSON);
+
+    expect(result.payload.kind).toBe("serialized");
+    const payload = result.payload as Extract<typeof result.payload, { kind: "serialized" }>;
+    // JSON should be parseable
+    expect(() => JSON.parse(payload.value)).not.toThrow();
+  });
+});
+
+describe("reconnect mapping regression — legacy artifacts", () => {
+  it("maps legacy DaemonMessage sequence preserving order", () => {
+    const result = mapConversationHistory(DAEMON_MSG_LEGACY_SEQUENCE);
+
+    expect(result).toHaveLength(4);
+    expect(result[0].id).toBe("dmsg-bom-1");
+    expect(result[1].id).toBe("dmsg-double-1");
+    expect(result[2].id).toBe("dmsg-escaped-1");
+    expect(result[3].id).toBe("dmsg-plain-1");
+  });
+
+  it("sanitizes BOM from legacy DaemonMessage content", () => {
+    const result = mapDaemonMessageToRawHistory(DAEMON_MSG_BOM);
+
+    if (result.payload.kind === "serialized") {
+      // BOM should be stripped — content should not start with U+FEFF
+      expect(result.payload.value.charCodeAt(0)).not.toBe(0xFEFF);
+      expect(result.payload.value).toBe("Hello from legacy storage");
+      expect(result.payload.encoding).toBe("plain-text");
+    }
+  });
+
+  it("classifies double-encoded structured DaemonMessage as json", () => {
+    const result = mapDaemonMessageToRawHistory(DAEMON_MSG_DOUBLE_ENCODED);
+
+    expect(result.payload.kind).toBe("serialized");
+    const payload = result.payload as Extract<typeof result.payload, { kind: "serialized" }>;
+    expect(payload.encoding).toBe("json");
+    // The value should be valid JSON (first level)
+    expect(() => JSON.parse(payload.value)).not.toThrow();
+  });
+
+  it("preserves escaped content without premature decoding", () => {
+    const result = mapDaemonMessageToRawHistory(DAEMON_MSG_ESCAPED);
+
+    if (result.payload.kind === "serialized") {
+      // Transport should classify but NOT decode — decoding is hydration's job
+      expect(result.payload.encoding).toBe("json-escaped");
+      expect(result.payload.value).toBe("Line 1\\nLine 2\\nLine 3");
+    }
+  });
+
+  it("does not mutate original DaemonMessage objects", () => {
+    const originalContent = DAEMON_MSG_BOM.content;
+    const originalId = DAEMON_MSG_BOM.id;
+
+    mapDaemonMessageToRawHistory(DAEMON_MSG_BOM);
+
+    expect(DAEMON_MSG_BOM.content).toBe(originalContent);
+    expect(DAEMON_MSG_BOM.id).toBe(originalId);
+  });
+});
+
+describe("reconnect mapping regression — end-to-end hydration compatibility", () => {
+  it("all mapped messages have valid DaemonRawHistoryMessage shape", () => {
+    const result = mapConversationHistory(DAEMON_MSG_MIXED_SEQUENCE);
+
+    for (const raw of result) {
+      expect(typeof raw.id).toBe("string");
+      expect(raw.id.length).toBeGreaterThan(0);
+      expect(typeof raw.role).toBe("string");
+      expect(["user", "assistant", "system"]).toContain(raw.role);
+      expect(typeof raw.createdAt).toBe("string");
+      expect(raw.payload).toBeDefined();
+      expect(raw.payload.kind).toBe("serialized");
+    }
+  });
+
+  it("all legacy mapped messages have valid DaemonRawHistoryMessage shape", () => {
+    const result = mapConversationHistory(DAEMON_MSG_LEGACY_SEQUENCE);
+
+    for (const raw of result) {
+      expect(typeof raw.id).toBe("string");
+      expect(raw.id.length).toBeGreaterThan(0);
+      expect(typeof raw.role).toBe("string");
+      expect(typeof raw.createdAt).toBe("string");
+      expect(raw.payload).toBeDefined();
+      expect(raw.payload.kind).toBe("serialized");
+      if (raw.payload.kind === "serialized") {
+        expect(["json", "json-escaped", "plain-text"]).toContain(
+          raw.payload.encoding,
+        );
+      }
+    }
+  });
+
+  it("mixed sequence produces hydration-compatible encodings", () => {
+    const result = mapConversationHistory(DAEMON_MSG_MIXED_SEQUENCE);
+
+    const encodings = result.map((r) =>
+      r.payload.kind === "serialized" ? r.payload.encoding : "structured",
+    );
+
+    // plain → json → json-escaped → json
+    expect(encodings).toEqual(["plain-text", "json", "json-escaped", "json"]);
+  });
+
+  it("legacy sequence produces hydration-compatible encodings after sanitization", () => {
+    const result = mapConversationHistory(DAEMON_MSG_LEGACY_SEQUENCE);
+
+    const encodings = result.map((r) =>
+      r.payload.kind === "serialized" ? r.payload.encoding : "structured",
+    );
+
+    // BOM→plain-text, double-encoded→json, escaped→json-escaped, plain→plain-text
+    expect(encodings).toEqual(["plain-text", "json", "json-escaped", "plain-text"]);
   });
 });
