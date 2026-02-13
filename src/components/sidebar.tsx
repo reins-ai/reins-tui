@@ -358,8 +358,8 @@ export function SidebarContent({ isFocused, connectionStatus = "disconnected" }:
         <Text
           content={
             isFocused
-              ? "Ctrl+K: palette  Ctrl+M: model"
-              : "Ctrl+1 to focus"
+              ? "Ctrl+K palette · Ctrl+M model"
+              : "Ctrl+1 toggle · Esc close"
           }
           style={{ color: tokens["text.muted"] }}
         />

@@ -21,6 +21,16 @@ import {
   type BreakpointBand,
 } from "../../src/layout/breakpoints";
 import type { LayoutMode } from "../../src/state/layout-mode";
+import {
+  resolveStatusSegmentSet,
+  deriveStatusSegments,
+  resolveSegmentVisibility,
+} from "../../src/state/status-machine";
+import {
+  SEGMENT_DROP_THRESHOLDS,
+  type StatusSegmentSources,
+} from "../../src/store/types";
+import { groupSegments } from "../../src/components/status-bar";
 
 describe("getBreakpointBand", () => {
   test("returns compact for widths below 60", () => {
@@ -559,5 +569,220 @@ describe("sidebar collapse across band transitions", () => {
     const atStandardStart = resolveBreakpointState(100, "normal");
     expect(atStandardStart.band).toBe("standard");
     expect(atStandardStart.sidebarVisible).toBe(true);
+  });
+});
+
+// --- Cross-component responsive polish tests ---
+
+function makeSegmentSources(overrides: Partial<StatusSegmentSources> = {}): StatusSegmentSources {
+  return {
+    connectionStatus: "connected",
+    currentModel: "claude-3.5-sonnet",
+    lifecycleStatus: "idle",
+    activeToolName: null,
+    tokenCount: 0,
+    cost: null,
+    compactionActive: false,
+    terminalWidth: 120,
+    ...overrides,
+  };
+}
+
+describe("cross-component status hint visibility across breakpoints", () => {
+  test("hints visible at standard width (120 cols)", () => {
+    const result = resolveStatusSegmentSet(makeSegmentSources({ terminalWidth: 120 }));
+    const hasHints = result.visibleSegments.some((s) => s.id === "hints");
+    expect(hasHints).toBe(true);
+  });
+
+  test("hints visible at wide width (200 cols)", () => {
+    const result = resolveStatusSegmentSet(makeSegmentSources({ terminalWidth: 200 }));
+    const hasHints = result.visibleSegments.some((s) => s.id === "hints");
+    expect(hasHints).toBe(true);
+  });
+
+  test("hints drop at narrow width below threshold", () => {
+    const result = resolveStatusSegmentSet(makeSegmentSources({ terminalWidth: 60 }));
+    const hasHints = result.visibleSegments.some((s) => s.id === "hints");
+    expect(hasHints).toBe(false);
+  });
+
+  test("hints drop at compact width", () => {
+    const result = resolveStatusSegmentSet(makeSegmentSources({ terminalWidth: 40 }));
+    const hasHints = result.visibleSegments.some((s) => s.id === "hints");
+    expect(hasHints).toBe(false);
+  });
+
+  test("connection segment survives at all breakpoint band widths", () => {
+    const bandWidths = [40, 60, 100, 200];
+    for (const width of bandWidths) {
+      const result = resolveStatusSegmentSet(makeSegmentSources({ terminalWidth: width }));
+      const hasConnection = result.visibleSegments.some((s) => s.id === "connection");
+      expect(hasConnection).toBe(true);
+    }
+  });
+
+  test("status bar content never exceeds terminal width at any band", () => {
+    const bandWidths = [40, 59, 60, 80, 99, 100, 140, 160, 161, 200];
+    for (const width of bandWidths) {
+      const result = resolveStatusSegmentSet(makeSegmentSources({ terminalWidth: width }));
+      expect(result.totalWidth).toBeLessThanOrEqual(width);
+    }
+  });
+});
+
+describe("cross-component sidebar toggle consistency across breakpoints", () => {
+  test("sidebar auto-visible on standard band regardless of toggle state", () => {
+    const withToggle = resolveBreakpointState(120, "normal", true);
+    const withoutToggle = resolveBreakpointState(120, "normal", false);
+    expect(withToggle.sidebarVisible).toBe(true);
+    expect(withoutToggle.sidebarVisible).toBe(true);
+  });
+
+  test("sidebar auto-visible on wide band regardless of toggle state", () => {
+    const withToggle = resolveBreakpointState(200, "normal", true);
+    const withoutToggle = resolveBreakpointState(200, "normal", false);
+    expect(withToggle.sidebarVisible).toBe(true);
+    expect(withoutToggle.sidebarVisible).toBe(true);
+  });
+
+  test("sidebar toggle respected on narrow band when room available", () => {
+    const toggled = resolveBreakpointState(80, "normal", true);
+    const notToggled = resolveBreakpointState(80, "normal", false);
+    expect(toggled.sidebarVisible).toBe(true);
+    expect(notToggled.sidebarVisible).toBe(false);
+  });
+
+  test("sidebar toggle ignored on compact band", () => {
+    const toggled = resolveBreakpointState(40, "normal", true);
+    expect(toggled.sidebarVisible).toBe(false);
+  });
+
+  test("sidebar toggle at narrow-standard boundary is deterministic", () => {
+    // Just below standard threshold
+    const narrow = resolveBreakpointState(99, "normal", true);
+    expect(narrow.band).toBe("narrow");
+    expect(narrow.sidebarVisible).toBe(true);
+
+    // At standard threshold
+    const standard = resolveBreakpointState(100, "normal", false);
+    expect(standard.band).toBe("standard");
+    expect(standard.sidebarVisible).toBe(true);
+  });
+});
+
+describe("cross-component spacing coherence at band boundaries", () => {
+  test("conversation width is positive at all band boundaries", () => {
+    const boundaries = [
+      BREAKPOINT_THRESHOLDS.compact,
+      BREAKPOINT_THRESHOLDS.narrow,
+      BREAKPOINT_THRESHOLDS.standard,
+    ];
+
+    for (const width of boundaries) {
+      const band = getBreakpointBand(width);
+      const widths = getPanelWidths(band, width);
+      expect(widths.conversation).toBeGreaterThan(0);
+    }
+  });
+
+  test("conversation width at narrow start is at least minimum", () => {
+    const band = getBreakpointBand(60);
+    const widths = getPanelWidths(band, 60);
+    expect(widths.conversation).toBeGreaterThanOrEqual(20);
+  });
+
+  test("rendered panel widths respect terminal width when sidebar visibility is applied", () => {
+    const testWidths = [40, 60, 80, 100, 120, 161, 200];
+    for (const cols of testWidths) {
+      const state = resolveBreakpointState(cols, "normal");
+      const widths = state.panelWidths;
+      const sidebarRendered = state.sidebarVisible ? widths.sidebar : 0;
+      const total = sidebarRendered + widths.conversation
+        + (widths.activity > 0 ? widths.activity + PANEL_GAP : 0)
+        + (widths.expanded > 0 ? widths.expanded + PANEL_GAP : 0)
+        + (sidebarRendered > 0 ? PANEL_GAP : 0);
+      expect(total).toBeLessThanOrEqual(cols);
+    }
+  });
+
+  test("status zone fits within terminal at all breakpoint widths", () => {
+    const testWidths = [40, 60, 80, 100, 120, 161, 200];
+    for (const width of testWidths) {
+      const result = resolveStatusSegmentSet(makeSegmentSources({ terminalWidth: width }));
+      // Status bar uses 2 padding (1 left + 1 right) plus segment content
+      expect(result.totalWidth).toBeLessThanOrEqual(width);
+    }
+  });
+});
+
+describe("shortcut hint parity", () => {
+  test("status bar hints include Ctrl+K palette shortcut", () => {
+    const result = resolveStatusSegmentSet(makeSegmentSources({ terminalWidth: 200 }));
+    const hints = result.visibleSegments.find((s) => s.id === "hints");
+    expect(hints).toBeDefined();
+    expect(hints!.content).toContain("Ctrl+K");
+  });
+
+  test("status bar hints include Ctrl+M model shortcut", () => {
+    const result = resolveStatusSegmentSet(makeSegmentSources({ terminalWidth: 200 }));
+    const hints = result.visibleSegments.find((s) => s.id === "hints");
+    expect(hints!.content).toContain("Ctrl+M");
+  });
+
+  test("status bar hints include Ctrl+1 context shortcut", () => {
+    const result = resolveStatusSegmentSet(makeSegmentSources({ terminalWidth: 200 }));
+    const hints = result.visibleSegments.find((s) => s.id === "hints");
+    expect(hints!.content).toContain("Ctrl+1");
+  });
+
+  test("status bar hints contain at least three keyboard shortcuts", () => {
+    const result = resolveStatusSegmentSet(makeSegmentSources({ terminalWidth: 200 }));
+    const hints = result.visibleSegments.find((s) => s.id === "hints");
+    expect(hints).toBeDefined();
+    const ctrlMatches = hints!.content.match(/Ctrl\+/g);
+    expect(ctrlMatches).not.toBeNull();
+    expect(ctrlMatches!.length).toBeGreaterThanOrEqual(3);
+  });
+
+  test("hints use consistent separator format", () => {
+    const result = resolveStatusSegmentSet(makeSegmentSources({ terminalWidth: 200 }));
+    const hints = result.visibleSegments.find((s) => s.id === "hints");
+    expect(hints).toBeDefined();
+    // Hints use middle dot separator between shortcuts
+    expect(hints!.content).toContain(" · ");
+  });
+
+  test("left and right groups are stable across all widths", () => {
+    const testWidths = [40, 60, 80, 100, 120, 200];
+    for (const width of testWidths) {
+      const result = resolveStatusSegmentSet(makeSegmentSources({ terminalWidth: width }));
+      const { left, right } = groupSegments(result.visibleSegments);
+
+      // Left group never contains hints
+      for (const seg of left) {
+        expect(seg.id).not.toBe("hints");
+      }
+
+      // Right group only contains hints
+      for (const seg of right) {
+        expect(seg.id).toBe("hints");
+      }
+    }
+  });
+
+  test("segment drop thresholds align with breakpoint bands", () => {
+    // Hints drop at 80 — within narrow band (60-99)
+    expect(SEGMENT_DROP_THRESHOLDS.hints).toBeGreaterThanOrEqual(BREAKPOINT_THRESHOLDS.compact);
+    expect(SEGMENT_DROP_THRESHOLDS.hints).toBeLessThan(BREAKPOINT_THRESHOLDS.narrow);
+
+    // Lifecycle drops at 50 — within compact band (<60)
+    expect(SEGMENT_DROP_THRESHOLDS.lifecycle).toBeLessThan(BREAKPOINT_THRESHOLDS.compact);
+
+    // Model drops at 30 — deep compact
+    expect(SEGMENT_DROP_THRESHOLDS.model).toBeLessThan(SEGMENT_DROP_THRESHOLDS.lifecycle);
+
+    // Connection never drops
+    expect(SEGMENT_DROP_THRESHOLDS.connection).toBe(0);
   });
 });

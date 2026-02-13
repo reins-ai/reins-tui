@@ -361,7 +361,7 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
   const hintText = validationError
     ?? (daemonMode === "mock"
       ? "⚠ Daemon disconnected — start daemon for real responses"
-      : isFocused ? "Enter to send" : "Press Tab to focus input");
+      : isFocused ? "Enter to send · Ctrl+K palette" : "Tab to focus · Ctrl+K palette");
 
   const hintColor = validationError
     ? tokens["status.error"]

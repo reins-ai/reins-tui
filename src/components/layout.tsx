@@ -162,7 +162,6 @@ export function Layout({ version, dimensions, showHelp, connectionStatus, daemon
         <ChatScreen
           panelBorders={panelBorders}
           focusedPanel={state.focusedPanel}
-          showSidebar={false}
           showActivityPanel={false}
           showExpandedPanel={false}
           breakpoint={breakpoint}

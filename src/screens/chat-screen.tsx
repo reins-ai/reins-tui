@@ -12,7 +12,6 @@ import type { PanelBorderColors } from "../components/layout";
 export interface ChatScreenProps {
   panelBorders: PanelBorderColors;
   focusedPanel: string;
-  showSidebar: boolean;
   showActivityPanel: boolean;
   showExpandedPanel: boolean;
   breakpoint: BreakpointState;
@@ -22,7 +21,6 @@ export interface ChatScreenProps {
 export function ChatScreen({
   panelBorders,
   focusedPanel,
-  showSidebar,
   showActivityPanel,
   showExpandedPanel,
   breakpoint,
@@ -32,7 +30,7 @@ export function ChatScreen({
 
   return (
     <Box style={{ flexDirection: "row", flexGrow: 1 }}>
-      <Box style={{ flexGrow: 1, marginLeft: showSidebar ? 1 : 0, flexDirection: "column" }}>
+      <Box style={{ flexGrow: 1, flexDirection: "column" }}>
         {/* Conversation zone: scrollable message area */}
         <ZoneShell
           backgroundColor={tokens["surface.primary"]}
