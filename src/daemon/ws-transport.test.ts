@@ -5,6 +5,7 @@ import {
   classifyHistoryPayload,
   mapConversationHistory,
   mapDaemonMessageToRawHistory,
+  sanitizeLegacyContent,
 } from "./ws-transport";
 
 // ---------------------------------------------------------------------------
@@ -113,15 +114,15 @@ describe("classifyHistoryPayload", () => {
       });
     });
 
-    it("classifies double-encoded JSON string starting with quote as plain-text", () => {
-      // JSON.stringify("Hello, world!") produces "Hello, world!" (with quotes)
-      // which starts with " not { or [ — classified as plain text
+    it("classifies double-encoded JSON string starting with quote as json", () => {
+      // JSON.stringify("Hello, world!") produces '"Hello, world!"' (with quotes)
+      // which starts with " — detected as a JSON-stringified string for legacy compat
       const content = JSON.stringify("Hello, world!");
       const result = classifyHistoryPayload(content);
       expect(result).toEqual({
         kind: "serialized",
         value: content,
-        encoding: "plain-text",
+        encoding: "json",
       });
     });
 
@@ -503,5 +504,186 @@ describe("history mapping integration", () => {
     for (let i = 0; i < result.length; i++) {
       expect(result[i].id).toBe(`msg-${i}`);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// sanitizeLegacyContent
+// ---------------------------------------------------------------------------
+
+describe("sanitizeLegacyContent", () => {
+  it("returns normal content unchanged", () => {
+    expect(sanitizeLegacyContent("Hello, world!")).toBe("Hello, world!");
+  });
+
+  it("strips BOM character from start of content", () => {
+    const bom = "\uFEFF";
+    expect(sanitizeLegacyContent(`${bom}Hello`)).toBe("Hello");
+  });
+
+  it("strips null bytes from content", () => {
+    expect(sanitizeLegacyContent("Hello\0World")).toBe("HelloWorld");
+  });
+
+  it("strips both BOM and null bytes", () => {
+    const bom = "\uFEFF";
+    expect(sanitizeLegacyContent(`${bom}Hello\0World`)).toBe("HelloWorld");
+  });
+
+  it("handles empty string", () => {
+    expect(sanitizeLegacyContent("")).toBe("");
+  });
+
+  it("handles BOM-only content", () => {
+    expect(sanitizeLegacyContent("\uFEFF")).toBe("");
+  });
+
+  it("does not strip BOM from middle of content", () => {
+    expect(sanitizeLegacyContent("Hello\uFEFFWorld")).toBe("Hello\uFEFFWorld");
+  });
+
+  it("preserves JSON content after BOM removal", () => {
+    const bom = "\uFEFF";
+    const json = JSON.stringify({ text: "hello" });
+    expect(sanitizeLegacyContent(`${bom}${json}`)).toBe(json);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Legacy compatibility: classifyHistoryPayload edge cases
+// ---------------------------------------------------------------------------
+
+describe("classifyHistoryPayload legacy compatibility", () => {
+  describe("JSON-stringified string payloads", () => {
+    it("classifies JSON.stringify(text) as json encoding", () => {
+      // JSON.stringify("Hello world") → '"Hello world"'
+      const content = JSON.stringify("Hello world");
+      const result = classifyHistoryPayload(content);
+      expect(result).toEqual({
+        kind: "serialized",
+        value: content,
+        encoding: "json",
+      });
+    });
+
+    it("classifies JSON.stringify(text with escapes) as json encoding", () => {
+      // JSON.stringify("line1\nline2") → '"line1\\nline2"'
+      const content = JSON.stringify("line1\nline2");
+      const result = classifyHistoryPayload(content);
+      expect(result).toEqual({
+        kind: "serialized",
+        value: content,
+        encoding: "json",
+      });
+    });
+
+    it("classifies JSON.stringify(text with tabs) as json encoding", () => {
+      const content = JSON.stringify("col1\tcol2");
+      const result = classifyHistoryPayload(content);
+      expect(result).toEqual({
+        kind: "serialized",
+        value: content,
+        encoding: "json",
+      });
+    });
+
+    it("does not misclassify non-JSON strings starting with quote", () => {
+      // A string that starts with " but is not valid JSON
+      const content = '"unclosed string';
+      const result = classifyHistoryPayload(content);
+      // Should fall through to escape detection or plain-text
+      expect(result.kind).toBe("serialized");
+      if (result.kind === "serialized") {
+        expect(result.encoding).not.toBe("json");
+      }
+    });
+
+    it("classifies double-encoded structured payload starting with quote", () => {
+      // JSON.stringify(JSON.stringify({ text: "hello" }))
+      // Outer: '"{\\"text\\":\\"hello\\"}"'
+      const inner = JSON.stringify({ text: "hello" });
+      const doubleEncoded = JSON.stringify(inner);
+      const result = classifyHistoryPayload(doubleEncoded);
+      expect(result).toEqual({
+        kind: "serialized",
+        value: doubleEncoded,
+        encoding: "json",
+      });
+    });
+  });
+
+  describe("legacy content with BOM/null sanitization", () => {
+    it("maps content with BOM to correct classification after sanitization", () => {
+      const bom = "\uFEFF";
+      const message = makeDaemonMessage({
+        content: `${bom}Hello world`,
+      });
+      const result = mapDaemonMessageToRawHistory(message);
+
+      expect(result.payload).toEqual({
+        kind: "serialized",
+        value: "Hello world",
+        encoding: "plain-text",
+      });
+    });
+
+    it("maps JSON content with BOM to json encoding after sanitization", () => {
+      const bom = "\uFEFF";
+      const json = JSON.stringify({ text: "hello" });
+      const message = makeDaemonMessage({
+        content: `${bom}${json}`,
+      });
+      const result = mapDaemonMessageToRawHistory(message);
+
+      expect(result.payload).toEqual({
+        kind: "serialized",
+        value: json,
+        encoding: "json",
+      });
+    });
+
+    it("maps content with null bytes to correct classification after sanitization", () => {
+      const message = makeDaemonMessage({
+        content: "Hello\0World",
+      });
+      const result = mapDaemonMessageToRawHistory(message);
+
+      expect(result.payload).toEqual({
+        kind: "serialized",
+        value: "HelloWorld",
+        encoding: "plain-text",
+      });
+    });
+  });
+
+  describe("backward compatibility with current daemon sessions", () => {
+    it("does not alter classification of standard plain text", () => {
+      const result = classifyHistoryPayload("Normal message text");
+      expect(result).toEqual({
+        kind: "serialized",
+        value: "Normal message text",
+        encoding: "plain-text",
+      });
+    });
+
+    it("does not alter classification of standard JSON payloads", () => {
+      const json = JSON.stringify({ text: "hello", blocks: [] });
+      const result = classifyHistoryPayload(json);
+      expect(result).toEqual({
+        kind: "serialized",
+        value: json,
+        encoding: "json",
+      });
+    });
+
+    it("does not alter classification of standard escaped content", () => {
+      const content = "Line 1\\nLine 2\\nLine 3";
+      const result = classifyHistoryPayload(content);
+      expect(result).toEqual({
+        kind: "serialized",
+        value: content,
+        encoding: "json-escaped",
+      });
+    });
   });
 });

@@ -126,9 +126,119 @@ function normalizeStructuredPayload(
   return { text, blocks };
 }
 
+// ---------------------------------------------------------------------------
+// Legacy compatibility — telemetry for malformed payloads
+// ---------------------------------------------------------------------------
+
+/**
+ * Log a telemetry warning for malformed or legacy payload variants.
+ * Uses console.warn for observability without disrupting rendering.
+ */
+function logLegacyPayloadTelemetry(
+  reason: string,
+  encoding: string,
+  valuePreview: string,
+): void {
+  const preview = valuePreview.length > 120
+    ? `${valuePreview.slice(0, 120)}…`
+    : valuePreview;
+  console.warn(`[history-hydration] legacy payload: ${reason} (encoding=${encoding}, preview=${JSON.stringify(preview)})`);
+}
+
+// ---------------------------------------------------------------------------
+// Legacy compatibility — strict schema check for double-encoded structured payloads
+// ---------------------------------------------------------------------------
+
+/**
+ * Attempt to recover a structured payload from a double-encoded JSON string.
+ *
+ * Legacy daemon sessions may store payloads as JSON.stringify(JSON.stringify(obj)),
+ * producing a string like `"{\"text\":\"hello\"}"`. After the first JSON.parse
+ * the result is a string that itself is valid JSON containing a structured object.
+ *
+ * This function performs a single additional parse ONLY when the first parse
+ * yields a string that looks like it contains a JSON object (starts with `{`).
+ * This is a strict schema check — not a multi-pass decode loop.
+ *
+ * Returns null if the inner string is not a valid structured payload.
+ */
+function tryRecoverDoubleEncodedStructured(
+  innerString: string,
+): DaemonHydratedHistoryPayload | null {
+  const trimmedInner = innerString.trim();
+  if (!trimmedInner.startsWith("{")) {
+    return null;
+  }
+
+  try {
+    const innerParsed: unknown = JSON.parse(trimmedInner);
+    if (
+      innerParsed !== null &&
+      typeof innerParsed === "object" &&
+      !Array.isArray(innerParsed)
+    ) {
+      const record = innerParsed as Record<string, unknown>;
+      if ("text" in record || "blocks" in record) {
+        return normalizeStructuredPayloadFromRecord(record);
+      }
+    }
+  } catch {
+    // Not valid inner JSON — caller falls back to plain text decode
+  }
+
+  return null;
+}
+
+/**
+ * Normalize a parsed record (from JSON) into a hydrated payload.
+ * Extracted to share between direct JSON parse and double-encoded recovery.
+ */
+function normalizeStructuredPayloadFromRecord(
+  record: Record<string, unknown>,
+): DaemonHydratedHistoryPayload {
+  const text = typeof record.text === "string" ? decodeEscapedText(record.text) : "";
+  const rawBlocks = Array.isArray(record.blocks) ? record.blocks : [];
+
+  const blocks: DaemonHistoryBlock[] = [];
+  for (const item of rawBlocks) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+    const block = item as Record<string, unknown>;
+    if (typeof block.type !== "string") continue;
+
+    if (block.type === "text" && typeof block.text === "string") {
+      blocks.push({ type: "text", text: decodeEscapedText(block.text) });
+    } else if (
+      block.type === "tool-use" &&
+      typeof block.toolCallId === "string" &&
+      typeof block.name === "string"
+    ) {
+      blocks.push({
+        type: "tool-use",
+        toolCallId: block.toolCallId,
+        name: block.name,
+        args: (block.args && typeof block.args === "object" && !Array.isArray(block.args))
+          ? block.args as Record<string, unknown>
+          : {},
+      });
+    } else if (block.type === "tool-result" && typeof block.toolCallId === "string") {
+      const { output, isError } = normalizeToolResultOutput(
+        block as { output?: string; result?: string; isError?: boolean; error?: boolean },
+      );
+      blocks.push({ type: "tool-result", toolCallId: block.toolCallId, output, isError });
+    }
+  }
+
+  if (text.length > 0 && !blocks.some((b) => b.type === "text")) {
+    blocks.unshift({ type: "text", text });
+  }
+
+  return { text, blocks };
+}
+
 /**
  * Attempt to parse a serialized payload string into a structured shape.
- * Handles JSON-encoded objects, JSON-escaped strings, and plain text.
+ * Handles JSON-encoded objects, JSON-escaped strings, plain text, and
+ * legacy double-encoded variants with strict schema checks.
  */
 function normalizeSerializedPayload(
   raw: Extract<DaemonRawHistoryPayload, { kind: "serialized" }>,
@@ -144,7 +254,6 @@ function normalizeSerializedPayload(
   }
 
   if (encoding === "json-escaped") {
-    // The value is a JSON-escaped string — decode escape sequences
     const text = decodeEscapedText(value);
     return {
       text,
@@ -157,7 +266,14 @@ function normalizeSerializedPayload(
     const parsed: unknown = JSON.parse(value);
 
     if (typeof parsed === "string") {
-      // Double-encoded string — decode it
+      // First parse yielded a string — check for double-encoded structured payload
+      const recovered = tryRecoverDoubleEncodedStructured(parsed);
+      if (recovered) {
+        logLegacyPayloadTelemetry("double-encoded-structured", encoding, value);
+        return recovered;
+      }
+
+      // Plain double-encoded string — decode escape sequences
       const text = decodeEscapedText(parsed);
       return {
         text,
@@ -166,54 +282,19 @@ function normalizeSerializedPayload(
     }
 
     if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
-      const record = parsed as Record<string, unknown>;
-      const text = typeof record.text === "string" ? decodeEscapedText(record.text) : "";
-      const rawBlocks = Array.isArray(record.blocks) ? record.blocks : [];
-
-      // Validate and normalize blocks
-      const blocks: DaemonHistoryBlock[] = [];
-      for (const item of rawBlocks) {
-        if (!item || typeof item !== "object" || Array.isArray(item)) continue;
-        const block = item as Record<string, unknown>;
-        if (typeof block.type !== "string") continue;
-
-        if (block.type === "text" && typeof block.text === "string") {
-          blocks.push({ type: "text", text: decodeEscapedText(block.text) });
-        } else if (
-          block.type === "tool-use" &&
-          typeof block.toolCallId === "string" &&
-          typeof block.name === "string"
-        ) {
-          blocks.push({
-            type: "tool-use",
-            toolCallId: block.toolCallId,
-            name: block.name,
-            args: (block.args && typeof block.args === "object" && !Array.isArray(block.args))
-              ? block.args as Record<string, unknown>
-              : {},
-          });
-        } else if (block.type === "tool-result" && typeof block.toolCallId === "string") {
-          const { output, isError } = normalizeToolResultOutput(
-            block as { output?: string; result?: string; isError?: boolean; error?: boolean },
-          );
-          blocks.push({ type: "tool-result", toolCallId: block.toolCallId, output, isError });
-        }
-      }
-
-      if (text.length > 0 && !blocks.some((b) => b.type === "text")) {
-        blocks.unshift({ type: "text", text });
-      }
-
-      return { text, blocks };
+      return normalizeStructuredPayloadFromRecord(parsed as Record<string, unknown>);
     }
 
     // Fallback: stringify whatever we got
     const fallbackText = decodeEscapedText(String(parsed));
+    logLegacyPayloadTelemetry("unexpected-json-type", encoding, value);
     return {
       text: fallbackText,
       blocks: fallbackText.length > 0 ? [{ type: "text", text: fallbackText }] : [],
     };
   } catch {
+    // JSON parse failed — log telemetry and return null (will be dropped)
+    logLegacyPayloadTelemetry("json-parse-failed", encoding, value);
     return null;
   }
 }
@@ -226,7 +307,16 @@ function normalizePayload(raw: DaemonRawHistoryPayload): DaemonHydratedHistoryPa
   if (raw.kind === "structured") {
     return normalizeStructuredPayload(raw.value);
   }
-  return normalizeSerializedPayload(raw);
+
+  const result = normalizeSerializedPayload(raw);
+  if (!result) {
+    logLegacyPayloadTelemetry(
+      "normalization-returned-null",
+      raw.encoding,
+      raw.value,
+    );
+  }
+  return result;
 }
 
 /**

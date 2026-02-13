@@ -565,7 +565,8 @@ export class DaemonWsTransport {
  *
  * 1. A JSON object with text/blocks fields (structured payload serialized as string)
  * 2. A JSON string (double-encoded text)
- * 3. Plain text (the common case for simple messages)
+ * 3. A JSON-stringified string starting with `"` (legacy double-encoded variant)
+ * 4. Plain text (the common case for simple messages)
  *
  * This function does NOT decode or normalize — it only classifies the payload
  * so the downstream hydration pipeline can handle it uniformly.
@@ -607,6 +608,20 @@ export function classifyHistoryPayload(content: string): DaemonRawHistoryPayload
     }
   }
 
+  // Legacy compatibility: detect JSON-stringified strings starting with `"`
+  // These are double-encoded payloads where the daemon stored the content as
+  // JSON.stringify(text), producing `"some text with \\n escapes"`.
+  if (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+      if (typeof parsed === "string") {
+        return { kind: "serialized", value: trimmed, encoding: "json" };
+      }
+    } catch {
+      // Not valid JSON string — fall through to escape detection
+    }
+  }
+
   // Detect escaped content (common in legacy payloads)
   if (trimmed.includes("\\n") || trimmed.includes("\\t") || trimmed.includes("\\\\") || trimmed.includes('\\"')) {
     return { kind: "serialized", value: content, encoding: "json-escaped" };
@@ -617,18 +632,45 @@ export function classifyHistoryPayload(content: string): DaemonRawHistoryPayload
 }
 
 /**
+ * Sanitize legacy content strings before classification.
+ *
+ * Some daemon sessions may persist content with BOM markers, null bytes,
+ * or other non-printable artifacts from serialization edge cases.
+ * This pre-processing step strips known artifacts to prevent
+ * misclassification without altering meaningful content.
+ */
+export function sanitizeLegacyContent(content: string): string {
+  // Strip BOM (U+FEFF) — can appear at start of content from legacy file reads
+  let sanitized = content;
+  if (sanitized.charCodeAt(0) === 0xFEFF) {
+    sanitized = sanitized.slice(1);
+  }
+
+  // Strip null bytes — can appear from binary-safe storage paths
+  if (sanitized.includes("\0")) {
+    sanitized = sanitized.replaceAll("\0", "");
+  }
+
+  return sanitized;
+}
+
+/**
  * Map a single DaemonMessage (from HTTP getConversation response) into the
  * DaemonRawHistoryMessage shape expected by the hydration pipeline.
  *
  * This is the transport-boundary bridge between the daemon's flat message
  * format and the store's typed normalization input.
+ *
+ * Applies legacy content sanitization before classification to handle
+ * artifacts from older daemon session storage formats.
  */
 export function mapDaemonMessageToRawHistory(message: DaemonMessage): DaemonRawHistoryMessage {
+  const sanitizedContent = sanitizeLegacyContent(message.content);
   return {
     id: message.id,
     role: message.role,
     createdAt: message.createdAt,
-    payload: classifyHistoryPayload(message.content),
+    payload: classifyHistoryPayload(sanitizedContent),
   };
 }
 

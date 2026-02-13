@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, spyOn } from "bun:test";
 
 import type {
   DaemonHistoryNormalizationContext,
@@ -858,6 +858,432 @@ describe("applyHydratedHistoryChunk", () => {
     expect(msg.toolCalls).toHaveLength(1);
     expect(msg.toolCalls![0].name).toBe("bash");
     expect(msg.toolCalls![0].result).toBe("/home/user");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Legacy escaped-payload compatibility guards
+// ---------------------------------------------------------------------------
+
+describe("legacy compatibility guards", () => {
+  describe("double-encoded structured payloads", () => {
+    it("recovers a double-encoded JSON object with text and blocks", () => {
+      // Simulates JSON.stringify(JSON.stringify({ text: "hello", blocks: [...] }))
+      const inner = JSON.stringify({
+        text: "Hello from legacy",
+        blocks: [{ type: "text", text: "Hello from legacy" }],
+      });
+      const doubleEncoded = JSON.stringify(inner);
+
+      const raw = makeRawMessage({
+        payload: serializedPayload(doubleEncoded, "json"),
+      });
+      const result = normalizeHistoryMessage(raw, makeContext());
+
+      expect(result.status).toBe("accepted");
+      if (result.status !== "accepted") return;
+
+      expect(result.message.payload.text).toBe("Hello from legacy");
+      expect(result.message.payload.blocks).toEqual([
+        { type: "text", text: "Hello from legacy" },
+      ]);
+    });
+
+    it("recovers double-encoded tool blocks", () => {
+      const inner = JSON.stringify({
+        text: "",
+        blocks: [
+          { type: "tool-use", toolCallId: "tc-1", name: "bash", args: { command: "ls" } },
+          { type: "tool-result", toolCallId: "tc-1", output: "file1.txt\\nfile2.txt" },
+        ],
+      });
+      const doubleEncoded = JSON.stringify(inner);
+
+      const raw = makeRawMessage({
+        payload: serializedPayload(doubleEncoded, "json"),
+      });
+      const result = normalizeHistoryMessage(raw, makeContext());
+
+      expect(result.status).toBe("accepted");
+      if (result.status !== "accepted") return;
+
+      expect(result.message.payload.blocks).toHaveLength(2);
+      expect(result.message.payload.blocks[0]).toEqual({
+        type: "tool-use",
+        toolCallId: "tc-1",
+        name: "bash",
+        args: { command: "ls" },
+      });
+      expect(result.message.payload.blocks[1]).toEqual({
+        type: "tool-result",
+        toolCallId: "tc-1",
+        output: "file1.txt\nfile2.txt",
+        isError: false,
+      });
+    });
+
+    it("falls back to plain text for double-encoded non-structured JSON", () => {
+      // JSON.stringify(JSON.stringify({ foo: "bar" })) — no text/blocks fields
+      const inner = JSON.stringify({ foo: "bar" });
+      const doubleEncoded = JSON.stringify(inner);
+
+      const raw = makeRawMessage({
+        payload: serializedPayload(doubleEncoded, "json"),
+      });
+      const result = normalizeHistoryMessage(raw, makeContext());
+
+      expect(result.status).toBe("accepted");
+      if (result.status !== "accepted") return;
+
+      // Should decode as plain text since inner object has no text/blocks
+      expect(result.message.payload.text).toBe(inner);
+    });
+  });
+
+  describe("JSON-stringified string payloads", () => {
+    it("handles JSON.stringify(text) where text has escape sequences", () => {
+      // Daemon stored: JSON.stringify("Hello\nWorld") → "\"Hello\\nWorld\""
+      const jsonString = JSON.stringify("Hello\nWorld");
+
+      const raw = makeRawMessage({
+        payload: serializedPayload(jsonString, "json"),
+      });
+      const result = normalizeHistoryMessage(raw, makeContext());
+
+      expect(result.status).toBe("accepted");
+      if (result.status !== "accepted") return;
+
+      expect(result.message.payload.text).toBe("Hello\nWorld");
+    });
+
+    it("handles JSON.stringify of plain text without escapes", () => {
+      const jsonString = JSON.stringify("Simple message");
+
+      const raw = makeRawMessage({
+        payload: serializedPayload(jsonString, "json"),
+      });
+      const result = normalizeHistoryMessage(raw, makeContext());
+
+      expect(result.status).toBe("accepted");
+      if (result.status !== "accepted") return;
+
+      expect(result.message.payload.text).toBe("Simple message");
+    });
+  });
+
+  describe("malformed payload handling", () => {
+    it("drops completely invalid JSON with json encoding silently", () => {
+      const raw = makeRawMessage({
+        payload: serializedPayload("{{{{not json at all", "json"),
+      });
+      const result = normalizeHistoryMessage(raw, makeContext());
+
+      expect(result.status).toBe("dropped");
+      if (result.status !== "dropped") return;
+      expect(result.reason).toBe("decode-failed");
+    });
+
+    it("drops truncated JSON payload silently", () => {
+      const raw = makeRawMessage({
+        payload: serializedPayload('{"text": "hello', "json"),
+      });
+      const result = normalizeHistoryMessage(raw, makeContext());
+
+      expect(result.status).toBe("dropped");
+      if (result.status !== "dropped") return;
+      expect(result.reason).toBe("decode-failed");
+    });
+
+    it("handles empty string in json encoding gracefully", () => {
+      const raw = makeRawMessage({
+        payload: serializedPayload('""', "json"),
+      });
+      const result = normalizeHistoryMessage(raw, makeContext());
+
+      expect(result.status).toBe("accepted");
+      if (result.status !== "accepted") return;
+
+      expect(result.message.payload.text).toBe("");
+      expect(result.message.payload.blocks).toEqual([]);
+    });
+
+    it("handles JSON null gracefully", () => {
+      const raw = makeRawMessage({
+        payload: serializedPayload("null", "json"),
+      });
+      const result = normalizeHistoryMessage(raw, makeContext());
+
+      expect(result.status).toBe("accepted");
+      if (result.status !== "accepted") return;
+
+      expect(result.message.payload.text).toBe("null");
+    });
+
+    it("handles JSON number gracefully", () => {
+      const raw = makeRawMessage({
+        payload: serializedPayload("42", "json"),
+      });
+      const result = normalizeHistoryMessage(raw, makeContext());
+
+      expect(result.status).toBe("accepted");
+      if (result.status !== "accepted") return;
+
+      expect(result.message.payload.text).toBe("42");
+    });
+
+    it("handles JSON boolean gracefully", () => {
+      const raw = makeRawMessage({
+        payload: serializedPayload("true", "json"),
+      });
+      const result = normalizeHistoryMessage(raw, makeContext());
+
+      expect(result.status).toBe("accepted");
+      if (result.status !== "accepted") return;
+
+      expect(result.message.payload.text).toBe("true");
+    });
+
+    it("preserves json-escaped content even when partially malformed", () => {
+      // Content with escape sequences but not valid JSON
+      const raw = makeRawMessage({
+        payload: serializedPayload("some text\\nwith escapes\\tand tabs", "json-escaped"),
+      });
+      const result = normalizeHistoryMessage(raw, makeContext());
+
+      expect(result.status).toBe("accepted");
+      if (result.status !== "accepted") return;
+
+      expect(result.message.payload.text).toBe("some text\nwith escapes\tand tabs");
+    });
+
+    it("handles plain-text with no special content", () => {
+      const raw = makeRawMessage({
+        payload: serializedPayload("Just a regular message.", "plain-text"),
+      });
+      const result = normalizeHistoryMessage(raw, makeContext());
+
+      expect(result.status).toBe("accepted");
+      if (result.status !== "accepted") return;
+
+      expect(result.message.payload.text).toBe("Just a regular message.");
+    });
+  });
+
+  describe("telemetry logging", () => {
+    it("logs telemetry for double-encoded structured payloads", () => {
+      const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+
+      try {
+        const inner = JSON.stringify({ text: "recovered" });
+        const doubleEncoded = JSON.stringify(inner);
+
+        const raw = makeRawMessage({
+          payload: serializedPayload(doubleEncoded, "json"),
+        });
+        normalizeHistoryMessage(raw, makeContext());
+
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        const message = warnSpy.mock.calls[0][0] as string;
+        expect(message).toContain("[history-hydration]");
+        expect(message).toContain("double-encoded-structured");
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it("logs telemetry for failed JSON parse", () => {
+      const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+
+      try {
+        const raw = makeRawMessage({
+          payload: serializedPayload("{broken", "json"),
+        });
+        normalizeHistoryMessage(raw, makeContext());
+
+        expect(warnSpy.mock.calls.length).toBeGreaterThanOrEqual(1);
+        const allMessages = warnSpy.mock.calls.map((c) => c[0] as string).join(" ");
+        expect(allMessages).toContain("[history-hydration]");
+        expect(allMessages).toContain("json-parse-failed");
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it("does not log telemetry for normal payloads", () => {
+      const warnSpy = spyOn(console, "warn").mockImplementation(() => {});
+
+      try {
+        const raw = makeRawMessage({
+          payload: structuredPayload("Normal message"),
+        });
+        normalizeHistoryMessage(raw, makeContext());
+
+        expect(warnSpy).not.toHaveBeenCalled();
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+  });
+
+  describe("end-to-end legacy payload hydration", () => {
+    it("hydrates a mix of legacy and current payloads in one chunk", () => {
+      const doubleEncodedInner = JSON.stringify({ text: "Legacy structured" });
+      const doubleEncoded = JSON.stringify(doubleEncodedInner);
+
+      const input: ApplyHydratedHistoryChunkInput = {
+        existingMessages: [],
+        incomingRawMessages: [
+          makeRawMessage({
+            id: "current-msg",
+            role: "user",
+            createdAt: "2026-01-15T10:00:00.000Z",
+            payload: structuredPayload("Current format"),
+          }),
+          makeRawMessage({
+            id: "legacy-escaped",
+            role: "assistant",
+            createdAt: "2026-01-15T10:00:01.000Z",
+            payload: serializedPayload("Legacy\\nescaped\\tcontent", "json-escaped"),
+          }),
+          makeRawMessage({
+            id: "legacy-double",
+            role: "assistant",
+            createdAt: "2026-01-15T10:00:02.000Z",
+            payload: serializedPayload(doubleEncoded, "json"),
+          }),
+          makeRawMessage({
+            id: "legacy-plain",
+            role: "user",
+            createdAt: "2026-01-15T10:00:03.000Z",
+            payload: serializedPayload("Plain text message", "plain-text"),
+          }),
+        ],
+        hydrationState: createHydrationState(),
+        normalizer: historyPayloadNormalizer,
+      };
+
+      const result = applyHydratedHistoryChunk(input);
+
+      expect(result.messages).toHaveLength(4);
+      expect(result.dropped).toHaveLength(0);
+
+      // Current format
+      expect(result.messages[0].content).toBe("Current format");
+
+      // Legacy escaped
+      expect(result.messages[1].content).toBe("Legacy\nescaped\tcontent");
+
+      // Legacy double-encoded structured
+      expect(result.messages[2].content).toBe("Legacy structured");
+
+      // Legacy plain text
+      expect(result.messages[3].content).toBe("Plain text message");
+    });
+
+    it("gracefully handles malformed entries mixed with valid ones", () => {
+      const input: ApplyHydratedHistoryChunkInput = {
+        existingMessages: [],
+        incomingRawMessages: [
+          makeRawMessage({
+            id: "valid-1",
+            role: "user",
+            createdAt: "2026-01-15T10:00:00.000Z",
+            payload: structuredPayload("Valid message"),
+          }),
+          makeRawMessage({
+            id: "malformed-1",
+            role: "assistant",
+            createdAt: "2026-01-15T10:00:01.000Z",
+            payload: serializedPayload("{truncated json", "json"),
+          }),
+          makeRawMessage({
+            id: "valid-2",
+            role: "assistant",
+            createdAt: "2026-01-15T10:00:02.000Z",
+            payload: serializedPayload("Normal response", "plain-text"),
+          }),
+        ],
+        hydrationState: createHydrationState(),
+        normalizer: historyPayloadNormalizer,
+      };
+
+      const result = applyHydratedHistoryChunk(input);
+
+      // Malformed entry dropped, valid entries preserved
+      expect(result.messages).toHaveLength(2);
+      expect(result.messages[0].id).toBe("valid-1");
+      expect(result.messages[1].id).toBe("valid-2");
+      expect(result.dropped).toHaveLength(1);
+    });
+
+    it("does not crash on deeply nested double-encoding", () => {
+      // Triple-encoded: JSON.stringify(JSON.stringify(JSON.stringify("text")))
+      const tripleEncoded = JSON.stringify(JSON.stringify(JSON.stringify("deep text")));
+
+      const raw = makeRawMessage({
+        payload: serializedPayload(tripleEncoded, "json"),
+      });
+      const result = normalizeHistoryMessage(raw, makeContext());
+
+      // Should not crash — accepts as double-encoded string (inner is a JSON string, not structured)
+      expect(result.status).toBe("accepted");
+      if (result.status !== "accepted") return;
+
+      // The first JSON.parse yields a string containing escaped quotes.
+      // tryRecoverDoubleEncodedStructured sees it doesn't start with { so skips.
+      // decodeEscapedText then decodes \" → " in the first-parse result.
+      // First parse result: "\"deep text\"" → after decode: ""deep text""
+      // This is conservative — no multi-pass decode, just one level of unwrap.
+      expect(typeof result.message.payload.text).toBe("string");
+      expect(result.message.payload.text).toContain("deep text");
+    });
+  });
+
+  describe("backward compatibility with current daemon sessions", () => {
+    it("handles standard structured payload unchanged", () => {
+      const raw = makeRawMessage({
+        payload: structuredPayload("Standard message", [
+          { type: "text", text: "Standard message" },
+        ]),
+      });
+      const result = normalizeHistoryMessage(raw, makeContext());
+
+      expect(result.status).toBe("accepted");
+      if (result.status !== "accepted") return;
+
+      expect(result.message.payload.text).toBe("Standard message");
+      expect(result.message.payload.blocks).toEqual([
+        { type: "text", text: "Standard message" },
+      ]);
+    });
+
+    it("handles standard JSON serialized payload unchanged", () => {
+      const jsonValue = JSON.stringify({
+        text: "JSON message",
+        blocks: [{ type: "text", text: "JSON message" }],
+      });
+      const raw = makeRawMessage({
+        payload: serializedPayload(jsonValue, "json"),
+      });
+      const result = normalizeHistoryMessage(raw, makeContext());
+
+      expect(result.status).toBe("accepted");
+      if (result.status !== "accepted") return;
+
+      expect(result.message.payload.text).toBe("JSON message");
+    });
+
+    it("handles standard plain-text payload unchanged", () => {
+      const raw = makeRawMessage({
+        payload: serializedPayload("Hello world", "plain-text"),
+      });
+      const result = normalizeHistoryMessage(raw, makeContext());
+
+      expect(result.status).toBe("accepted");
+      if (result.status !== "accepted") return;
+
+      expect(result.message.payload.text).toBe("Hello world");
+    });
   });
 });
 
