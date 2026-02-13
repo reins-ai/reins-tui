@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 
 import type { ProviderConnectionState } from "../providers/connect-service";
 import { useThemeTokens } from "../theme";
-import { Box, Text, useKeyboard } from "../ui";
+import { Box, ScrollBox, Text, useKeyboard } from "../ui";
 import { ModalPanel } from "./modal-panel";
 
 // --- Pure utility (kept for backward compatibility) ---
@@ -232,9 +232,12 @@ export function ModelSelectorModal({
     <ModalPanel
       visible={visible}
       title="Select Model"
+      hint={hasSelectableModels ? "↑↓ navigate · Enter select · Esc close" : "Esc close"}
+      width={88}
+      height={26}
       onClose={onClose}
     >
-      <Box style={{ flexDirection: "column" }}>
+      <Box style={{ flexDirection: "column", flexGrow: 1, minHeight: 0 }}>
         {items.length === 0 ? (
           <Box style={{ flexDirection: "column" }}>
             <Text
@@ -247,100 +250,93 @@ export function ModelSelectorModal({
             />
           </Box>
         ) : (
-          items.map((item, index) => {
-            if (item.type === "provider-header") {
-              const statusIcon = item.disabled ? "○" : "●";
-              const statusColor = item.disabled
-                ? tokens["text.muted"]
-                : tokens["status.success"];
+          <ScrollBox style={{ flexDirection: "column", flexGrow: 1 }}>
+            {items.map((item, index) => {
+              if (item.type === "provider-header") {
+                const statusIcon = item.disabled ? "○" : "●";
+                const statusColor = item.disabled
+                  ? tokens["text.muted"]
+                  : tokens["status.success"];
+
+                return (
+                  <Box
+                    key={`provider-${item.providerId}`}
+                    style={{
+                      flexDirection: "row",
+                      marginTop: index > 0 ? 1 : 0,
+                      marginBottom: 0,
+                    }}
+                  >
+                    <Text
+                      content={statusIcon}
+                      style={{ color: statusColor }}
+                    />
+                    <Text content=" " />
+                    <Text
+                      content={item.providerName}
+                      style={{
+                        color: item.disabled
+                          ? tokens["text.muted"]
+                          : tokens["accent.primary"],
+                      }}
+                    />
+                  </Box>
+                );
+              }
+
+              if (item.type === "connect-hint") {
+                return (
+                  <Box
+                    key={`hint-${item.providerId}`}
+                    style={{ flexDirection: "row", paddingLeft: 3 }}
+                  >
+                    <Text
+                      content="Connect with /connect"
+                      style={{ color: tokens["text.muted"] }}
+                    />
+                  </Box>
+                );
+              }
+
+              const isHighlighted = index === highlightedItemIndex;
+              const isCurrentModel = item.modelId === currentModel;
+              const displayName = formatModelDisplayName(item.modelId ?? "");
+              const prefix = isCurrentModel ? "* " : "  ";
 
               return (
                 <Box
-                  key={`provider-${item.providerId}`}
+                  key={`model-${item.providerId}-${item.modelId}`}
                   style={{
                     flexDirection: "row",
-                    marginTop: index > 0 ? 1 : 0,
-                    marginBottom: 0,
+                    paddingLeft: 2,
+                    backgroundColor: isHighlighted
+                      ? tokens["surface.elevated"]
+                      : undefined,
                   }}
                 >
                   <Text
-                    content={statusIcon}
-                    style={{ color: statusColor }}
-                  />
-                  <Text content=" " />
-                  <Text
-                    content={item.providerName}
+                    content={prefix}
                     style={{
-                      color: item.disabled
-                        ? tokens["text.muted"]
-                        : tokens["accent.primary"],
+                      color: isCurrentModel
+                        ? tokens["accent.primary"]
+                        : tokens["text.muted"],
+                    }}
+                  />
+                  <Text
+                    content={isHighlighted ? `▸ ${displayName}` : displayName}
+                    style={{
+                      color: isHighlighted
+                        ? tokens["accent.primary"]
+                        : isCurrentModel
+                          ? tokens["text.primary"]
+                          : tokens["text.secondary"],
                     }}
                   />
                 </Box>
               );
-            }
-
-            if (item.type === "connect-hint") {
-              return (
-                <Box
-                  key={`hint-${item.providerId}`}
-                  style={{ flexDirection: "row", paddingLeft: 3 }}
-                >
-                  <Text
-                    content="Connect with /connect"
-                    style={{ color: tokens["text.muted"] }}
-                  />
-                </Box>
-              );
-            }
-
-            // Model item
-            const isHighlighted = index === highlightedItemIndex;
-            const isCurrentModel = item.modelId === currentModel;
-            const displayName = formatModelDisplayName(item.modelId ?? "");
-            const prefix = isCurrentModel ? "✦ " : "  ";
-
-            return (
-              <Box
-                key={`model-${item.providerId}-${item.modelId}`}
-                style={{
-                  flexDirection: "row",
-                  paddingLeft: 2,
-                  backgroundColor: isHighlighted
-                    ? tokens["surface.elevated"]
-                    : undefined,
-                }}
-              >
-                <Text
-                  content={prefix}
-                  style={{
-                    color: isCurrentModel
-                      ? tokens["accent.primary"]
-                      : tokens["text.muted"],
-                  }}
-                />
-                <Text
-                  content={isHighlighted ? `▸ ${displayName}` : displayName}
-                  style={{
-                    color: isHighlighted
-                      ? tokens["accent.primary"]
-                      : isCurrentModel
-                        ? tokens["text.primary"]
-                        : tokens["text.secondary"],
-                  }}
-                />
-              </Box>
-            );
-          })
+            })}
+          </ScrollBox>
         )}
-
-        {/* Footer hints */}
-        <Box style={{ flexDirection: "row", marginTop: 1 }}>
-          <Text
-            content={hasSelectableModels ? "↑↓ navigate  Enter select  Esc close" : "Esc close"}
-            style={{ color: tokens["text.muted"] }}
-          />
-        </Box>
       </Box>
     </ModalPanel>
   );

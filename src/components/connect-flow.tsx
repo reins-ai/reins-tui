@@ -11,7 +11,8 @@ import type {
   ProviderMode,
 } from "../providers/connect-service";
 import { useThemeTokens } from "../theme";
-import { Box, Text, Input, useKeyboard } from "../ui";
+import { Box, Text, Input, ScrollBox, useKeyboard } from "../ui";
+import { ModalPanel } from "./modal-panel";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -449,38 +450,27 @@ interface OverlayFrameProps {
 
 function OverlayFrame({ title, hint, tokens, children }: OverlayFrameProps) {
   return (
-    <Box
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        width: "100%",
-        height: "100%",
-        backgroundColor: tokens["surface.primary"],
-        flexDirection: "column",
-        paddingTop: 2,
-        paddingLeft: 4,
-        paddingRight: 4,
-      }}
+    <ModalPanel
+      visible
+      title={title}
+      hint={hint}
+      width={96}
+      height={24}
+      closeOnEscape={false}
+      onClose={() => {}}
     >
-      <Box
-        style={{
-          border: true,
-          borderColor: tokens["border.focus"],
-          backgroundColor: tokens["surface.secondary"],
-          padding: 1,
-          flexDirection: "column",
-        }}
-      >
-        <Box style={{ flexDirection: "row", marginBottom: 1 }}>
-          <Text content={`◆ ${title}`} style={{ color: tokens["accent.primary"] }} />
-        </Box>
-        {children}
-        <Box style={{ marginTop: 1 }}>
-          <Text content={hint} style={{ color: tokens["text.muted"] }} />
-        </Box>
+      <Box style={{ flexDirection: "column", flexGrow: 1, minHeight: 0 }}>
+        <ScrollBox
+          style={{
+            flexDirection: "column",
+            flexGrow: 1,
+            backgroundColor: tokens["surface.secondary"],
+          }}
+        >
+          {children}
+        </ScrollBox>
       </Box>
-    </Box>
+    </ModalPanel>
   );
 }
 
@@ -810,7 +800,7 @@ function SuccessStep({ state, tokens }: { state: ConnectState; tokens: Record<st
   return (
     <OverlayFrame title="Connected!" hint="Press any key to continue" tokens={tokens}>
       <Box style={{ flexDirection: "row" }}>
-        <Text content="✦ " style={{ color: tokens["status.success"] }} />
+        <Text content="* " style={{ color: tokens["status.success"] }} />
         <Text content={`${providerName} connected${authLabel}`} style={{ color: tokens["text.primary"] }} />
       </Box>
       <Box style={{ flexDirection: "row", marginTop: 1 }}>
@@ -831,7 +821,7 @@ function ErrorStep({ state, tokens }: { state: ConnectState; tokens: Record<stri
       tokens={tokens}
     >
       <Box style={{ flexDirection: "row" }}>
-        <Text content="✧ " style={{ color: tokens["status.error"] }} />
+        <Text content="x " style={{ color: tokens["status.error"] }} />
         <Text content={errorMessage} style={{ color: tokens["text.primary"] }} />
       </Box>
       {state.error?.retryable ? (

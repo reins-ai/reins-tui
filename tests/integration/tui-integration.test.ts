@@ -69,8 +69,6 @@ import {
   GLYPH_REINS,
   GLYPH_USER,
   GLYPH_TOOL_DONE,
-  GLYPH_TOOL_ERROR,
-  GLYPH_TOOL_RUNNING,
 } from "../../src/components/message";
 import {
   getToolBlockStyle,
@@ -78,7 +76,7 @@ import {
   formatToolBlockArgs,
   formatToolBlockDetail,
 } from "../../src/components/tool-inline";
-import { ACCENT_BORDER_CHARS, SUBTLE_BORDER_CHARS } from "../../src/ui/primitives";
+import { SUBTLE_BORDER_CHARS } from "../../src/ui/primitives";
 import {
   validateThemeTokens,
 } from "../../src/theme/theme-schema";
@@ -896,8 +894,8 @@ describe("Message block style consistency regression", () => {
     });
   }
 
-  test("border chars: assistant uses accent, others use subtle", () => {
-    expect(getMessageBorderChars("assistant")).toBe(ACCENT_BORDER_CHARS);
+  test("border chars: all roles use subtle framing", () => {
+    expect(getMessageBorderChars("assistant")).toBe(SUBTLE_BORDER_CHARS);
     expect(getMessageBorderChars("user")).toBe(SUBTLE_BORDER_CHARS);
     expect(getMessageBorderChars("system")).toBe(SUBTLE_BORDER_CHARS);
     expect(getMessageBorderChars("tool")).toBe(SUBTLE_BORDER_CHARS);

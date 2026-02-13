@@ -310,7 +310,7 @@ describe("Tool Expand/Collapse Integration", () => {
     expect(visualStates[2].expanded).toBe(false);
   });
 
-  test("shouldRenderToolBlocks identifies tool-role messages", () => {
+  test("shouldRenderToolBlocks identifies messages with tool calls", () => {
     const toolMsg = createMessage({
       id: "t1",
       role: "tool" as DisplayMessage["role"],
@@ -324,7 +324,7 @@ describe("Tool Expand/Collapse Integration", () => {
       content: "text",
       toolCalls: [{ id: "tc2", name: "bash", status: "complete" }],
     });
-    expect(shouldRenderToolBlocks(assistantMsg)).toBe(false);
+    expect(shouldRenderToolBlocks(assistantMsg)).toBe(true);
 
     const noToolsMsg = createMessage({ id: "a2", role: "assistant", content: "text" });
     expect(shouldRenderToolBlocks(noToolsMsg)).toBe(false);

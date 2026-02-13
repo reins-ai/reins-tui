@@ -16,7 +16,8 @@ import {
 import { rankSearchResults, RecencyTracker, type RankedSearchResult } from "../palette/ranking";
 import { SLASH_COMMANDS } from "../commands/registry";
 import { useThemeTokens } from "../theme";
-import { Box, Input, Text, useKeyboard } from "../ui";
+import { Box, Input, ScrollBox, Text, useKeyboard, useTerminalDimensions } from "../ui";
+import { ModalPanel } from "./modal-panel";
 
 export interface CommandPaletteDataSources {
   readonly conversations?: readonly ConversationSearchSource[];
@@ -39,9 +40,9 @@ const CATEGORY_LABELS: Readonly<Record<SearchCategory, string>> = {
 
 const CATEGORY_GLYPHS: Readonly<Record<SearchCategory, string>> = {
   command: "/",
-  action: "⚡",
+  action: "*",
   conversation: "◇",
-  note: "📝",
+  note: "N",
 };
 
 const CATEGORY_DISPLAY_ORDER: readonly SearchCategory[] = [
@@ -208,17 +209,61 @@ function HighlightedText({ text, ranges, matchedField, highlightColor, baseColor
   );
 }
 
+function truncateWithEllipsis(value: string, maxLength: number): string {
+  if (maxLength <= 0 || value.length <= maxLength) {
+    return value;
+  }
+
+  if (maxLength === 1) {
+    return "…";
+  }
+
+  return `${value.slice(0, maxLength - 1)}…`;
+}
+
+function clampRanges(ranges: readonly HighlightRange[], visibleLength: number): HighlightRange[] {
+  if (visibleLength <= 0) {
+    return [];
+  }
+
+  const clamped: HighlightRange[] = [];
+  for (const range of ranges) {
+    const start = Math.max(0, Math.min(range.start, visibleLength));
+    const end = Math.max(start, Math.min(range.end, visibleLength));
+    if (start < end) {
+      clamped.push({ start, end });
+    }
+  }
+
+  return clamped;
+}
+
 interface PaletteResultRowProps {
   result: RankedSearchResult<PaletteAction>;
   isSelected: boolean;
   categoryGlyph: string;
+  labelMaxChars: number;
+  descriptionMaxChars: number;
+  shortcutMaxChars: number;
   tokens: Record<string, string>;
 }
 
-function PaletteResultRow({ result, isSelected, categoryGlyph, tokens }: PaletteResultRowProps) {
+function PaletteResultRow({
+  result,
+  isSelected,
+  categoryGlyph,
+  labelMaxChars,
+  descriptionMaxChars,
+  shortcutMaxChars,
+  tokens,
+}: PaletteResultRowProps) {
   const bgColor = isSelected ? tokens["surface.elevated"] : "transparent";
   const highlightColor = tokens["accent.primary"];
   const shortcutHint = resolveShortcutHint(result.item.action);
+  const displayLabel = truncateWithEllipsis(result.item.label, labelMaxChars);
+  const labelVisibleLength = displayLabel.endsWith("…") ? displayLabel.length - 1 : displayLabel.length;
+  const displayDescription = truncateWithEllipsis(result.item.description, descriptionMaxChars);
+  const displayShortcut = shortcutHint ? truncateWithEllipsis(shortcutHint, shortcutMaxChars) : null;
 
   return (
     <Box
@@ -232,15 +277,15 @@ function PaletteResultRow({ result, isSelected, categoryGlyph, tokens }: Palette
       <Text content={isSelected ? "▸ " : "  "} style={{ color: tokens["accent.primary"] }} />
       <Text content={`${categoryGlyph} `} style={{ color: tokens["text.secondary"] }} />
       <HighlightedText
-        text={result.item.label}
-        ranges={result.ranges}
+        text={displayLabel}
+        ranges={clampRanges(result.ranges, labelVisibleLength)}
         matchedField={result.matchedField}
         highlightColor={highlightColor}
         baseColor={tokens["text.primary"]}
       />
-      <Text content={`  ${result.item.description}`} style={{ color: tokens["text.muted"] }} />
-      {shortcutHint ? (
-        <Text content={`  ${shortcutHint}`} style={{ color: tokens["text.secondary"] }} />
+      <Text content={`  ${displayDescription}`} style={{ color: tokens["text.muted"] }} />
+      {displayShortcut ? (
+        <Text content={`  ${displayShortcut}`} style={{ color: tokens["text.secondary"] }} />
       ) : null}
     </Box>
   );
@@ -298,6 +343,7 @@ const sessionRecencyTracker = new RecencyTracker();
 
 export function CommandPalette({ isOpen, sources, onClose, onExecute }: CommandPaletteProps) {
   const { tokens } = useThemeTokens();
+  const terminalDimensions = useTerminalDimensions() as { width?: number };
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
 
@@ -319,6 +365,12 @@ export function CommandPalette({ isOpen, sources, onClose, onExecute }: CommandP
   );
 
   const totalResults = flatResults.length;
+  const terminalWidth = typeof terminalDimensions.width === "number" ? terminalDimensions.width : 120;
+  const panelWidth = Math.max(48, Math.min(108, terminalWidth - 4));
+  const contentWidth = Math.max(32, panelWidth - 8);
+  const labelMaxChars = Math.max(12, Math.floor(contentWidth * 0.4));
+  const descriptionMaxChars = Math.max(10, Math.floor(contentWidth * 0.34));
+  const shortcutMaxChars = Math.max(6, Math.floor(contentWidth * 0.16));
 
   useEffect(() => {
     if (!isOpen) {
@@ -388,56 +440,32 @@ export function CommandPalette({ isOpen, sources, onClose, onExecute }: CommandP
   let flatIndex = 0;
 
   return (
-    <Box
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        width: "100%",
-        height: "100%",
-        backgroundColor: tokens["surface.primary"],
-        flexDirection: "column",
-        paddingTop: 2,
-        paddingLeft: 4,
-        paddingRight: 4,
-      }}
+    <ModalPanel
+      visible={isOpen}
+      title="Command Palette"
+      hint="Esc close · ↑↓ navigate · Enter select"
+      onClose={onClose}
+      width={108}
+      height={30}
     >
-      <Box
-        style={{
-          border: true,
-          borderColor: tokens["border.focus"],
-          backgroundColor: tokens["surface.secondary"],
-          padding: 1,
-          flexDirection: "column",
+      <Input
+        focused
+        placeholder="Search commands, conversations, notes..."
+        value={query}
+        onInput={(value) => {
+          setQuery(extractInputValue(value));
+          setSelectedIndex(0);
         }}
-      >
-        <Box style={{ flexDirection: "row", marginBottom: 1 }}>
-          <Text content="🔮 " />
-          <Text content="Command Palette" style={{ color: tokens["text.primary"] }} />
-          <Text content="  Esc close · ↑↓ navigate · Enter select" style={{ color: tokens["text.muted"] }} />
-        </Box>
+      />
 
-        <Input
-          focused
-          placeholder="Search commands, conversations, notes..."
-          value={query}
-          onInput={(value) => {
-            setQuery(extractInputValue(value));
-            setSelectedIndex(0);
-          }}
-        />
-
-        <Box style={{ marginTop: 1, flexDirection: "column" }}>
-          {totalResults === 0 ? (
-            <EmptyState query={query} tokens={tokens} />
-          ) : (
-            categoryGroups.map((group) => (
+      <Box style={{ marginTop: 1, flexDirection: "column", flexGrow: 1, minHeight: 0 }}>
+        {totalResults === 0 ? (
+          <EmptyState query={query} tokens={tokens} />
+        ) : (
+          <ScrollBox style={{ flexDirection: "column", flexGrow: 1 }}>
+            {categoryGroups.map((group) => (
               <Box key={group.category} style={{ flexDirection: "column" }}>
-                <CategoryHeader
-                  label={group.label}
-                  glyph={group.glyph}
-                  tokens={tokens}
-                />
+                <CategoryHeader label={group.label} glyph={group.glyph} tokens={tokens} />
                 {group.results.map((result) => {
                   const currentFlatIndex = flatIndex;
                   flatIndex += 1;
@@ -447,22 +475,25 @@ export function CommandPalette({ isOpen, sources, onClose, onExecute }: CommandP
                       result={result}
                       isSelected={currentFlatIndex === selectedIndex}
                       categoryGlyph={group.glyph}
+                      labelMaxChars={labelMaxChars}
+                      descriptionMaxChars={descriptionMaxChars}
+                      shortcutMaxChars={shortcutMaxChars}
                       tokens={tokens}
                     />
                   );
                 })}
               </Box>
-            ))
-          )}
-        </Box>
-
-        <Box style={{ marginTop: 1, flexDirection: "row" }}>
-          <Text
-            content={totalResults > 0 ? `${totalResults} results` : "Type to search"}
-            style={{ color: tokens["text.muted"] }}
-          />
-        </Box>
+            ))}
+          </ScrollBox>
+        )}
       </Box>
-    </Box>
+
+      <Box style={{ marginTop: 1, flexDirection: "row" }}>
+        <Text
+          content={totalResults > 0 ? `${totalResults} results` : "Type to search"}
+          style={{ color: tokens["text.muted"] }}
+        />
+      </Box>
+    </ModalPanel>
   );
 }

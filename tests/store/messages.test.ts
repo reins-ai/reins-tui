@@ -79,6 +79,38 @@ describe("appReducer message actions", () => {
     expect(next.messages[0]?.toolCalls?.[1]?.result).toBe("done");
   });
 
+  test("SET_MESSAGES preserves existing tool metadata when incoming payload omits it", () => {
+    const state = {
+      ...DEFAULT_STATE,
+      messages: [
+        createMessage({
+          id: "assistant-1",
+          content: "Original",
+          toolCalls: [{ id: "tool-1", name: "bash", status: "complete", result: "ok" }],
+          contentBlocks: [{ type: "tool-call", toolCallId: "tool-1" }],
+        }),
+      ],
+    };
+
+    const next = appReducer(state, {
+      type: "SET_MESSAGES",
+      payload: [
+        createMessage({
+          id: "assistant-1",
+          content: "Server hydrated content",
+          toolCalls: undefined,
+          contentBlocks: undefined,
+        }),
+      ],
+    });
+
+    expect(next.messages[0]?.content).toBe("Server hydrated content");
+    expect(next.messages[0]?.toolCalls).toHaveLength(1);
+    expect(next.messages[0]?.toolCalls?.[0]?.id).toBe("tool-1");
+    expect(next.messages[0]?.contentBlocks).toHaveLength(1);
+    expect(next.messages[0]?.contentBlocks?.[0]?.toolCallId).toBe("tool-1");
+  });
+
   test("FINISH_STREAMING marks message as not streaming", () => {
     const state = {
       ...DEFAULT_STATE,

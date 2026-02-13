@@ -250,13 +250,13 @@ function connectionGlyph(status: DaemonConnectionStatus): string {
 function connectionLabel(status: DaemonConnectionStatus): string {
   switch (status) {
     case "connected":
-      return "Connected";
+      return "Backend";
     case "disconnected":
-      return "Offline";
+      return "Backend Offline";
     case "connecting":
-      return "Connecting...";
+      return "Backend Connecting...";
     case "reconnecting":
-      return "Reconnecting...";
+      return "Backend Reconnecting...";
   }
 }
 
@@ -380,9 +380,32 @@ export function deriveStatusSegments(sources: StatusSegmentSources): StatusSegme
       case "connection":
         return buildSegment(id, connGlyph, `${connGlyph} ${connLabel}`, connColor);
       case "model":
-        return buildSegment(id, "", sources.currentModel, "text.secondary");
-      case "lifecycle":
+        // Model segment removed - return empty segment that will be filtered out
+        return buildSegment(id, "", "", "text.secondary");
+      case "lifecycle": {
+        // Show lifecycle segment for warnings/errors or active states
+        const showLifecycle = 
+          sources.connectionStatus !== "connected" || // Show connection issues
+          sources.lifecycleStatus === "error" ||      // Show errors
+          sources.lifecycleStatus === "sending" ||    // Show active states
+          sources.lifecycleStatus === "thinking" ||
+          sources.lifecycleStatus === "streaming" ||
+          sources.compactionActive;                   // Show compaction notice
+        
+        if (!showLifecycle) {
+          return buildSegment(id, "", "", lc.colorToken);
+        }
+        
+        // For connection issues, show connection-specific message
+        if (sources.connectionStatus !== "connected") {
+          const connMsg = sources.connectionStatus === "disconnected" 
+            ? "Cannot reach backend"
+            : `Backend ${sources.connectionStatus}...`;
+          return buildSegment(id, "⚠", `⚠ ${connMsg}`, connectionColorToken(sources.connectionStatus));
+        }
+        
         return buildSegment(id, lc.glyph, `${lc.glyph} ${lc.label}`, lc.colorToken);
+      }
       case "hints":
         return buildSegment(id, "", "Ctrl+K palette · Ctrl+M model · Ctrl+1 context", "text.muted");
     }
@@ -413,6 +436,11 @@ export function resolveSegmentVisibility(
   let usedWidth = PADDING;
 
   for (const segment of sorted) {
+    // Skip empty segments
+    if (segment.content.trim().length === 0) {
+      continue;
+    }
+    
     const segmentWidth = segment.content.length;
     const separatorCost = visibleSegments.length > 0 ? SEPARATOR_WIDTH : 0;
     const needed = usedWidth + separatorCost + segmentWidth;

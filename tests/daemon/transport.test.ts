@@ -130,6 +130,14 @@ async function collectStream(stream: AsyncIterable<{ type: string; delta?: strin
   return events;
 }
 
+async function collectEventTypes(stream: AsyncIterable<{ type: string }>): Promise<string[]> {
+  const events: string[] = [];
+  for await (const event of stream) {
+    events.push(event.type);
+  }
+  return events;
+}
+
 async function waitFor(predicate: () => boolean, timeoutMs = 300, intervalMs = 5): Promise<void> {
   const start = Date.now();
   while (!predicate()) {
@@ -290,6 +298,82 @@ describe("daemon ws transport", () => {
     const chunks = await collectStream(streamResult.value);
     expect(chunks).toEqual(["hello", "hello"]);
     expect(heartbeatTimestamp).toBe("2026-01-01T00:00:00.000Z");
+  });
+
+  test("maps daemon tool_call_start/tool_call_end events into daemon stream events", async () => {
+    FakeWebSocket.reset();
+
+    const transport = new DaemonWsTransport({
+      baseUrl: "ws://localhost:7433",
+      connectTimeoutMs: 100,
+      webSocketFactory: (url) => new FakeWebSocket(url),
+    });
+
+    const connected = await transport.connect();
+    expect(connected.ok).toBe(true);
+
+    const streamResult = await transport.streamResponse({
+      conversationId: "c1",
+      assistantMessageId: "a1",
+    });
+    expect(streamResult.ok).toBe(true);
+    if (!streamResult.ok) {
+      throw new Error("Expected streamResponse to succeed");
+    }
+
+    const socket = FakeWebSocket.instances[0];
+
+    socket?.serverMessage({
+      type: "stream-event",
+      event: {
+        type: "start",
+        conversationId: "c1",
+        messageId: "a1",
+        timestamp: "2026-01-01T00:00:01.000Z",
+      },
+    });
+    socket?.serverMessage({
+      type: "stream-event",
+      event: {
+        type: "tool_call_start",
+        conversationId: "c1",
+        messageId: "a1",
+        tool_use_id: "tool-1",
+        name: "bash",
+        input: { command: "pwd" },
+        timestamp: "2026-01-01T00:00:02.000Z",
+      },
+    });
+    socket?.serverMessage({
+      type: "stream-event",
+      event: {
+        type: "tool_call_end",
+        conversationId: "c1",
+        messageId: "a1",
+        tool_use_id: "tool-1",
+        result_summary: "Listed directory",
+        result: {
+          callId: "tool-1",
+          name: "bash",
+          result: { cwd: "/tmp" },
+          error: undefined,
+        },
+        timestamp: "2026-01-01T00:00:03.000Z",
+      },
+    });
+    socket?.serverMessage({
+      type: "stream-event",
+      event: {
+        type: "complete",
+        conversationId: "c1",
+        messageId: "a1",
+        content: "done",
+        timestamp: "2026-01-01T00:00:04.000Z",
+      },
+    });
+
+    const eventTypes = await collectEventTypes(streamResult.value);
+    expect(eventTypes).toEqual(["start", "tool-call-start", "tool-call-complete", "complete"]);
   });
 });
 

@@ -65,13 +65,38 @@ export function Box({ children, ...props }: BoxProps): ReactElement {
 }
 
 export function Text({ content, children, variant, ...props }: TextProps): ReactElement {
+  const resolveTextStyle = (style: Style | undefined, resolvedColor?: string): Style | undefined => {
+    if (!style && resolvedColor === undefined) {
+      return style;
+    }
+
+    const mappedStyle: Style & { fg?: string; bg?: string } = {
+      ...(style ?? {}),
+    };
+
+    const color = resolvedColor ?? style?.color;
+    if (color !== undefined) {
+      mappedStyle.fg = color;
+      delete mappedStyle.color;
+    }
+
+    if (style?.backgroundColor !== undefined) {
+      mappedStyle.bg = style.backgroundColor;
+      delete mappedStyle.backgroundColor;
+    }
+
+    return mappedStyle;
+  };
+
   if (variant) {
     const { getTextVariantColor } = useThemeTokens();
     const variantColor = getTextVariantColor(variant);
-    const mergedStyle: Style = { ...props.style, color: variantColor };
+    const mergedStyle = resolveTextStyle(props.style, variantColor);
     return createElement("text", { ...props, style: mergedStyle }, content ?? children);
   }
-  return createElement("text", props, content ?? children);
+
+  const mappedStyle = resolveTextStyle(props.style);
+  return createElement("text", { ...props, style: mappedStyle }, content ?? children);
 }
 
 export function ScrollBox({ children, ...props }: ScrollBoxProps): ReactElement {
