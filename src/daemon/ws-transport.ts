@@ -1,4 +1,14 @@
-import { err, ok, type DaemonClientError, type DaemonResult, type DaemonStreamEvent, type StreamResponseRequest } from "./contracts";
+import {
+  err,
+  ok,
+  type DaemonClientError,
+  type DaemonMessage,
+  type DaemonRawHistoryMessage,
+  type DaemonRawHistoryPayload,
+  type DaemonResult,
+  type DaemonStreamEvent,
+  type StreamResponseRequest,
+} from "./contracts";
 
 interface WebSocketMessageLike {
   data: string | ArrayBuffer | ArrayBufferView;
@@ -376,6 +386,94 @@ export class DaemonWsTransport {
       return { type: "delta", conversationId, messageId, delta, timestamp };
     }
 
+    if (type === "tool-call-start" || type === "tool_call_start" || type === "tool-start" || type === "tool_start") {
+      const toolCallRecord = this.isRecord(event.toolCall) ? event.toolCall : undefined;
+      const toolCallId = typeof event.toolCallId === "string"
+        ? event.toolCallId
+        : typeof event.tool_use_id === "string"
+          ? event.tool_use_id
+          : typeof event.id === "string"
+            ? event.id
+            : toolCallRecord && typeof toolCallRecord.id === "string"
+              ? toolCallRecord.id
+              : undefined;
+      const name = typeof event.name === "string"
+        ? event.name
+        : typeof event.toolName === "string"
+          ? event.toolName
+          : toolCallRecord && typeof toolCallRecord.name === "string"
+            ? toolCallRecord.name
+            : undefined;
+      const args = this.isRecord(event.args)
+        ? event.args
+        : this.isRecord(event.input)
+          ? event.input
+          : toolCallRecord && this.isRecord(toolCallRecord.arguments)
+            ? toolCallRecord.arguments
+          : undefined;
+
+      if (!toolCallId || !name) {
+        return null;
+      }
+
+      return {
+        type: "tool-call-start",
+        conversationId,
+        messageId,
+        toolCallId,
+        name,
+        args,
+        timestamp,
+      };
+    }
+
+    if (
+      type === "tool-call-complete"
+      || type === "tool_call_complete"
+      || type === "tool_call_end"
+      || type === "tool-complete"
+      || type === "tool_result"
+    ) {
+      const resultRecord = this.isRecord(event.result) ? event.result : undefined;
+      const toolCallId = typeof event.toolCallId === "string"
+        ? event.toolCallId
+        : typeof event.tool_use_id === "string"
+          ? event.tool_use_id
+          : typeof event.id === "string"
+            ? event.id
+            : resultRecord && typeof resultRecord.callId === "string"
+              ? resultRecord.callId
+              : undefined;
+      const result = typeof event.result === "string"
+        ? event.result
+        : typeof event.output === "string"
+          ? event.output
+          : typeof event.result_summary === "string"
+            ? event.result_summary
+            : this.stringifyUnknown(resultRecord?.result);
+      const error = typeof event.error === "string"
+        ? event.error
+        : this.isRecord(event.error) && typeof event.error.message === "string"
+          ? event.error.message
+          : resultRecord && typeof resultRecord.error === "string"
+            ? resultRecord.error
+            : undefined;
+
+      if (!toolCallId) {
+        return null;
+      }
+
+      return {
+        type: "tool-call-complete",
+        conversationId,
+        messageId,
+        toolCallId,
+        result,
+        error,
+        timestamp,
+      };
+    }
+
     if (type === "complete" || type === "message_complete") {
       const content = typeof event.content === "string" ? event.content : "";
       return { type: "complete", conversationId, messageId, content, timestamp };
@@ -409,6 +507,26 @@ export class DaemonWsTransport {
     return null;
   }
 
+  private isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === "object";
+  }
+
+  private stringifyUnknown(value: unknown): string | undefined {
+    if (value === undefined) {
+      return undefined;
+    }
+
+    if (typeof value === "string") {
+      return value;
+    }
+
+    try {
+      return JSON.stringify(value);
+    } catch {
+      return String(value);
+    }
+  }
+
   private toDaemonErrorCode(value: unknown): DaemonClientError["code"] {
     if (value === "DAEMON_UNAVAILABLE" ||
       value === "DAEMON_DISCONNECTED" ||
@@ -436,6 +554,99 @@ export class DaemonWsTransport {
     return Boolean(payload && typeof payload === "object" && (payload as { type?: unknown }).type === "heartbeat");
   }
 }
+
+// ---------------------------------------------------------------------------
+// History mapping — convert DaemonMessage[] to DaemonRawHistoryMessage[]
+// ---------------------------------------------------------------------------
+
+/**
+ * Classify a DaemonMessage content string into the appropriate raw history
+ * payload variant. The content may be:
+ *
+ * 1. A JSON object with text/blocks fields (structured payload serialized as string)
+ * 2. A JSON string (double-encoded text)
+ * 3. Plain text (the common case for simple messages)
+ *
+ * This function does NOT decode or normalize — it only classifies the payload
+ * so the downstream hydration pipeline can handle it uniformly.
+ */
+export function classifyHistoryPayload(content: string): DaemonRawHistoryPayload {
+  const trimmed = content.trim();
+
+  // Empty content → plain text
+  if (trimmed.length === 0) {
+    return { kind: "serialized", value: content, encoding: "plain-text" };
+  }
+
+  // Attempt JSON parse for structured payloads
+  if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+    try {
+      const parsed: unknown = JSON.parse(trimmed);
+
+      // Object with text or blocks fields → structured payload
+      if (
+        parsed !== null &&
+        typeof parsed === "object" &&
+        !Array.isArray(parsed)
+      ) {
+        const record = parsed as Record<string, unknown>;
+        if ("text" in record || "blocks" in record) {
+          return { kind: "serialized", value: trimmed, encoding: "json" };
+        }
+      }
+
+      // JSON string (double-encoded) → json encoding
+      if (typeof parsed === "string") {
+        return { kind: "serialized", value: trimmed, encoding: "json" };
+      }
+
+      // Other JSON (array, number, etc.) — treat as json-encoded
+      return { kind: "serialized", value: trimmed, encoding: "json" };
+    } catch {
+      // Not valid JSON — fall through to escape detection
+    }
+  }
+
+  // Detect escaped content (common in legacy payloads)
+  if (trimmed.includes("\\n") || trimmed.includes("\\t") || trimmed.includes("\\\\") || trimmed.includes('\\"')) {
+    return { kind: "serialized", value: content, encoding: "json-escaped" };
+  }
+
+  // Default: plain text
+  return { kind: "serialized", value: content, encoding: "plain-text" };
+}
+
+/**
+ * Map a single DaemonMessage (from HTTP getConversation response) into the
+ * DaemonRawHistoryMessage shape expected by the hydration pipeline.
+ *
+ * This is the transport-boundary bridge between the daemon's flat message
+ * format and the store's typed normalization input.
+ */
+export function mapDaemonMessageToRawHistory(message: DaemonMessage): DaemonRawHistoryMessage {
+  return {
+    id: message.id,
+    role: message.role,
+    createdAt: message.createdAt,
+    payload: classifyHistoryPayload(message.content),
+  };
+}
+
+/**
+ * Map an array of DaemonMessage records (from getConversation) into
+ * DaemonRawHistoryMessage[] for the hydration pipeline.
+ *
+ * This is the primary entry point for reconnect history mapping.
+ * It preserves the original message order — deterministic sorting
+ * is handled downstream by the hydration pipeline.
+ */
+export function mapConversationHistory(
+  messages: readonly DaemonMessage[],
+): DaemonRawHistoryMessage[] {
+  return messages.map(mapDaemonMessageToRawHistory);
+}
+
+// ---------------------------------------------------------------------------
 
 function normalizeWebSocketUrl(value: string): string {
   const trimmed = value.trim();
