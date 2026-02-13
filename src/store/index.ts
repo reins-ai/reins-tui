@@ -10,6 +10,13 @@ import {
   type LayoutAction,
 } from "../state/layout-mode";
 import type { StreamToolCall, TurnContentBlock } from "../state/streaming-state";
+import type {
+  DaemonHydratedHistoryMessage,
+  DaemonHistoryNormalizationContext,
+  DaemonHistoryNormalizationResult,
+  DaemonHistoryPayloadNormalizer,
+  DaemonRawHistoryMessage,
+} from "../daemon/contracts";
 import type { AppState, DisplayContentBlock, DisplayMessage, DisplayToolCall, DisplayToolCallStatus, FocusedPanel } from "./types";
 import { DEFAULT_STATE } from "./types";
 
@@ -96,6 +103,63 @@ export type AppAction =
   | LayoutModeAction
   | LayoutAction;
 
+/**
+ * Deterministic ordering key for hydrated history merges.
+ * timestampMs is primary ordering and fallbackIndex breaks ties.
+ */
+export interface HistoryOrderingKey {
+  timestampMs: number;
+  fallbackIndex: number;
+}
+
+/**
+ * Mutable hydration state used while applying reconnect chunks.
+ * seenMessageIds enables idempotent merges when duplicate chunks arrive.
+ */
+export interface HistoryHydrationState {
+  seenMessageIds: Set<string>;
+  nextFallbackIndex: number;
+}
+
+export interface NormalizeHistoryMessageInput {
+  rawMessage: DaemonRawHistoryMessage;
+  source: DaemonHistoryNormalizationContext["source"];
+  fallbackIndex: number;
+  seenMessageIds: ReadonlySet<string>;
+}
+
+export type NormalizeHistoryMessage = (
+  input: NormalizeHistoryMessageInput,
+  normalizer: DaemonHistoryPayloadNormalizer,
+) => DaemonHistoryNormalizationResult;
+
+export type SortHydratedHistoryMessages = (
+  messages: readonly DaemonHydratedHistoryMessage[],
+) => DaemonHydratedHistoryMessage[];
+
+export interface ApplyHydratedHistoryChunkInput {
+  existingMessages: readonly DisplayMessage[];
+  incomingRawMessages: readonly DaemonRawHistoryMessage[];
+  hydrationState: HistoryHydrationState;
+  normalizer: DaemonHistoryPayloadNormalizer;
+}
+
+export interface ApplyHydratedHistoryChunkResult {
+  messages: DisplayMessage[];
+  hydrationState: HistoryHydrationState;
+  accepted: DaemonHydratedHistoryMessage[];
+  dropped: Extract<DaemonHistoryNormalizationResult, { status: "dropped" }>[];
+  duplicates: Extract<DaemonHistoryNormalizationResult, { status: "duplicate" }>[];
+}
+
+/**
+ * Signature contract for the reconnect hydration path.
+ * Implementation is introduced in follow-up tasks.
+ */
+export type ApplyHydratedHistoryChunk = (
+  input: ApplyHydratedHistoryChunkInput,
+) => ApplyHydratedHistoryChunkResult;
+
 function streamToolCallsToDisplay(toolCalls: StreamToolCall[]): DisplayToolCall[] {
   return [...toolCalls]
     .sort((a, b) => a.sequenceIndex - b.sequenceIndex)
@@ -117,6 +181,161 @@ function turnBlocksToDisplay(blocks: TurnContentBlock[]): DisplayContentBlock[] 
     toolCallId: block.toolCallId,
     text: block.text,
   }));
+}
+
+function stableSerialize(value: unknown): string | null {
+  try {
+    return JSON.stringify(value, (_key, currentValue) => {
+      if (
+        typeof currentValue === "object"
+        && currentValue !== null
+        && !Array.isArray(currentValue)
+      ) {
+        const record = currentValue as Record<string, unknown>;
+        const sortedKeys = Object.keys(record).sort((a, b) => a.localeCompare(b));
+        const normalized: Record<string, unknown> = {};
+        for (const key of sortedKeys) {
+          normalized[key] = record[key];
+        }
+        return normalized;
+      }
+      return currentValue;
+    });
+  } catch {
+    return null;
+  }
+}
+
+function areArgValuesEqual(previous: unknown, next: unknown): boolean {
+  if (Object.is(previous, next)) {
+    return true;
+  }
+
+  if (
+    typeof previous === "object" && previous !== null
+    && typeof next === "object" && next !== null
+  ) {
+    const prevSerialized = stableSerialize(previous);
+    const nextSerialized = stableSerialize(next);
+    return prevSerialized !== null && nextSerialized !== null && prevSerialized === nextSerialized;
+  }
+
+  return false;
+}
+
+function areToolArgsEqual(
+  previous: Record<string, unknown> | undefined,
+  next: Record<string, unknown> | undefined,
+): boolean {
+  if (previous === next) {
+    return true;
+  }
+
+  if (!previous || !next) {
+    return previous === next;
+  }
+
+  const previousKeys = Object.keys(previous);
+  const nextKeys = Object.keys(next);
+  if (previousKeys.length !== nextKeys.length) {
+    return false;
+  }
+
+  for (const key of previousKeys) {
+    if (!(key in next)) {
+      return false;
+    }
+
+    if (!areArgValuesEqual(previous[key], next[key])) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function getCreatedAtTimestamp(value: Date | string | number): number {
+  if (value instanceof Date) {
+    return value.getTime();
+  }
+
+  return new Date(value).getTime();
+}
+
+function areDisplayToolCallsEqual(
+  previous: readonly DisplayToolCall[] | undefined,
+  next: readonly DisplayToolCall[] | undefined,
+): boolean {
+  if (previous === next) {
+    return true;
+  }
+
+  if (!previous || !next) {
+    return previous === next;
+  }
+
+  if (previous.length !== next.length) {
+    return false;
+  }
+
+  for (let index = 0; index < previous.length; index += 1) {
+    const prev = previous[index];
+    const curr = next[index];
+
+    if (
+      prev.id !== curr.id
+      || prev.name !== curr.name
+      || prev.status !== curr.status
+      || prev.result !== curr.result
+      || prev.isError !== curr.isError
+    ) {
+      return false;
+    }
+
+    if (!areToolArgsEqual(prev.args, curr.args)) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function areDisplayContentBlocksEqual(
+  previous: readonly DisplayContentBlock[] | undefined,
+  next: readonly DisplayContentBlock[] | undefined,
+): boolean {
+  if (previous === next) {
+    return true;
+  }
+
+  if (!previous || !next) {
+    return previous === next;
+  }
+
+  if (previous.length !== next.length) {
+    return false;
+  }
+
+  for (let index = 0; index < previous.length; index += 1) {
+    const prev = previous[index];
+    const curr = next[index];
+
+    if (prev.type !== curr.type || prev.toolCallId !== curr.toolCallId || prev.text !== curr.text) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function areDisplayMessagesEqual(previous: DisplayMessage, next: DisplayMessage): boolean {
+  return previous.id === next.id
+    && previous.role === next.role
+    && previous.content === next.content
+    && previous.isStreaming === next.isStreaming
+    && getCreatedAtTimestamp(previous.createdAt) === getCreatedAtTimestamp(next.createdAt)
+    && areDisplayToolCallsEqual(previous.toolCalls, next.toolCalls)
+    && areDisplayContentBlocksEqual(previous.contentBlocks, next.contentBlocks);
 }
 
 export function appReducer(state: AppState, action: AppAction): AppState {
@@ -219,10 +438,34 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         streamingMessageId: action.payload.isStreaming ? action.payload.id : state.streamingMessageId,
       };
     case "SET_MESSAGES": {
-      const streamingMessage = action.payload.find((message) => message.isStreaming);
+      const existingById = new Map(state.messages.map((message) => [message.id, message]));
+      const mergedMessages = action.payload.map((incoming) => {
+        const existing = existingById.get(incoming.id);
+        if (!existing) {
+          return incoming;
+        }
+
+        const merged = {
+          ...incoming,
+          toolCalls: incoming.toolCalls ?? existing.toolCalls,
+          contentBlocks: incoming.contentBlocks ?? existing.contentBlocks,
+          isStreaming: incoming.isStreaming ?? existing.isStreaming,
+        };
+
+        return areDisplayMessagesEqual(existing, merged) ? existing : merged;
+      });
+
+      const unchanged = mergedMessages.length === state.messages.length
+        && mergedMessages.every((message, index) => message === state.messages[index]);
+
+      if (unchanged) {
+        return state;
+      }
+
+      const streamingMessage = mergedMessages.find((message) => message.isStreaming);
       return {
         ...state,
-        messages: action.payload,
+        messages: mergedMessages,
         streamingMessageId: streamingMessage?.id ?? null,
       };
     }
