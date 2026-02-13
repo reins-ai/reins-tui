@@ -57,6 +57,135 @@ export interface DaemonMessage {
   createdAt: string;
 }
 
+/**
+ * Canonical history block used by normalized reconnect hydration.
+ * This is also compatible with live-session block semantics.
+ */
+export type DaemonHistoryBlock =
+  | {
+      type: "text";
+      text: string;
+    }
+  | {
+      type: "tool-use";
+      toolCallId: string;
+      name: string;
+      args: Record<string, unknown>;
+    }
+  | {
+      type: "tool-result";
+      toolCallId: string;
+      output: string;
+      isError?: boolean;
+    };
+
+/**
+ * Canonical hydrated content shape consumed by rendering.
+ */
+export interface DaemonHydratedHistoryPayload {
+  text: string;
+  blocks: DaemonHistoryBlock[];
+}
+
+/**
+ * Normalized message shape produced by reconnect hydration.
+ * ordering and dedupe fields support deterministic merge behavior
+ * when history arrives across multiple chunks.
+ */
+export interface DaemonHydratedHistoryMessage {
+  id: string;
+  role: DaemonMessageRole;
+  createdAt: string;
+  payload: DaemonHydratedHistoryPayload;
+  ordering: {
+    timestampMs: number;
+    fallbackIndex: number;
+  };
+  dedupeKey: string;
+}
+
+/**
+ * Raw history payload variants observed at reconnect boundaries.
+ *
+ * serialized is retained as a discrete discriminant to avoid ambiguous
+ * string/object unions in downstream hydration code.
+ */
+export type DaemonRawHistoryPayload =
+  | {
+      kind: "structured";
+      value: {
+        text?: string;
+        blocks?: ReadonlyArray<
+          | {
+              type: "text";
+              text: string;
+            }
+          | {
+              type: "tool-use";
+              toolCallId: string;
+              name: string;
+              args?: Record<string, unknown>;
+            }
+          | {
+              type: "tool-result";
+              toolCallId: string;
+              output?: string;
+              result?: string;
+              isError?: boolean;
+              error?: boolean;
+            }
+        >;
+      };
+    }
+  | {
+      kind: "serialized";
+      value: string;
+      encoding: "json" | "json-escaped" | "plain-text";
+    };
+
+export interface DaemonRawHistoryMessage {
+  id: string;
+  role: DaemonMessageRole;
+  createdAt: string;
+  payload: DaemonRawHistoryPayload;
+}
+
+/**
+ * Context passed to a single normalization interface.
+ * - fallbackIndex ensures deterministic ordering when timestamps match
+ * - seenMessageIds supports idempotent chunk hydration
+ */
+export interface DaemonHistoryNormalizationContext {
+  source: "live" | "reload";
+  fallbackIndex: number;
+  seenMessageIds: ReadonlySet<string>;
+}
+
+export type DaemonHistoryNormalizationResult =
+  | {
+      status: "accepted";
+      message: DaemonHydratedHistoryMessage;
+    }
+  | {
+      status: "duplicate";
+      dedupeKey: string;
+    }
+  | {
+      status: "dropped";
+      reason: "invalid-shape" | "invalid-created-at" | "decode-failed";
+    };
+
+/**
+ * Single parser surface for all reconnect payload variants, including
+ * legacy escaped payload forms.
+ */
+export interface DaemonHistoryPayloadNormalizer {
+  normalize(
+    rawMessage: DaemonRawHistoryMessage,
+    context: DaemonHistoryNormalizationContext,
+  ): DaemonHistoryNormalizationResult;
+}
+
 export interface ConversationSummary {
   id: string;
   title: string;
@@ -121,6 +250,24 @@ export type DaemonStreamEvent =
       timestamp: string;
     }
   | {
+      type: "tool-call-start";
+      conversationId: string;
+      messageId: string;
+      toolCallId: string;
+      name: string;
+      args?: Record<string, unknown>;
+      timestamp: string;
+    }
+  | {
+      type: "tool-call-complete";
+      conversationId: string;
+      messageId: string;
+      toolCallId: string;
+      result?: string;
+      error?: string;
+      timestamp: string;
+    }
+  | {
       type: "complete";
       conversationId: string;
       messageId: string;
@@ -139,4 +286,11 @@ export const DAEMON_CONTRACT_COMPATIBILITY_NOTES = [
   "sendMessage response keeps userMessageId for existing clients and may also include canonical messageId",
   "sendMessage response may include timestamp once daemon message persistence acknowledgement is wired",
   "stream subscription payload remains type=stream.subscribe with conversationId and assistantMessageId",
+] as const;
+
+export const DAEMON_HISTORY_COMPATIBILITY_NOTES = [
+  "history payload may arrive as structured object blocks or as serialized string payloads",
+  "legacy escaped payload strings use encoding=json-escaped and should be decoded before rendering",
+  "tool-result compatibility accepts output/result aliases and isError/error aliases",
+  "invalid legacy entries should be dropped without placeholder rendering",
 ] as const;

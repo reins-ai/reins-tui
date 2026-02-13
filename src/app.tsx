@@ -7,6 +7,7 @@ import { HelpScreen } from "./screens";
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "./daemon/client";
 import { DaemonProvider, useDaemon } from "./daemon/daemon-context";
 import type { DaemonMessage, DaemonResult, ConversationSummary as DaemonConversationSummary } from "./daemon/contracts";
+import { mapConversationHistory } from "./daemon/ws-transport";
 import { ConnectService } from "./providers/connect-service";
 import { GreetingService, type StartupContent } from "./personalization/greeting-service";
 import { createConversationStore, type ConversationStoreState } from "./state/conversation-store";
@@ -16,7 +17,7 @@ import { toPinPreferences, applyPinPreferences, DEFAULT_PANEL_STATE } from "./st
 import { useConversations, useFocus } from "./hooks";
 import type { PaletteAction } from "./palette/fuzzy-index";
 import type { ConversationLifecycleStatus } from "./state/status-machine";
-import { AppContext, DEFAULT_STATE, appReducer, useApp } from "./store";
+import { AppContext, DEFAULT_STATE, appReducer, useApp, createHydrationState, historyPayloadNormalizer } from "./store";
 import type { DisplayMessage, DisplayToolCall } from "./store";
 import { ThemeProvider, useThemeTokens } from "./theme";
 import { type KeyEvent, type TerminalDimensions, useKeyboard, useRenderer, useTerminalDimensions } from "./ui";
@@ -367,13 +368,16 @@ function AppView({ version, dimensions }: AppViewProps) {
         return;
       }
 
-      const converted: DisplayMessage[] = result.value.messages.map((message) => ({
-        id: message.id,
-        role: message.role,
-        content: message.content,
-        createdAt: parseIsoDate(message.createdAt),
-      }));
-      dispatch({ type: "SET_MESSAGES", payload: converted });
+      const rawMessages = mapConversationHistory(result.value.messages);
+      const hydrationState = createHydrationState();
+      dispatch({
+        type: "HYDRATE_HISTORY",
+        payload: {
+          rawMessages,
+          normalizer: historyPayloadNormalizer,
+          hydrationState,
+        },
+      });
     };
 
     void loadConversation();

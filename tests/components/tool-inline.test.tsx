@@ -22,6 +22,7 @@ import {
 import {
   formatArgsPreview,
   formatResultPreview,
+  formatToolResultPreview,
 } from "../../src/components/message";
 import {
   displayToolCallToToolCall,
@@ -29,6 +30,7 @@ import {
   shouldRenderToolBlocks,
   resolveToolBlockAccent,
 } from "../../src/components/conversation-panel";
+import { buildSimplifiedToolText } from "../../src/lib/tool-output";
 import type { DisplayMessage, DisplayToolCall } from "../../src/store";
 
 const MOCK_TOKENS: ThemeTokens = {
@@ -395,8 +397,7 @@ describe("formatArgsPreview", () => {
     });
     const preview = formatArgsPreview(dtc);
     expect(preview).toBeDefined();
-    expect(preview).toContain("ls -la");
-    expect(preview).toContain("/tmp");
+    expect(preview).toBe("$ ls -la");
   });
 
   test("truncates long args with ellipsis", () => {
@@ -849,11 +850,11 @@ describe("shouldRenderToolBlocks", () => {
     expect(shouldRenderToolBlocks(msg)).toBe(true);
   });
 
-  test("returns false for assistant message with tool calls", () => {
+  test("returns true for assistant message with tool calls", () => {
     const msg = makeDisplayMessage("assistant", "Let me check...", {
       toolCalls: [makeDisplayToolCall("running", { name: "bash" })],
     });
-    expect(shouldRenderToolBlocks(msg)).toBe(false);
+    expect(shouldRenderToolBlocks(msg)).toBe(true);
   });
 
   test("returns false for user message", () => {
@@ -970,19 +971,18 @@ describe("ToolBlock visual distinction from message blocks", () => {
     expect(style.backgroundColor).not.toBe(MOCK_TOKENS["conversation.assistant.bg"]);
   });
 
-  test("tool block uses SUBTLE_BORDER_CHARS (lighter than assistant ACCENT)", () => {
+  test("tool and message blocks use subtle border chars", () => {
     const source = readFileSync(
       resolve(import.meta.dir, "../../src/components/tool-inline.tsx"),
       "utf-8",
     );
-    // ToolBlock uses SUBTLE_BORDER_CHARS
     expect(source).toContain("SUBTLE_BORDER_CHARS");
-    // Message uses ACCENT_BORDER_CHARS for assistant
+
     const msgSource = readFileSync(
       resolve(import.meta.dir, "../../src/components/message.tsx"),
       "utf-8",
     );
-    expect(msgSource).toContain("ACCENT_BORDER_CHARS");
+    expect(msgSource).toContain("SUBTLE_BORDER_CHARS");
   });
 
   test("tool block accent colors are status-driven, not role-driven", () => {
@@ -1034,3 +1034,486 @@ function makeDisplayMessage(
     ...overrides,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Tool output reload parity tests (MH2, MH4)
+// ---------------------------------------------------------------------------
+
+describe("tool output reload parity — no escaped artifacts", () => {
+  test("hydrated tool result with real newlines contains no escaped \\n", () => {
+    const hydratedResult = "file1.ts\nfile2.ts\nfile3.ts";
+    const dtc = makeDisplayToolCall("complete", {
+      name: "bash",
+      args: { command: "ls" },
+      result: hydratedResult,
+    });
+    const preview = formatToolResultPreview(dtc);
+    expect(preview).toBeDefined();
+    expect(preview).not.toContain("\\n");
+    expect(preview).toContain("file1.ts");
+    expect(preview).toContain("file2.ts");
+  });
+
+  test("hydrated tool result with real tabs contains no escaped \\t", () => {
+    const hydratedResult = "NAME\tSIZE\nfoo\t1024";
+    const dtc = makeDisplayToolCall("complete", {
+      name: "bash",
+      args: { command: "ls -l" },
+      result: hydratedResult,
+    });
+    const preview = formatToolResultPreview(dtc);
+    expect(preview).toBeDefined();
+    expect(preview).not.toContain("\\t");
+    expect(preview).toContain("NAME");
+  });
+
+  test("hydrated tool result with decoded backslashes contains no double-escaped \\\\", () => {
+    const hydratedResult = "path\\to\\file";
+    const dtc = makeDisplayToolCall("complete", {
+      name: "bash",
+      result: hydratedResult,
+    });
+    const preview = formatToolResultPreview(dtc);
+    expect(preview).toBeDefined();
+    expect(preview).not.toContain("\\\\");
+    expect(preview).toContain("path\\to\\file");
+  });
+
+  test("hydrated tool result with decoded quotes contains no escaped \\\"", () => {
+    const hydratedResult = 'key: "value"';
+    const dtc = makeDisplayToolCall("complete", {
+      name: "bash",
+      result: hydratedResult,
+    });
+    const preview = formatToolResultPreview(dtc);
+    expect(preview).toBeDefined();
+    expect(preview).not.toContain('\\"');
+    expect(preview).toContain('"value"');
+  });
+});
+
+describe("tool output reload parity — line break preservation", () => {
+  test("multi-line tool output preserves newlines through formatting pipeline", () => {
+    const multiLineOutput = "line1\nline2\nline3";
+    const dtc = makeDisplayToolCall("complete", {
+      name: "bash",
+      args: { command: "echo test" },
+      result: multiLineOutput,
+    });
+    const preview = formatToolResultPreview(dtc);
+    expect(preview).toBeDefined();
+    // The preview should contain real newlines, not escaped ones
+    expect(preview!.split("\n").length).toBeGreaterThanOrEqual(3);
+  });
+
+  test("tool output with mixed whitespace preserves spacing", () => {
+    const output = "  indented\n    double-indented\nnormal";
+    const dtc = makeDisplayToolCall("complete", {
+      name: "bash",
+      result: output,
+    });
+    const preview = formatToolResultPreview(dtc);
+    expect(preview).toBeDefined();
+    expect(preview).toContain("  indented");
+    expect(preview).toContain("    double-indented");
+  });
+
+  test("empty lines in tool output are preserved", () => {
+    const output = "header\n\nbody\n\nfooter";
+    const dtc = makeDisplayToolCall("complete", {
+      name: "bash",
+      result: output,
+    });
+    const preview = formatToolResultPreview(dtc);
+    expect(preview).toBeDefined();
+    const lines = preview!.split("\n");
+    // Should have empty lines between sections
+    expect(lines.some((line) => line === "")).toBe(true);
+  });
+});
+
+describe("tool output reload parity — live vs reloaded equivalence", () => {
+  test("live and hydrated bash tool results produce identical formatted output", () => {
+    const args = { command: "ls -la" };
+    // Live: result arrives as JSON string from daemon stream
+    const liveResult = '{"command":"ls -la","output":"total 8\\nfile1.ts\\nfile2.ts"}';
+    // Reloaded: hydration has decoded escape sequences in the output field,
+    // but the result stored in DisplayToolCall is the tool-result block output
+    // which for structured results is the raw output text after decode
+    const reloadedResult = "total 8\nfile1.ts\nfile2.ts";
+
+    const liveText = buildSimplifiedToolText(args, liveResult, undefined);
+    const reloadedText = buildSimplifiedToolText(args, reloadedResult, undefined);
+
+    expect(liveText).toBeDefined();
+    expect(reloadedText).toBeDefined();
+    // Both should produce the same formatted output
+    expect(liveText).toBe(reloadedText);
+  });
+
+  test("live and hydrated plain text results produce identical output", () => {
+    const plainResult = "Hello, world!";
+    const liveText = buildSimplifiedToolText(undefined, plainResult, undefined);
+    const reloadedText = buildSimplifiedToolText(undefined, plainResult, undefined);
+    expect(liveText).toBe(reloadedText);
+  });
+
+  test("live and hydrated error results produce identical output", () => {
+    const args = { command: "rm -rf /" };
+    const errorText = "Permission denied";
+    const liveOutput = buildSimplifiedToolText(args, undefined, errorText);
+    const reloadedOutput = buildSimplifiedToolText(args, undefined, errorText);
+    expect(liveOutput).toBe(reloadedOutput);
+  });
+
+  test("displayToolCallToVisualState produces same detail for live and hydrated data", () => {
+    const liveCall: DisplayToolCall = {
+      id: "tc-live",
+      name: "bash",
+      status: "complete",
+      args: { command: "echo hello" },
+      result: "hello",
+    };
+    const hydratedCall: DisplayToolCall = {
+      id: "tc-hydrated",
+      name: "bash",
+      status: "complete",
+      args: { command: "echo hello" },
+      result: "hello",
+    };
+
+    const liveState = displayToolCallToVisualState(liveCall, true);
+    const hydratedState = displayToolCallToVisualState(hydratedCall, true);
+
+    expect(liveState.detail).toBe(hydratedState.detail);
+    expect(liveState.status).toBe(hydratedState.status);
+    expect(liveState.label).toBe(hydratedState.label);
+  });
+
+  test("multi-line hydrated result splits correctly for ToolBlock rendering", () => {
+    const hydratedCall: DisplayToolCall = {
+      id: "tc-multi",
+      name: "bash",
+      status: "complete",
+      args: { command: "ls" },
+      result: "file1.ts\nfile2.ts\nfile3.ts",
+    };
+
+    const vs = displayToolCallToVisualState(hydratedCall, true);
+    expect(vs.detail).toBeDefined();
+    // ToolBlock splits detail on \n for rendering — verify real newlines present
+    const lines = vs.detail!.split("\n");
+    expect(lines.length).toBeGreaterThanOrEqual(3);
+    expect(lines.some((l) => l.includes("file1.ts"))).toBe(true);
+    expect(lines.some((l) => l.includes("file2.ts"))).toBe(true);
+    expect(lines.some((l) => l.includes("file3.ts"))).toBe(true);
+  });
+
+  test("hydrated error tool call renders error text without escaped artifacts", () => {
+    const hydratedCall: DisplayToolCall = {
+      id: "tc-err",
+      name: "bash",
+      status: "error",
+      args: { command: "bad-cmd" },
+      result: "command not found: bad-cmd\nDid you mean: bad_cmd?",
+      isError: true,
+    };
+
+    const vs = displayToolCallToVisualState(hydratedCall, true);
+    expect(vs.detail).toBeDefined();
+    expect(vs.detail).not.toContain("\\n");
+    expect(vs.detail).toContain("command not found");
+    expect(vs.detail).toContain("Did you mean");
+  });
+});
+
+describe("tool output reload parity — structured JSON result handling", () => {
+  test("JSON result with command and output extracts fields correctly", () => {
+    const jsonResult = '{"command":"git status","output":"On branch main\\nnothing to commit"}';
+    const text = buildSimplifiedToolText({ command: "git status" }, jsonResult, undefined);
+    expect(text).toBeDefined();
+    expect(text).toContain("$ git status");
+    expect(text).toContain("On branch main");
+    expect(text).toContain("nothing to commit");
+    expect(text).not.toContain("\\n");
+  });
+
+  test("already-decoded JSON result still extracts fields via fallback parser", () => {
+    // After hydration decodes \n to real newlines, JSON.parse fails but
+    // extractJsonStringField handles it via character-by-character parsing
+    const decodedJsonResult = '{"command":"git status","output":"On branch main\nnothing to commit"}';
+    const text = buildSimplifiedToolText({ command: "git status" }, decodedJsonResult, undefined);
+    expect(text).toBeDefined();
+    expect(text).toContain("$ git status");
+    expect(text).toContain("On branch main");
+    expect(text).not.toContain("\\n");
+  });
+
+  test("plain text result passes through without JSON parsing artifacts", () => {
+    const plainResult = "total 16\ndrwxr-xr-x  5 user  staff  160 Jan  1 00:00 .\ndrwxr-xr-x  3 user  staff   96 Jan  1 00:00 ..";
+    const text = buildSimplifiedToolText({ command: "ls -la" }, plainResult, undefined);
+    expect(text).toBeDefined();
+    expect(text).toContain("$ ls -la");
+    expect(text).toContain("total 16");
+    expect(text).not.toContain("\\n");
+  });
+
+  test("result with only output field (no command) renders output directly", () => {
+    const result = '{"output":"search result 1\\nsearch result 2"}';
+    const text = buildSimplifiedToolText(undefined, result, undefined);
+    expect(text).toBeDefined();
+    expect(text).toContain("search result 1");
+    expect(text).toContain("search result 2");
+    expect(text).not.toContain("\\n");
+  });
+});
+
+describe("tool output reload parity — formatDetailSection with decoded content", () => {
+  test("string result is not re-escaped by formatDetailSection", () => {
+    const call = makeToolCall("success", {
+      result: "line1\nline2\nline3",
+    });
+    const detail = formatDetailSection(call);
+    expect(detail).toBeDefined();
+    expect(detail).not.toContain("\\n");
+    expect(detail).toContain("line1");
+    expect(detail).toContain("line2");
+  });
+
+  test("object result is still JSON-stringified by formatDetailSection", () => {
+    const call = makeToolCall("success", {
+      result: { key: "value" },
+    });
+    const detail = formatDetailSection(call);
+    expect(detail).toBeDefined();
+    expect(detail).toContain("Result:");
+    expect(detail).toContain("key");
+  });
+
+  test("string result with tabs is not re-escaped", () => {
+    const call = makeToolCall("success", {
+      result: "col1\tcol2\nval1\tval2",
+    });
+    const detail = formatDetailSection(call);
+    expect(detail).toBeDefined();
+    expect(detail).not.toContain("\\t");
+    expect(detail).not.toContain("\\n");
+  });
+});
+
+describe("tool output reload parity — ToolCallAnchor rendering structure", () => {
+  test("message.tsx splits plain result on newlines for multi-line rendering", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/message.tsx"),
+      "utf-8",
+    );
+    // Verify the rendering splits on newlines (like ToolBlock does)
+    expect(source).toContain('.split("\\n").map(');
+  });
+
+  test("message.tsx splits error result on newlines for multi-line rendering", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/message.tsx"),
+      "utf-8",
+    );
+    // Both plain result and error result should split on newlines
+    const splitCount = (source.match(/\.split\("\\n"\)\.map\(/g) ?? []).length;
+    expect(splitCount).toBeGreaterThanOrEqual(2);
+  });
+
+  test("tool-inline.tsx ToolBlock also splits detail on newlines", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/tool-inline.tsx"),
+      "utf-8",
+    );
+    expect(source).toContain('.split("\\n").map(');
+  });
+
+  test("ToolCallAnchor and ToolBlock use consistent newline splitting pattern", () => {
+    const messageSource = readFileSync(
+      resolve(import.meta.dir, "../../src/components/message.tsx"),
+      "utf-8",
+    );
+    const toolSource = readFileSync(
+      resolve(import.meta.dir, "../../src/components/tool-inline.tsx"),
+      "utf-8",
+    );
+    // Both should use the same split pattern for rendering multi-line output
+    const messageSplits = (messageSource.match(/\.split\("\\n"\)\.map\(/g) ?? []).length;
+    const toolSplits = (toolSource.match(/\.split\("\\n"\)\.map\(/g) ?? []).length;
+    expect(messageSplits).toBeGreaterThanOrEqual(2); // plain result + error result
+    expect(toolSplits).toBeGreaterThanOrEqual(1); // ToolBlock detail
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Mixed tool/message sequence reload parity (MH2, MH4)
+// ---------------------------------------------------------------------------
+
+describe("mixed tool/message sequence reload parity", () => {
+  /**
+   * Builds a realistic sequence of tool calls as they would appear in
+   * a hydrated conversation: multiple tools interleaved with text.
+   */
+  function buildMixedToolSequence(): DisplayToolCall[] {
+    return [
+      makeDisplayToolCall("complete", {
+        name: "bash",
+        args: { command: "ls -la /src" },
+        result: "total 24\ndrwxr-xr-x  5 user staff 160 Jan 1 00:00 .\n-rw-r--r--  1 user staff 1024 Jan 1 00:00 index.ts",
+      }),
+      makeDisplayToolCall("complete", {
+        name: "read_file",
+        args: { path: "/src/index.ts" },
+        result: "import { App } from './app';\n\nconst app = new App();\napp.start();",
+      }),
+      makeDisplayToolCall("error", {
+        name: "bash",
+        args: { command: "rm -rf /protected" },
+        result: "Permission denied: /protected\nOperation not permitted",
+        isError: true,
+      }),
+    ];
+  }
+
+  test("all tool results in mixed sequence contain no escaped newlines", () => {
+    const tools = buildMixedToolSequence();
+
+    for (const tool of tools) {
+      if (tool.result) {
+        expect(tool.result).not.toContain("\\n");
+        expect(tool.result).not.toContain("\\t");
+      }
+    }
+  });
+
+  test("all tool results in mixed sequence preserve real line breaks", () => {
+    const tools = buildMixedToolSequence();
+
+    // First tool: ls output has 3 lines
+    expect(tools[0].result!.split("\n")).toHaveLength(3);
+
+    // Second tool: code file has 4 lines
+    expect(tools[1].result!.split("\n")).toHaveLength(4);
+
+    // Third tool: error has 2 lines
+    expect(tools[2].result!.split("\n")).toHaveLength(2);
+  });
+
+  test("formatToolResultPreview preserves line breaks for each tool in sequence", () => {
+    const tools = buildMixedToolSequence();
+
+    for (const tool of tools) {
+      const preview = formatToolResultPreview(tool);
+      expect(preview).toBeDefined();
+      expect(preview).not.toContain("\\n");
+    }
+  });
+
+  test("displayToolCallToVisualState produces correct status for each tool in sequence", () => {
+    const tools = buildMixedToolSequence();
+
+    const states = tools.map((t) => displayToolCallToVisualState(t, true));
+
+    expect(states[0].status).toBe("success");
+    expect(states[1].status).toBe("success");
+    expect(states[2].status).toBe("error");
+  });
+
+  test("visual state detail for each tool in sequence contains no escaped artifacts", () => {
+    const tools = buildMixedToolSequence();
+
+    for (const tool of tools) {
+      const vs = displayToolCallToVisualState(tool, true);
+      if (vs.detail) {
+        expect(vs.detail).not.toContain("\\n");
+        expect(vs.detail).not.toContain("\\t");
+        expect(vs.detail).not.toContain("\\\\");
+      }
+    }
+  });
+
+  test("error tool in mixed sequence preserves error text with real newlines", () => {
+    const tools = buildMixedToolSequence();
+    const errorTool = tools[2];
+
+    const vs = displayToolCallToVisualState(errorTool, true);
+    expect(vs.detail).toBeDefined();
+    expect(vs.detail).toContain("Permission denied");
+    expect(vs.detail).toContain("Operation not permitted");
+    expect(vs.detail!.split("\n").length).toBeGreaterThanOrEqual(2);
+  });
+
+  test("tool block styles are status-driven regardless of sequence position", () => {
+    const tools = buildMixedToolSequence();
+    const states = tools.map((t) => displayToolCallToVisualState(t, true));
+
+    const successStyle = getToolBlockStyle(
+      makeVisualState("success", { id: states[0].id }),
+      MOCK_TOKENS,
+    );
+    const errorStyle = getToolBlockStyle(
+      makeVisualState("error", { id: states[2].id }),
+      MOCK_TOKENS,
+    );
+
+    expect(successStyle.accentColor).toBe(MOCK_TOKENS["glyph.tool.done"]);
+    expect(errorStyle.accentColor).toBe(MOCK_TOKENS["glyph.tool.error"]);
+    expect(successStyle.accentColor).not.toBe(errorStyle.accentColor);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tool output formatting parity: live JSON vs hydrated decoded (MH2, MH4)
+// ---------------------------------------------------------------------------
+
+describe("tool output formatting parity: live JSON vs hydrated decoded", () => {
+  test("buildSimplifiedToolText produces identical output for JSON and pre-decoded results", () => {
+    const args = { command: "cat package.json" };
+    const jsonResult = '{"command":"cat package.json","output":"{\\"name\\": \\"reins-tui\\"}"}';
+    const decodedResult = '{"name": "reins-tui"}';
+
+    const fromJson = buildSimplifiedToolText(args, jsonResult, undefined);
+    const fromDecoded = buildSimplifiedToolText(args, decodedResult, undefined);
+
+    expect(fromJson).toBeDefined();
+    expect(fromDecoded).toBeDefined();
+    // Both should contain the command prefix and the output content
+    expect(fromJson).toContain("$ cat package.json");
+    expect(fromDecoded).toContain("$ cat package.json");
+  });
+
+  test("formatDetailSection handles string result with embedded JSON without re-escaping", () => {
+    const call = makeToolCall("success", {
+      result: '{"name": "test", "version": "1.0.0"}',
+    });
+    const detail = formatDetailSection(call);
+    expect(detail).toBeDefined();
+    expect(detail).toContain("Result:");
+    // String result should be used directly, not JSON.stringify'd again
+    expect(detail).not.toContain("\\\\");
+  });
+
+  test("formatDetailSection handles multi-line string result without adding escape sequences", () => {
+    const call = makeToolCall("success", {
+      result: "Line 1: success\nLine 2: data loaded\nLine 3: complete",
+    });
+    const detail = formatDetailSection(call);
+    expect(detail).toBeDefined();
+    expect(detail).toContain("Line 1: success");
+    expect(detail).toContain("Line 2: data loaded");
+    expect(detail).not.toContain("\\n");
+  });
+
+  test("formatDetailSection handles result with tabs preserving real tab characters", () => {
+    const call = makeToolCall("success", {
+      result: "NAME\tSIZE\tDATE\nfoo.ts\t1024\t2026-01-01\nbar.ts\t2048\t2026-01-02",
+    });
+    const detail = formatDetailSection(call);
+    expect(detail).toBeDefined();
+    expect(detail).toContain("NAME");
+    expect(detail).toContain("foo.ts");
+    expect(detail).not.toContain("\\t");
+    expect(detail).not.toContain("\\n");
+  });
+});

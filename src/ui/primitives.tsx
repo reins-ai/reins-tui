@@ -24,8 +24,18 @@ export interface TextProps extends BaseProps {
 }
 
 export interface ScrollBoxProps extends BaseProps {
+  focused?: boolean;
   stickyScroll?: boolean;
-  stickyStart?: "top" | "bottom";
+  stickyStart?: "top" | "bottom" | "left" | "right";
+  scrollX?: boolean;
+  scrollY?: boolean;
+  rootOptions?: Record<string, unknown>;
+  wrapperOptions?: Record<string, unknown>;
+  viewportOptions?: Record<string, unknown>;
+  contentOptions?: Record<string, unknown>;
+  scrollbarOptions?: Record<string, unknown>;
+  verticalScrollbarOptions?: Record<string, unknown>;
+  horizontalScrollbarOptions?: Record<string, unknown>;
 }
 
 export interface InputProps extends BaseProps {
@@ -173,7 +183,7 @@ export function FramedBlock({
 
   const boxStyle: Style = {
     flexDirection: "column",
-    flexGrow: 1,
+    width: "100%",
     border: borderSides,
     borderColor: resolvedAccentColor,
     customBorderChars: resolvedChars,

@@ -33,7 +33,10 @@ export function formatDetailSection(call: ToolCall, maxLength: number = 200): st
   }
 
   if (call.result !== undefined) {
-    sections.push(`Result: ${compactStringify(call.result)}`);
+    // Use the result string directly when it's already a string (e.g. hydrated
+    // history data) to avoid re-escaping decoded newlines/tabs via JSON.stringify.
+    const resultText = typeof call.result === "string" ? call.result : compactStringify(call.result);
+    sections.push(`Result: ${resultText}`);
   }
 
   if (call.error !== undefined && call.error.length > 0) {
@@ -76,8 +79,9 @@ export function ToolInline({ call, collapsed }: ToolInlineProps) {
   return (
     <Box style={{ flexDirection: "column", marginLeft: 2 }}>
       <Box style={{ flexDirection: "row" }}>
-        <Text style={{ color: statusColor }}>{content.glyph}</Text>
-        <Text style={{ color: tokens["text.secondary"] }}>{` ${content.label}`}</Text>
+        <Text style={{ color: tokens["text.muted"] }}>Tool</Text>
+        <Text style={{ color: tokens["text.secondary"] }}>{` ${call.toolName}`}</Text>
+        <Text style={{ color: statusColor }}>{`  ${content.label}`}</Text>
         {detail !== undefined ? (
           <Text style={{ color: tokens["text.muted"] }}>{collapsed ? " [+]" : " [-]"}</Text>
         ) : null}
@@ -216,39 +220,31 @@ export function getToolBlockStatusSuffix(visualState: ToolVisualState): string {
  * background with status-driven left-border accent colors.
  *
  * Structure:
- *   ┃ ◎ bash  running...
+ *   ┃ Tool bash  running...
  *   ┃   {"command":"ls -la"}
  *
- *   ┃ ✦ bash  done (42ms)
+ *   ┃ Tool bash  done (42ms)
  *   ┃   file1.ts
  *   ┃   file2.ts
  *
- *   ┃ ✧ write  failed
+ *   ┃ Tool write  failed
  *   ┃   Permission denied
  */
 export function ToolBlock({ visualState }: ToolBlockProps) {
   const { tokens } = useThemeTokens();
   const blockStyle = getToolBlockStyle(visualState, tokens);
-  const accentColor = blockStyle.accentColor ?? tokens["glyph.tool.running"];
-  const statusSuffix = getToolBlockStatusSuffix(visualState);
   const formattedDetail = formatToolBlockDetail(visualState.detail);
 
   return (
     <FramedBlock style={blockStyle} borderChars={SUBTLE_BORDER_CHARS}>
-      {/* Header: glyph + tool name + status + expand indicator */}
+      {/* Header: tool name */}
       <Box style={{ flexDirection: "row" }}>
-        <Text style={{ color: accentColor }}>{visualState.glyph}</Text>
+        <Text style={{ color: tokens["text.muted"] }}>Tool</Text>
         <Text style={{ color: tokens["text.secondary"] }}>{` ${visualState.toolName}`}</Text>
-        <Text style={{ color: tokens["text.muted"] }}>{`  ${statusSuffix}`}</Text>
-        {visualState.hasDetail ? (
-          <Text style={{ color: tokens["text.muted"] }}>
-            {visualState.expanded ? "  [-]" : "  [+]"}
-          </Text>
-        ) : null}
       </Box>
 
       {/* Detail body: args, result, or error content */}
-      {visualState.expanded && formattedDetail ? (
+      {formattedDetail ? (
         <Box style={{ flexDirection: "column", marginTop: 0, paddingLeft: 2 }}>
           {formattedDetail.split("\n").map((line, i) => (
             <Text
