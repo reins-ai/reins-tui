@@ -53,5 +53,6 @@ export type {
   MemoryCommandContext,
   MemoryEntry,
   MemoryLayer,
+  MemorySettingsManager,
   MemoryType,
 } from "./types";

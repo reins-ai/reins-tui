@@ -1,4 +1,5 @@
 import { err, ok } from "../../daemon/contracts";
+import { handleMemorySettingsCommand } from "../memory/memory-settings-command";
 import type { CommandHandler, MemoryEntry, MemoryLayer, MemoryType } from "./types";
 
 type ParsedFlagValue = string | boolean;
@@ -255,9 +256,24 @@ export const handleMemoryCommand: CommandHandler = (args, context) => {
     return handleMemoryShow(args, context);
   }
 
+  if (subcommand === "settings") {
+    const settingsManager = context.memory.settingsManager;
+    if (!settingsManager) {
+      return err({
+        code: "UNSUPPORTED",
+        message: "Proactive memory settings are not available.",
+      });
+    }
+
+    return handleMemorySettingsCommand(args, {
+      available: context.memory.available,
+      settingsManager,
+    });
+  }
+
   return err({
     code: "INVALID_ARGUMENT",
-    message: `Unknown memory subcommand '${subcommand}'. Usage: /memory <list|show> [options]`,
+    message: `Unknown memory subcommand '${subcommand}'. Usage: /memory <list|show|settings> [options]`,
   });
 };
 

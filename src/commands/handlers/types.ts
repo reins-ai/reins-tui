@@ -79,8 +79,19 @@ export interface MemoryEntry {
   readonly accessedAt: string;
 }
 
+export interface MemorySettingsManager {
+  getSettings(): unknown;
+  updateSettings(partial: unknown): Result<unknown, { message: string }>;
+  resetToDefaults(): unknown;
+  enableFeature(feature: string): Result<unknown, { message: string }>;
+  disableFeature(feature: string): Result<unknown, { message: string }>;
+  setFeatureSetting(feature: string, key: string, value: unknown): Result<unknown, { message: string }>;
+  serialize(): string;
+}
+
 export interface MemoryCommandContext {
   readonly available: boolean;
+  readonly settingsManager?: MemorySettingsManager;
   remember(input: {
     content: string;
     type?: MemoryType;
