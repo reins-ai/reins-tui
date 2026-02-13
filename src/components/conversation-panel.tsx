@@ -8,7 +8,7 @@ import type { ToolCall, ToolCallStatus, ToolVisualState } from "../tools/tool-li
 import { displayToolCallToVisualState } from "../tools/tool-lifecycle";
 import type { FramedBlockStyle } from "../ui/types";
 import { Box, ScrollBox, Text } from "../ui";
-import { ACCENT_BORDER_CHARS, FramedBlock } from "../ui/primitives";
+import { FramedBlock, SUBTLE_BORDER_CHARS } from "../ui/primitives";
 import { LogoAscii } from "./logo-ascii";
 import { Message } from "./message";
 import { formatModelDisplayName } from "./model-selector";
@@ -38,6 +38,9 @@ export const MESSAGE_GAP = 1;
 
 /** Additional spacing (in lines) at exchange boundaries between turns. */
 export const EXCHANGE_GAP = 2;
+
+/** Scrollbar hidden temporarily; no gutter needed. */
+const SCROLLBAR_GUTTER = 0;
 
 export interface ConversationPanelProps {
   isFocused: boolean;
@@ -140,14 +143,14 @@ export interface ToolBlockListProps {
  */
 export function ToolBlockList({ toolCalls, expandedSet }: ToolBlockListProps) {
   const visualStates = toolCalls.map((dtc) => {
-    const expanded = shouldAutoExpand(dtc) || expandedSet.has(dtc.id);
+    const expanded = shouldAutoExpand(dtc) || dtc.status === "complete" || expandedSet.has(dtc.id);
     return displayToolCallToVisualState(dtc, expanded);
   });
 
   return (
     <>
-      {visualStates.map((vs) => (
-        <Box key={vs.id} style={{ marginTop: 0 }}>
+      {visualStates.map((vs, index) => (
+        <Box key={vs.id} style={{ marginTop: index === 0 ? 0 : MESSAGE_GAP }}>
           <ToolBlock visualState={vs} />
         </Box>
       ))}
@@ -167,18 +170,24 @@ export function shouldRenderToolBlocks(message: DisplayMessage): boolean {
     return false;
   }
 
-  if (message.role === "tool") {
-    return true;
-  }
-
-  return false;
+  return message.role === "tool" || message.role === "assistant";
 }
 
-export function ConversationPanel({ isFocused, borderColor }: ConversationPanelProps) {
+function hasOrderedToolBlocks(message: DisplayMessage): boolean {
+  if (!message.contentBlocks || !message.toolCalls || message.contentBlocks.length === 0) {
+    return false;
+  }
+
+  const toolIds = new Set(message.toolCalls.map((toolCall) => toolCall.id));
+  return message.contentBlocks.some((block) => block.type === "tool-call" && block.toolCallId !== undefined && toolIds.has(block.toolCallId));
+}
+
+export function ConversationPanel({ isFocused, borderColor: _borderColor }: ConversationPanelProps) {
   const { messages, isStreaming, lifecycleStatus } = useConversation();
   const { state } = useApp();
   const { tokens, getRoleBorder } = useThemeTokens();
   const expandedToolCalls = state.expandedToolCalls;
+  const showEmptyState = messages.length === 0 && !isStreaming;
   const hasContent = messages.some(
     (message) => message.content.trim().length > 0 || (message.toolCalls && message.toolCalls.length > 0),
   );
@@ -188,23 +197,15 @@ export function ConversationPanel({ isFocused, borderColor }: ConversationPanelP
     : null;
 
   return (
-    <Box
-      style={{
-        flexGrow: 1,
-        border: true,
-        borderColor,
-        padding: 1,
-        flexDirection: "column",
-      }}
-    >
+    <Box style={{ flexGrow: 1, minHeight: 0, flexDirection: "column", paddingLeft: 1, paddingRight: 1, paddingTop: 1 }}>
       {modelDisplay ? (
-        <Box style={{ flexDirection: "row", marginBottom: 1 }}>
+        <Box style={{ flexDirection: "row", marginBottom: 1, marginRight: SCROLLBAR_GUTTER }}>
           <Text
-            content="✦ "
-            style={{ color: tokens["accent.primary"] }}
+            content="Model"
+            style={{ color: tokens["text.muted"] }}
           />
           <Text
-            content={modelDisplay}
+            content={` ${modelDisplay}`}
             style={{ color: tokens["text.secondary"] }}
           />
           <Text
@@ -213,50 +214,132 @@ export function ConversationPanel({ isFocused, borderColor }: ConversationPanelP
           />
         </Box>
       ) : null}
-      <ScrollBox style={{ flexGrow: 1, flexDirection: "column" }} stickyScroll={true} stickyStart="bottom">
-        {messages.length === 0 ? (
-          <Box style={{ flexDirection: "column", paddingTop: 2 }}>
+      <ScrollBox
+        style={{
+          flexGrow: 1,
+          flexDirection: "column",
+          minHeight: 0,
+        }}
+        focused={isFocused}
+        scrollX={false}
+        scrollY={true}
+        stickyScroll={true}
+        stickyStart="bottom"
+        verticalScrollbarOptions={{ visible: false }}
+        contentOptions={{ paddingRight: SCROLLBAR_GUTTER }}
+      >
+        {showEmptyState ? (
+          <Box style={{ flexDirection: "column", flexGrow: 1, justifyContent: "center", alignItems: "center" }}>
             <LogoAscii variant="standard" size="full" showTagline />
             <Text style={{ color: tokens["text.muted"], marginTop: 1 }}>
               {isFocused ? "Type a message to begin" : "Press Tab to focus conversation"}
             </Text>
           </Box>
-        ) : (
-          messages.map((message, index) => {
+        ) : messages.length > 0 ? (
+          <Box style={{ flexDirection: "column", gap: MESSAGE_GAP }}>
+          {messages.map((message, index) => {
             const gap = isExchangeBoundary(messages, index)
-              ? EXCHANGE_GAP
-              : index > 0
-                ? MESSAGE_GAP
-                : 0;
+              ? EXCHANGE_GAP - MESSAGE_GAP
+              : 0;
 
             const useToolBlocks = shouldRenderToolBlocks(message);
+            const useOrderedBlocks = hasOrderedToolBlocks(message);
+
+            const toolCallsById = new Map((message.toolCalls ?? []).map((toolCall) => [toolCall.id, toolCall]));
+
+            const textBlockIndexes = (message.contentBlocks ?? [])
+              .map((block, blockIndex) => block.type === "text" && (block.text?.trim().length ?? 0) > 0 ? blockIndex : -1)
+              .filter((blockIndex) => blockIndex >= 0);
+            const lastTextBlockIndex = textBlockIndexes.length > 0 ? textBlockIndexes[textBlockIndexes.length - 1] : -1;
+
+            const renderedToolIds = new Set<string>();
+            let renderedBlockCount = 0;
+
+            const renderableOrderedBlocks = useOrderedBlocks
+              ? (message.contentBlocks ?? []).map((block, blockIndex) => {
+                  if (block.type === "text") {
+                    const content = block.text?.trim() ?? "";
+                    if (content.length === 0) {
+                      return null;
+                    }
+
+                    const textMessage: DisplayMessage = {
+                      ...message,
+                      content: block.text ?? "",
+                      toolCalls: undefined,
+                      contentBlocks: undefined,
+                      isStreaming: message.isStreaming === true && blockIndex === lastTextBlockIndex,
+                    };
+
+                    const marginTop = renderedBlockCount === 0 ? 0 : MESSAGE_GAP;
+                    renderedBlockCount += 1;
+
+                    return (
+                      <Box key={`${message.id}-text-${blockIndex}`} style={{ flexDirection: "column", marginTop }}>
+                        <Message
+                          message={textMessage}
+                          lifecycleStatus={textMessage.isStreaming ? lifecycleStatus : undefined}
+                        />
+                      </Box>
+                    );
+                  }
+
+                  if (block.type === "tool-call" && block.toolCallId) {
+                    const toolCall = toolCallsById.get(block.toolCallId);
+                    if (!toolCall) {
+                      return null;
+                    }
+
+                    renderedToolIds.add(toolCall.id);
+                    const expanded = shouldAutoExpand(toolCall) || toolCall.status === "complete" || expandedToolCalls.has(toolCall.id);
+                    const visualState = displayToolCallToVisualState(toolCall, expanded);
+                    const marginTop = renderedBlockCount === 0 ? 0 : MESSAGE_GAP;
+                    renderedBlockCount += 1;
+
+                    return (
+                      <Box key={`${message.id}-tool-${toolCall.id}`} style={{ flexDirection: "column", marginTop }}>
+                        <ToolBlock visualState={visualState} />
+                      </Box>
+                    );
+                  }
+
+                  return null;
+                })
+              : null;
+
+            const remainingToolCalls = (message.toolCalls ?? []).filter((toolCall) => !renderedToolIds.has(toolCall.id));
 
             return (
               <Box key={message.id} style={{ flexDirection: "column", marginTop: gap }}>
-                <Message
-                  message={message}
-                  lifecycleStatus={message.isStreaming ? lifecycleStatus : undefined}
-                  renderToolBlocks={useToolBlocks}
-                />
-                {useToolBlocks && message.toolCalls ? (
-                  <ToolBlockList
-                    toolCalls={message.toolCalls}
-                    expandedSet={expandedToolCalls}
+                {useOrderedBlocks ? renderableOrderedBlocks : (
+                  <Message
+                    message={message}
+                    lifecycleStatus={message.isStreaming ? lifecycleStatus : undefined}
+                    renderToolBlocks={useToolBlocks}
                   />
+                )}
+                {useToolBlocks && remainingToolCalls.length > 0 ? (
+                  <Box style={{ marginTop: MESSAGE_GAP }}>
+                    <ToolBlockList
+                      toolCalls={remainingToolCalls}
+                      expandedSet={expandedToolCalls}
+                    />
+                  </Box>
                 ) : null}
               </Box>
             );
-          })
-        )}
+          })}
+          </Box>
+        ) : null}
 
-        {isStreaming && !hasContent ? (
-          <Box style={{ marginTop: MESSAGE_GAP }}>
-            <FramedBlock
-              style={getStreamingPlaceholderStyle(tokens, getRoleBorder)}
-              borderChars={ACCENT_BORDER_CHARS}
-            >
-              <Text style={{ color: tokens["text.secondary"] }}>Generating response...</Text>
-            </FramedBlock>
+      {isStreaming && !hasContent ? (
+        <Box style={{ marginTop: MESSAGE_GAP }}>
+          <FramedBlock
+            style={getStreamingPlaceholderStyle(tokens, getRoleBorder)}
+            borderChars={SUBTLE_BORDER_CHARS}
+          >
+            <Text style={{ color: tokens["text.secondary"] }}>Generating response...</Text>
+          </FramedBlock>
           </Box>
         ) : null}
       </ScrollBox>

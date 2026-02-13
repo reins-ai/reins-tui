@@ -3,19 +3,20 @@ import type { ConversationLifecycleStatus } from "../state/status-machine";
 import type { DisplayMessage, DisplayToolCall } from "../store";
 import { useThemeTokens } from "../theme";
 import type { ThemeTokens } from "../theme/theme-schema";
+import { buildSimplifiedToolText } from "../lib/tool-output";
 import type { MessageRole } from "../theme/use-theme-tokens";
 import type { FramedBlockStyle } from "../ui/types";
 import { Box, Text } from "../ui";
-import { ACCENT_BORDER_CHARS, FramedBlock, SUBTLE_BORDER_CHARS } from "../ui/primitives";
+import { FramedBlock, SUBTLE_BORDER_CHARS } from "../ui/primitives";
 import { CardRenderer } from "./cards";
 import { StreamingText } from "./streaming-text";
 
-// Prose-style glyph vocabulary
-export const GLYPH_REINS = "◆";
-export const GLYPH_USER = "◇";
-export const GLYPH_TOOL_RUNNING = "◎";
-export const GLYPH_TOOL_DONE = "✦";
-export const GLYPH_TOOL_ERROR = "✧";
+// Chat label vocabulary (text-only, symbol-free)
+export const GLYPH_REINS = "Assistant";
+export const GLYPH_USER = "User";
+export const GLYPH_TOOL_RUNNING = "Running";
+export const GLYPH_TOOL_DONE = "Done";
+export const GLYPH_TOOL_ERROR = "Failed";
 
 const TOOL_GLYPH_MAP: Record<DisplayToolCall["status"], string> = {
   pending: GLYPH_TOOL_RUNNING,
@@ -132,7 +133,7 @@ export function getMessageBorderChars(role: DisplayMessage["role"]) {
     case "user":
       return SUBTLE_BORDER_CHARS;
     case "assistant":
-      return ACCENT_BORDER_CHARS;
+      return SUBTLE_BORDER_CHARS;
     case "system":
       return SUBTLE_BORDER_CHARS;
     case "tool":
@@ -160,6 +161,13 @@ export function formatArgsPreview(toolCall: DisplayToolCall): string | undefined
     return undefined;
   }
 
+  const command = typeof toolCall.args.command === "string" && toolCall.args.command.trim().length > 0
+    ? toolCall.args.command.trim()
+    : undefined;
+  if (command) {
+    return `$ ${command}`;
+  }
+
   try {
     const json = JSON.stringify(toolCall.args);
     if (json === undefined || json === "{}") {
@@ -184,11 +192,27 @@ export function formatResultPreview(result: string, maxLength: number = RESULT_P
   return `${result.slice(0, maxLength)}…`;
 }
 
+export function formatToolResultPreview(
+  toolCall: DisplayToolCall,
+  maxLength: number = RESULT_PREVIEW_MAX_LENGTH,
+): string | undefined {
+  const rendered = buildSimplifiedToolText(
+    toolCall.args,
+    toolCall.result,
+    toolCall.status === "error" ? toolCall.result : undefined,
+  );
+  if (!rendered) {
+    return undefined;
+  }
+
+  return formatResultPreview(rendered, maxLength);
+}
+
 export function ToolCallAnchor({ toolCall }: ToolCallAnchorProps) {
   const { tokens } = useThemeTokens();
-  const glyph = getToolGlyph(toolCall.status);
-  const glyphColor = getToolGlyphColor(toolCall.status, tokens);
-  const labelColor = toolCall.status === "error" || toolCall.isError
+  const statusLabel = getToolGlyph(toolCall.status);
+  const statusColor = getToolGlyphColor(toolCall.status, tokens);
+  const toolNameColor = toolCall.status === "error" || toolCall.isError
     ? tokens["glyph.tool.error"]
     : tokens["text.secondary"];
 
@@ -202,10 +226,11 @@ export function ToolCallAnchor({ toolCall }: ToolCallAnchorProps) {
   const showPlainResult = toolCall.status === "complete" && toolCall.result && !toolCall.isError && !showCard;
 
   return (
-    <Box style={{ flexDirection: "column", marginLeft: 2 }}>
+    <Box style={{ flexDirection: "column", marginTop: 1 }}>
       <Box style={{ flexDirection: "row" }}>
-        <Text style={{ color: glyphColor }}>{glyph}</Text>
-        <Text style={{ color: labelColor }}>{` ${toolCall.name}`}</Text>
+        <Text style={{ color: tokens["text.muted"] }}>Tool</Text>
+        <Text style={{ color: toolNameColor }}>{` ${toolCall.name}`}</Text>
+        <Text style={{ color: statusColor }}>{`  ${statusLabel}`}</Text>
         {toolCall.status === "running" ? (
           <Text style={{ color: tokens["text.muted"] }}>{" ..."}</Text>
         ) : null}
@@ -222,7 +247,7 @@ export function ToolCallAnchor({ toolCall }: ToolCallAnchorProps) {
       ) : null}
       {showPlainResult && toolCall.result ? (
         <Box style={{ marginLeft: 2 }}>
-          <Text style={{ color: tokens["text.muted"] }}>{formatResultPreview(toolCall.result)}</Text>
+          <Text style={{ color: tokens["text.muted"] }}>{formatToolResultPreview(toolCall) ?? formatResultPreview(toolCall.result)}</Text>
         </Box>
       ) : null}
       {toolCall.result && toolCall.status === "error" ? (
@@ -247,40 +272,35 @@ export interface MessageProps {
 
 export function Message({ message, lifecycleStatus, renderToolBlocks }: MessageProps) {
   const { tokens, getRoleBorder } = useThemeTokens();
-  const glyph = getRoleGlyph(message.role);
-  const glyphColor = getRoleColor(message.role, tokens);
-  const isUser = message.role === "user";
-  const isSystem = message.role === "system";
+  const roleLabel = getRoleGlyph(message.role);
+  const roleLabelColor = getRoleColor(message.role, tokens);
 
   const blockStyle = getMessageBlockStyle(message.role, tokens, getRoleBorder);
   const borderChars = getMessageBorderChars(message.role);
+  const contentColor = message.role === "system"
+    ? tokens["text.muted"]
+    : message.role === "assistant"
+      ? tokens["conversation.assistant.text"]
+      : tokens["conversation.user.text"];
 
   return (
     <FramedBlock style={blockStyle} borderChars={borderChars}>
-      {isUser ? (
-        <Box style={{ flexDirection: "row" }}>
-          <Text style={{ color: glyphColor }}>{glyph}</Text>
-          <Text>{" "}</Text>
-          <Text style={{ color: tokens["conversation.user.text"] }}>{message.content}</Text>
-        </Box>
-      ) : isSystem ? (
-        <Box style={{ flexDirection: "row" }}>
-          <Text style={{ color: glyphColor }}>{glyph}</Text>
-          <Text style={{ color: tokens["text.muted"] }}>{` ${message.content}`}</Text>
-        </Box>
-      ) : (
-        <Box style={{ flexDirection: "column" }}>
-          <Box style={{ flexDirection: "row" }}>
-            <Text style={{ color: glyphColor }}>{glyph}</Text>
-            <Text>{" "}</Text>
+      <Box style={{ flexDirection: "column" }}>
+        <Text style={{ color: roleLabelColor }}>{roleLabel}</Text>
+        {message.content.trim().length > 0 || message.isStreaming ? (
+          <Box style={{ marginTop: 0 }}>
+            {message.role === "assistant" ? (
+              <StreamingText
+                content={message.content}
+                isStreaming={message.isStreaming}
+                lifecycleStatus={message.isStreaming ? lifecycleStatus : undefined}
+              />
+            ) : (
+              <Text style={{ color: contentColor }}>{message.content}</Text>
+            )}
           </Box>
-          <StreamingText
-            content={message.content}
-            isStreaming={message.isStreaming}
-            lifecycleStatus={message.isStreaming ? lifecycleStatus : undefined}
-          />
-        </Box>
-      )}
+        ) : null}
+      </Box>
 
       {!renderToolBlocks && message.toolCalls?.map((toolCall) => (
         <ToolCallAnchor key={toolCall.id} toolCall={toolCall} />

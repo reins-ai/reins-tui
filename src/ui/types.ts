@@ -29,6 +29,10 @@ export interface Style {
   flexDirection?: "row" | "column";
   flexGrow?: number;
   flexShrink?: number;
+  justifyContent?: "flex-start" | "center" | "flex-end" | "space-between" | "space-around" | "space-evenly";
+  alignItems?: "auto" | "flex-start" | "center" | "flex-end" | "stretch" | "baseline";
+  alignSelf?: "auto" | "flex-start" | "center" | "flex-end" | "stretch" | "baseline";
+  overflow?: "visible" | "hidden" | "scroll";
   padding?: number;
   paddingTop?: number;
   paddingRight?: number;
