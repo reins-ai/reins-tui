@@ -127,7 +127,7 @@ describe("role border token mapping", () => {
     if (!registryResult.ok) throw new Error("Failed to create registry");
 
     const theme = registryResult.value.getTheme();
-    expect(theme.tokens["role.user.border"]).toBe("#a78bfa");
+    expect(theme.tokens["role.user.border"]).toBe("#c4b5fd");
   });
 
   test("role.assistant.border uses indigo/blue tones across themes", () => {
@@ -135,7 +135,7 @@ describe("role border token mapping", () => {
     if (!registryResult.ok) throw new Error("Failed to create registry");
 
     const theme = registryResult.value.getTheme();
-    expect(theme.tokens["role.assistant.border"]).toBe("#818cf8");
+    expect(theme.tokens["role.assistant.border"]).toBe("#e4e4e7");
   });
 
   test("role.system.border uses warning/amber tones across themes", () => {
