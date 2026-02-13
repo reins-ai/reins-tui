@@ -351,3 +351,77 @@ describe("conversation with tool calls", () => {
     expect(shouldShowSeparator(messages, 1)).toBe(true);
   });
 });
+
+describe("tool lifecycle rendering in conversation", () => {
+  test("tool start block has running glyph and tool name", () => {
+    const tc = makeToolCall("running", { name: "bash" });
+    expect(getToolGlyph(tc.status)).toBe(GLYPH_TOOL_RUNNING);
+    expect(getToolGlyphColor(tc.status, MOCK_TOKENS)).toBe(MOCK_TOKENS["glyph.tool.running"]);
+  });
+
+  test("tool start block with args carries args on DisplayToolCall", () => {
+    const tc = makeToolCall("running", {
+      name: "bash",
+      args: { command: "git status" },
+    });
+    expect(tc.args).toEqual({ command: "git status" });
+  });
+
+  test("running tool shows running glyph color distinct from done", () => {
+    const runningColor = getToolGlyphColor("running", MOCK_TOKENS);
+    const doneColor = getToolGlyphColor("complete", MOCK_TOKENS);
+    expect(runningColor).not.toBe(doneColor);
+  });
+
+  test("tool result block has done glyph", () => {
+    const tc = makeToolCall("complete", { name: "read", result: "file contents" });
+    expect(getToolGlyph(tc.status)).toBe(GLYPH_TOOL_DONE);
+    expect(getToolGlyphColor(tc.status, MOCK_TOKENS)).toBe(MOCK_TOKENS["glyph.tool.done"]);
+  });
+
+  test("tool error block has error glyph", () => {
+    const tc = makeToolCall("error", { name: "write", isError: true, result: "Permission denied" });
+    expect(getToolGlyph(tc.status)).toBe(GLYPH_TOOL_ERROR);
+    expect(getToolGlyphColor(tc.status, MOCK_TOKENS)).toBe(MOCK_TOKENS["glyph.tool.error"]);
+  });
+
+  test("tool blocks are visually distinct from assistant text glyphs", () => {
+    const assistantGlyph = getRoleGlyph("assistant");
+    const toolRunningGlyph = getToolGlyph("running");
+    const toolDoneGlyph = getToolGlyph("complete");
+    const toolErrorGlyph = getToolGlyph("error");
+
+    expect(assistantGlyph).not.toBe(toolRunningGlyph);
+    expect(assistantGlyph).not.toBe(toolDoneGlyph);
+    expect(assistantGlyph).not.toBe(toolErrorGlyph);
+  });
+
+  test("tool blocks use different color tokens from assistant text", () => {
+    const assistantColor = getRoleColor("assistant", MOCK_TOKENS);
+    const toolRunningColor = getToolGlyphColor("running", MOCK_TOKENS);
+    expect(assistantColor).not.toBe(toolRunningColor);
+  });
+
+  test("multi-tool message preserves all tool call states independently", () => {
+    const toolCalls: DisplayToolCall[] = [
+      makeToolCall("complete", { name: "read" }),
+      makeToolCall("running", { name: "grep" }),
+      makeToolCall("pending", { name: "bash" }),
+    ];
+
+    expect(getToolGlyph(toolCalls[0].status)).toBe(GLYPH_TOOL_DONE);
+    expect(getToolGlyph(toolCalls[1].status)).toBe(GLYPH_TOOL_RUNNING);
+    expect(getToolGlyph(toolCalls[2].status)).toBe(GLYPH_TOOL_RUNNING);
+  });
+
+  test("DisplayToolCall args field is optional and backward compatible", () => {
+    const withArgs = makeToolCall("running", {
+      name: "bash",
+      args: { command: "ls" },
+    });
+    const withoutArgs = makeToolCall("running", { name: "bash" });
+
+    expect(withArgs.args).toBeDefined();
+    expect(withoutArgs.args).toBeUndefined();
+  });
+});

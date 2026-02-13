@@ -64,12 +64,44 @@ interface ToolCallAnchorProps {
   toolCall: DisplayToolCall;
 }
 
+const ARGS_PREVIEW_MAX_LENGTH = 120;
+const RESULT_PREVIEW_MAX_LENGTH = 300;
+
 function tryParseToolResult(result: string): unknown {
   try {
     return JSON.parse(result);
   } catch {
     return result;
   }
+}
+
+export function formatArgsPreview(toolCall: DisplayToolCall): string | undefined {
+  if (!toolCall.args || Object.keys(toolCall.args).length === 0) {
+    return undefined;
+  }
+
+  try {
+    const json = JSON.stringify(toolCall.args);
+    if (json === undefined || json === "{}") {
+      return undefined;
+    }
+
+    if (json.length <= ARGS_PREVIEW_MAX_LENGTH) {
+      return json;
+    }
+
+    return `${json.slice(0, ARGS_PREVIEW_MAX_LENGTH)}…`;
+  } catch {
+    return undefined;
+  }
+}
+
+export function formatResultPreview(result: string, maxLength: number = RESULT_PREVIEW_MAX_LENGTH): string {
+  if (result.length <= maxLength) {
+    return result;
+  }
+
+  return `${result.slice(0, maxLength)}…`;
 }
 
 export function ToolCallAnchor({ toolCall }: ToolCallAnchorProps) {
@@ -85,6 +117,9 @@ export function ToolCallAnchor({ toolCall }: ToolCallAnchorProps) {
     : null;
 
   const showCard = card !== null && card.type !== "plain-text";
+  const isActive = toolCall.status === "pending" || toolCall.status === "running";
+  const argsPreview = isActive ? formatArgsPreview(toolCall) : undefined;
+  const showPlainResult = toolCall.status === "complete" && toolCall.result && !toolCall.isError && !showCard;
 
   return (
     <Box style={{ flexDirection: "column", marginLeft: 2 }}>
@@ -95,9 +130,19 @@ export function ToolCallAnchor({ toolCall }: ToolCallAnchorProps) {
           <Text style={{ color: tokens["text.muted"] }}>{" ..."}</Text>
         ) : null}
       </Box>
+      {argsPreview ? (
+        <Box style={{ marginLeft: 2 }}>
+          <Text style={{ color: tokens["text.muted"] }}>{argsPreview}</Text>
+        </Box>
+      ) : null}
       {showCard && card ? (
         <Box style={{ marginLeft: 2, marginTop: 0 }}>
           <CardRenderer card={card} />
+        </Box>
+      ) : null}
+      {showPlainResult && toolCall.result ? (
+        <Box style={{ marginLeft: 2 }}>
+          <Text style={{ color: tokens["text.muted"] }}>{formatResultPreview(toolCall.result)}</Text>
         </Box>
       ) : null}
       {toolCall.result && toolCall.status === "error" ? (

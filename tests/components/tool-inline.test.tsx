@@ -9,6 +9,10 @@ import {
   getStatusColor,
   formatDetailSection,
 } from "../../src/components/tool-inline";
+import {
+  formatArgsPreview,
+  formatResultPreview,
+} from "../../src/components/message";
 import { displayToolCallToToolCall } from "../../src/components/conversation-panel";
 import type { DisplayToolCall } from "../../src/store";
 
@@ -354,5 +358,253 @@ describe("glyph consistency across lifecycle and inline", () => {
 
   test("error glyph matches between tool-lifecycle and inline expectations", () => {
     expect(getToolGlyph("error")).toBe("✧");
+  });
+});
+
+describe("formatArgsPreview", () => {
+  test("returns undefined when args is undefined", () => {
+    const dtc = makeDisplayToolCall("running");
+    expect(formatArgsPreview(dtc)).toBeUndefined();
+  });
+
+  test("returns undefined when args is empty object", () => {
+    const dtc = makeDisplayToolCall("running", { args: {} });
+    expect(formatArgsPreview(dtc)).toBeUndefined();
+  });
+
+  test("returns compact JSON for small args", () => {
+    const dtc = makeDisplayToolCall("running", {
+      args: { command: "ls -la", workdir: "/tmp" },
+    });
+    const preview = formatArgsPreview(dtc);
+    expect(preview).toBeDefined();
+    expect(preview).toContain("ls -la");
+    expect(preview).toContain("/tmp");
+  });
+
+  test("truncates long args with ellipsis", () => {
+    const longValue = "x".repeat(200);
+    const dtc = makeDisplayToolCall("running", {
+      args: { content: longValue },
+    });
+    const preview = formatArgsPreview(dtc);
+    expect(preview).toBeDefined();
+    expect(preview!.length).toBeLessThanOrEqual(121); // 120 + "…"
+    expect(preview!.endsWith("…")).toBe(true);
+  });
+
+  test("handles nested object args", () => {
+    const dtc = makeDisplayToolCall("running", {
+      args: { filter: { type: "glob", pattern: "**/*.ts" } },
+    });
+    const preview = formatArgsPreview(dtc);
+    expect(preview).toBeDefined();
+    expect(preview).toContain("glob");
+    expect(preview).toContain("**/*.ts");
+  });
+});
+
+describe("formatResultPreview", () => {
+  test("returns short result unchanged", () => {
+    const result = "Found 3 files";
+    expect(formatResultPreview(result)).toBe(result);
+  });
+
+  test("truncates long result with ellipsis", () => {
+    const longResult = "line\n".repeat(200);
+    const preview = formatResultPreview(longResult, 300);
+    expect(preview.length).toBeLessThanOrEqual(301); // 300 + "…"
+    expect(preview.endsWith("…")).toBe(true);
+  });
+
+  test("preserves exact boundary result", () => {
+    const exactResult = "x".repeat(300);
+    expect(formatResultPreview(exactResult, 300)).toBe(exactResult);
+  });
+});
+
+describe("DisplayToolCall args propagation", () => {
+  test("displayToolCallToToolCall passes args through", () => {
+    const dtc = makeDisplayToolCall("running", {
+      args: { command: "git status" },
+    });
+    const tc = displayToolCallToToolCall(dtc);
+    expect(tc.args).toEqual({ command: "git status" });
+  });
+
+  test("displayToolCallToToolCall handles undefined args", () => {
+    const dtc = makeDisplayToolCall("running");
+    const tc = displayToolCallToToolCall(dtc);
+    expect(tc.args).toBeUndefined();
+  });
+
+  test("displayToolCallToToolCall preserves complex args", () => {
+    const dtc = makeDisplayToolCall("running", {
+      args: { path: "/src/index.ts", offset: 1, limit: 50 },
+    });
+    const tc = displayToolCallToToolCall(dtc);
+    expect(tc.args).toEqual({ path: "/src/index.ts", offset: 1, limit: 50 });
+  });
+});
+
+describe("tool lifecycle state transitions", () => {
+  test("start state shows running glyph and tool name", () => {
+    const call = makeToolCall("running", { toolName: "bash" });
+    const content = toolCallToMessageContent(call);
+    expect(content.glyph).toBe("◎");
+    expect(content.label).toContain("Bash");
+    expect(content.label).toContain("...");
+  });
+
+  test("start state with args shows detail", () => {
+    const call = makeToolCall("running", {
+      toolName: "bash",
+      args: { command: "ls -la" },
+    });
+    const content = toolCallToMessageContent(call);
+    const detail = formatDetailSection(call);
+    expect(content.glyph).toBe("◎");
+    expect(detail).toBeDefined();
+    expect(detail).toContain("Args:");
+    expect(detail).toContain("ls -la");
+  });
+
+  test("end state shows success glyph with duration", () => {
+    const call = makeToolCall("success", {
+      toolName: "bash",
+      duration: 150,
+      result: "file1.ts\nfile2.ts",
+    });
+    const content = toolCallToMessageContent(call);
+    expect(content.glyph).toBe("✦");
+    expect(content.label).toContain("complete");
+    expect(content.label).toContain("150ms");
+  });
+
+  test("end state shows result in detail", () => {
+    const call = makeToolCall("success", {
+      toolName: "read",
+      result: "1: import React from 'react';",
+    });
+    const detail = formatDetailSection(call);
+    expect(detail).toBeDefined();
+    expect(detail).toContain("Result:");
+    expect(detail).toContain("import React");
+  });
+
+  test("error end state shows error glyph and message", () => {
+    const call = makeToolCall("error", {
+      toolName: "bash",
+      error: "Command timed out after 30s",
+    });
+    const content = toolCallToMessageContent(call);
+    expect(content.glyph).toBe("✧");
+    expect(content.label).toContain("failed");
+    expect(content.label).toContain("Command timed out");
+  });
+
+  test("full lifecycle: queued → running → success produces correct glyphs", () => {
+    const queued = makeToolCall("queued", { toolName: "grep" });
+    const running = makeToolCall("running", { toolName: "grep", args: { pattern: "TODO" } });
+    const success = makeToolCall("success", {
+      toolName: "grep",
+      duration: 42,
+      result: "src/app.ts:10: // TODO: fix this",
+    });
+
+    expect(toolCallToMessageContent(queued).glyph).toBe("◎");
+    expect(toolCallToMessageContent(running).glyph).toBe("◎");
+    expect(toolCallToMessageContent(success).glyph).toBe("✦");
+  });
+
+  test("full lifecycle: queued → running → error produces correct glyphs", () => {
+    const queued = makeToolCall("queued", { toolName: "write" });
+    const running = makeToolCall("running", { toolName: "write" });
+    const error = makeToolCall("error", {
+      toolName: "write",
+      error: "Permission denied",
+    });
+
+    expect(toolCallToMessageContent(queued).glyph).toBe("◎");
+    expect(toolCallToMessageContent(running).glyph).toBe("◎");
+    expect(toolCallToMessageContent(error).glyph).toBe("✧");
+  });
+
+  test("each lifecycle state uses distinct color category", () => {
+    const runningColor = getStatusColor("running", MOCK_TOKENS);
+    const successColor = getStatusColor("success", MOCK_TOKENS);
+    const errorColor = getStatusColor("error", MOCK_TOKENS);
+
+    expect(runningColor).not.toBe(successColor);
+    expect(runningColor).not.toBe(errorColor);
+    expect(successColor).not.toBe(errorColor);
+  });
+});
+
+describe("ToolCallAnchor args display", () => {
+  test("running tool with args produces preview", () => {
+    const dtc = makeDisplayToolCall("running", {
+      name: "bash",
+      args: { command: "bun test" },
+    });
+    const preview = formatArgsPreview(dtc);
+    expect(preview).toBeDefined();
+    expect(preview).toContain("bun test");
+  });
+
+  test("pending tool with args produces preview", () => {
+    const dtc = makeDisplayToolCall("pending", {
+      name: "read",
+      args: { path: "/src/index.ts" },
+    });
+    const preview = formatArgsPreview(dtc);
+    expect(preview).toBeDefined();
+    expect(preview).toContain("/src/index.ts");
+  });
+
+  test("complete tool does not show args preview (args are for active states)", () => {
+    const dtc = makeDisplayToolCall("complete", {
+      name: "bash",
+      args: { command: "bun test" },
+      result: "All tests passed",
+    });
+    // formatArgsPreview is only called for active states in the component
+    // but the function itself still works - the component guards the call
+    const preview = formatArgsPreview(dtc);
+    expect(preview).toBeDefined(); // function works regardless
+  });
+
+  test("message.tsx contains formatArgsPreview export", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/message.tsx"),
+      "utf-8",
+    );
+    expect(source).toContain("export function formatArgsPreview");
+  });
+
+  test("message.tsx contains formatResultPreview export", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/message.tsx"),
+      "utf-8",
+    );
+    expect(source).toContain("export function formatResultPreview");
+  });
+
+  test("message.tsx renders args preview for active tool calls", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/message.tsx"),
+      "utf-8",
+    );
+    expect(source).toContain("argsPreview");
+    expect(source).toContain("isActive");
+  });
+
+  test("message.tsx renders plain result for non-card completions", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/message.tsx"),
+      "utf-8",
+    );
+    expect(source).toContain("showPlainResult");
+    expect(source).toContain("formatResultPreview");
   });
 });

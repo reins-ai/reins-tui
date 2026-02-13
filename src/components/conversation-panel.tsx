@@ -51,6 +51,7 @@ export function displayToolCallToToolCall(dtc: DisplayToolCall): ToolCall {
     id: dtc.id,
     toolName: dtc.name,
     status,
+    args: dtc.args,
     error: dtc.isError && dtc.result ? dtc.result : undefined,
     result: !dtc.isError && dtc.result ? dtc.result : undefined,
   };
