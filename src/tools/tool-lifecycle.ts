@@ -1,3 +1,5 @@
+import { buildSimplifiedToolText } from "../lib/tool-output";
+
 export type ToolCallStatus = "queued" | "running" | "success" | "error";
 
 export interface ToolCall {
@@ -176,6 +178,16 @@ function formatToolLabel(toolName: string): string {
 }
 
 function buildToolDetail(call: ToolCall): string | undefined {
+  const resultString = typeof call.result === "string"
+    ? call.result
+    : call.result === undefined
+      ? undefined
+      : safePretty(call.result);
+  const simplified = buildSimplifiedToolText(call.args, resultString, call.error);
+  if (simplified !== undefined) {
+    return truncateDetail(simplified, 500);
+  }
+
   const sections: string[] = [];
 
   if (call.args !== undefined) {
@@ -431,6 +443,11 @@ function buildStreamLabel(
 }
 
 function buildStreamDetail(call: StreamToolCallLike): string | undefined {
+  const simplified = buildSimplifiedToolText(call.args, call.result, call.error);
+  if (simplified !== undefined) {
+    return truncateDetail(simplified, 500);
+  }
+
   const sections: string[] = [];
 
   if (call.args !== undefined) {
@@ -472,6 +489,15 @@ function buildDisplayLabel(
 }
 
 function buildDisplayDetail(call: DisplayToolCallLike): string | undefined {
+  const simplified = buildSimplifiedToolText(
+    call.args,
+    call.result,
+    call.isError ? call.result : undefined,
+  );
+  if (simplified !== undefined) {
+    return truncateDetail(simplified, 500);
+  }
+
   const sections: string[] = [];
 
   if (call.args !== undefined) {

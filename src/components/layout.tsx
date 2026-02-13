@@ -174,7 +174,7 @@ export function Layout({ version, dimensions, showHelp, connectionStatus, daemon
         side="left"
         width={DRAWER_WIDTH}
         visible={state.panels.drawer.visible}
-        title={state.panels.drawer.pinned ? "Context 📌" : "Context"}
+        title={state.panels.drawer.pinned ? "Context [Pinned]" : "Context"}
         onClose={dismissDrawer}
       >
         <SidebarContent
@@ -188,7 +188,7 @@ export function Layout({ version, dimensions, showHelp, connectionStatus, daemon
         side="right"
         width={TODAY_PANEL_WIDTH}
         visible={state.panels.today.visible}
-        title={state.panels.today.pinned ? "Today 📌" : "Today"}
+        title={state.panels.today.pinned ? "Today [Pinned]" : "Today"}
         onClose={dismissToday}
       >
         <Text content="Activity" style={{ color: tokens["text.secondary"] }} />

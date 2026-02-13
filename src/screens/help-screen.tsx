@@ -1,9 +1,10 @@
 // Migrated from components/help-screen.tsx — screen-level overlay for keyboard shortcuts and greeting.
 
 import { LogoAscii } from "../components/logo-ascii";
+import { ModalPanel } from "../components/modal-panel";
 import type { StartupContent } from "../personalization/greeting-service";
 import { useThemeTokens } from "../theme";
-import { Box, Text } from "../ui";
+import { Box, ScrollBox, Text } from "../ui";
 
 export interface HelpShortcut {
   key: string;
@@ -106,46 +107,32 @@ export function HelpScreen({ isOpen, startup = null }: HelpScreenProps) {
   }
 
   return (
-    <Box
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        width: "100%",
-        height: "100%",
-        backgroundColor: tokens["surface.primary"],
-        flexDirection: "column",
-        paddingTop: 2,
-        paddingLeft: 8,
-        paddingRight: 8,
-      }}
+    <ModalPanel
+      visible={isOpen}
+      title="Help"
+      hint="Press ? or Esc to close"
+      closeOnEscape={false}
+      onClose={() => {}}
+      width={108}
+      height={32}
     >
-      <Box style={{ flexDirection: "column", marginBottom: 1 }}>
-        <LogoAscii variant="standard" size="full" showTagline />
-      </Box>
-      {startup && <WelcomeGreeting startup={startup} />}
-      <Box
-        style={{
-          border: true,
-          borderColor: tokens["border.focus"],
-          backgroundColor: tokens["surface.secondary"],
-          flexDirection: "column",
-          padding: 1,
-        }}
-      >
-        <Text>Help</Text>
-        <Text content="" />
-        {HELP_SHORTCUT_CATEGORIES.map((category) => (
-          <Box key={category.title} style={{ flexDirection: "column" }}>
-            <Text style={{ color: tokens["accent.primary"] }}>{category.title}</Text>
-            {category.shortcuts.map((shortcut) => (
-              <Text key={`${category.title}-${shortcut.key}`} content={formatShortcutRow(shortcut)} />
-            ))}
-            <Text content="" />
-          </Box>
-        ))}
-        <Text style={{ color: tokens["text.muted"] }}>Press ? or Esc to close</Text>
-      </Box>
-    </Box>
+      <ScrollBox style={{ flexDirection: "column", flexGrow: 1 }}>
+        <Box style={{ flexDirection: "column", marginBottom: 1 }}>
+          <LogoAscii variant="standard" size="full" showTagline />
+        </Box>
+        {startup && <WelcomeGreeting startup={startup} />}
+        <Box style={{ flexDirection: "column" }}>
+          {HELP_SHORTCUT_CATEGORIES.map((category) => (
+            <Box key={category.title} style={{ flexDirection: "column" }}>
+              <Text style={{ color: tokens["accent.primary"] }}>{category.title}</Text>
+              {category.shortcuts.map((shortcut) => (
+                <Text key={`${category.title}-${shortcut.key}`} content={formatShortcutRow(shortcut)} />
+              ))}
+              <Text content="" />
+            </Box>
+          ))}
+        </Box>
+      </ScrollBox>
+    </ModalPanel>
   );
 }

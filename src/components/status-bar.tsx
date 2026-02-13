@@ -56,13 +56,13 @@ export function resolveHeartbeatInterval(status: DaemonConnectionStatus): number
 export function getConnectionLabel(status: DaemonConnectionStatus, daemonMode?: DaemonMode): string {
   switch (status) {
     case "connected":
-      return "Connected";
+      return "Backend";
     case "disconnected":
-      return daemonMode === "mock" ? "⚠ Daemon disconnected" : "Offline";
+      return daemonMode === "mock" ? "⚠ Backend disconnected" : "Backend Offline";
     case "connecting":
-      return "Connecting...";
+      return "Backend Connecting...";
     case "reconnecting":
-      return "Reconnecting...";
+      return "Backend Reconnecting...";
   }
 }
 
@@ -398,14 +398,22 @@ export function StatusBar({
   const { left, right } = groupSegments(segmentSet.visibleSegments);
 
   // Render per-segment colored spans for the left group
-  const leftElements = left.map((seg, i) => {
+  const leftElements = left.flatMap((seg, i) => {
     const color = tokens[seg.colorToken as keyof typeof tokens] ?? tokens["text.primary"];
     const separator = i < left.length - 1 ? SEGMENT_SEPARATOR : "";
-    return (
-      <Text key={seg.id} style={{ color }}>
-        {`${seg.content}${separator}`}
-      </Text>
-    );
+
+    if (seg.id === "connection" && seg.glyph.length > 0) {
+      const label = seg.content.substring(seg.glyph.length + 1);
+      return [
+        <Text key={`${seg.id}-glyph`} content={seg.glyph} style={{ color }} />,
+        <Text key={`${seg.id}-label`} content={` ${label}`} style={{ color: tokens["text.primary"] }} />,
+        separator
+          ? <Text key={`${seg.id}-sep`} content={separator} style={{ color: tokens["text.muted"] }} />
+          : null,
+      ];
+    }
+
+    return <Text key={seg.id} content={`${seg.content}${separator}`} style={{ color }} />;
   });
 
   // Right group: hints in muted color

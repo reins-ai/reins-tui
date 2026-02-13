@@ -30,7 +30,7 @@ export function ChatScreen({
 
   return (
     <Box style={{ flexDirection: "row", flexGrow: 1 }}>
-      <Box style={{ flexGrow: 1, flexDirection: "column" }}>
+      <Box style={{ flexGrow: 1, flexDirection: "column", minHeight: 0 }}>
         {/* Conversation zone: scrollable message area */}
         <ZoneShell
           backgroundColor={tokens["surface.primary"]}
