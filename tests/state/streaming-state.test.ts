@@ -9,6 +9,13 @@ import {
   type StreamingEvent,
   type StreamingState,
 } from "../../src/state/streaming-state";
+import { appReducer, type AppAction } from "../../src/store";
+import { DEFAULT_STATE, type AppState, type DisplayToolCall } from "../../src/store/types";
+import {
+  toolCallsToVisualStates,
+  shouldAutoExpand,
+  shouldRenderToolBlocks,
+} from "../../src/components/conversation-panel";
 
 function createError(overrides: Partial<DaemonClientError> = {}): DaemonClientError {
   return {
@@ -916,6 +923,216 @@ describe("multi-tool sequence rendering", () => {
   });
 });
 
+describe("streaming block rendering metadata", () => {
+  test("in-progress streaming turn preserves assistant message in messages array", () => {
+    const base = createStreamingBase();
+
+    const streaming = applyEvents(base, [
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "Working on it...",
+      },
+    ]);
+
+    expect(streaming.status).toBe("streaming");
+    const assistantMsg = streaming.messages.find((m) => m.id === "assistant-1");
+    expect(assistantMsg).toBeDefined();
+    expect(assistantMsg!.role).toBe("assistant");
+    expect(assistantMsg!.content).toBe("Working on it...");
+  });
+
+  test("streaming turn with tools has content blocks suitable for block rendering", () => {
+    const base = createStreamingBase();
+
+    const withTools = applyEvents(base, [
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:02.500Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "Let me check...",
+      },
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        name: "bash",
+        args: { command: "ls" },
+      },
+    ]);
+
+    expect(withTools.turnState.hasToolCalls).toBe(true);
+    expect(withTools.turnState.contentBlocks.length).toBeGreaterThanOrEqual(2);
+    // First block is text before tools
+    expect(withTools.turnState.contentBlocks[0].type).toBe("text");
+    expect(withTools.turnState.contentBlocks[0].text).toBe("Let me check...");
+    // Second block is tool-call placeholder
+    expect(withTools.turnState.contentBlocks[1].type).toBe("tool-call");
+    expect(withTools.turnState.contentBlocks[1].toolCallId).toBe("tool-1");
+  });
+
+  test("tool-call content blocks carry toolCallId for block-level rendering", () => {
+    const base = createStreamingBase();
+
+    const withTools = applyEvents(base, [
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-abc",
+        name: "read",
+      },
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.001Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-def",
+        name: "grep",
+      },
+    ]);
+
+    const toolBlocks = withTools.turnState.contentBlocks.filter((b) => b.type === "tool-call");
+    expect(toolBlocks).toHaveLength(2);
+    expect(toolBlocks[0].toolCallId).toBe("tool-abc");
+    expect(toolBlocks[1].toolCallId).toBe("tool-def");
+  });
+
+  test("multi-turn does not mix content blocks across turns", () => {
+    const base = createStreamingBase();
+
+    // First turn with tools
+    const firstTurn = applyEvents(base, [
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        name: "bash",
+      },
+      {
+        type: "tool-call-complete",
+        timestamp: "2026-02-11T00:00:04.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        result: "ok",
+      },
+      {
+        type: "complete",
+        timestamp: "2026-02-11T00:00:05.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        content: "Done.",
+      },
+      {
+        type: "complete-timeout",
+        timestamp: "2026-02-11T00:00:06.000Z",
+      },
+    ]);
+
+    // After complete-timeout, turn state is reset
+    expect(firstTurn.status).toBe("idle");
+    expect(firstTurn.turnState.contentBlocks).toHaveLength(0);
+    expect(firstTurn.turnState.hasToolCalls).toBe(false);
+    expect(firstTurn.toolCalls).toHaveLength(0);
+
+    // Second turn starts fresh
+    const secondTurn = applyEvents(firstTurn, [
+      {
+        type: "user-send",
+        timestamp: "2026-02-11T00:00:07.000Z",
+        conversationId: "conv-1",
+        userMessage: {
+          id: "user-2",
+          role: "user",
+          content: "next",
+          createdAt: "2026-02-11T00:00:07.000Z",
+        },
+      },
+      {
+        type: "message-ack",
+        timestamp: "2026-02-11T00:00:08.000Z",
+        conversationId: "conv-1",
+        assistantMessageId: "assistant-2",
+      },
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:09.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-2",
+        delta: "Fresh response",
+      },
+    ]);
+
+    expect(secondTurn.turnState.contentBlocks).toHaveLength(1);
+    expect(secondTurn.turnState.contentBlocks[0].type).toBe("text");
+    expect(secondTurn.turnState.contentBlocks[0].text).toBe("Fresh response");
+    expect(secondTurn.turnState.hasToolCalls).toBe(false);
+  });
+
+  test("streaming state messages array preserves ordering for block rendering", () => {
+    const base = createStreamingBase();
+
+    const afterDelta = applyEvents(base, [
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "Hello",
+      },
+    ]);
+
+    // User message comes first, then assistant
+    expect(afterDelta.messages).toHaveLength(2);
+    expect(afterDelta.messages[0].role).toBe("user");
+    expect(afterDelta.messages[0].id).toBe("user-1");
+    expect(afterDelta.messages[1].role).toBe("assistant");
+    expect(afterDelta.messages[1].id).toBe("assistant-1");
+  });
+
+  test("tool placeholders in content blocks align with toolCalls array", () => {
+    const base = createStreamingBase();
+
+    const withTools = applyEvents(base, [
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        name: "bash",
+      },
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.001Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-2",
+        name: "read",
+      },
+    ]);
+
+    // Every tool-call content block should reference a tool in toolCalls
+    const toolBlockIds = withTools.turnState.contentBlocks
+      .filter((b) => b.type === "tool-call")
+      .map((b) => b.toolCallId);
+    const toolCallIds = withTools.toolCalls.map((tc) => tc.id);
+
+    for (const blockId of toolBlockIds) {
+      expect(toolCallIds).toContain(blockId);
+    }
+  });
+});
+
 describe("conversation store pipeline", () => {
   test("streams daemon events and auto-returns to idle after complete", async () => {
     const streamEvents: DaemonStreamEvent[] = [
@@ -992,5 +1209,495 @@ describe("conversation store pipeline", () => {
 
     const snapshot = store.getState();
     expect(snapshot.streaming.status).toBe("error");
+  });
+});
+
+// --- Expand/collapse interaction tests ---
+
+function createToolCall(overrides: Partial<DisplayToolCall> = {}): DisplayToolCall {
+  return {
+    id: "tool-1",
+    name: "bash",
+    status: "complete",
+    args: { command: "ls" },
+    result: "file1.ts\nfile2.ts",
+    ...overrides,
+  };
+}
+
+describe("expand/collapse state management", () => {
+  test("TOGGLE_TOOL_EXPAND adds tool call id to expanded set", () => {
+    const state = appReducer(DEFAULT_STATE, {
+      type: "TOGGLE_TOOL_EXPAND",
+      payload: { toolCallId: "tool-1" },
+    });
+
+    expect(state.expandedToolCalls.has("tool-1")).toBe(true);
+  });
+
+  test("TOGGLE_TOOL_EXPAND removes tool call id when already expanded", () => {
+    let state = appReducer(DEFAULT_STATE, {
+      type: "TOGGLE_TOOL_EXPAND",
+      payload: { toolCallId: "tool-1" },
+    });
+    expect(state.expandedToolCalls.has("tool-1")).toBe(true);
+
+    state = appReducer(state, {
+      type: "TOGGLE_TOOL_EXPAND",
+      payload: { toolCallId: "tool-1" },
+    });
+    expect(state.expandedToolCalls.has("tool-1")).toBe(false);
+  });
+
+  test("TOGGLE_TOOL_EXPAND handles multiple tool calls independently", () => {
+    let state = DEFAULT_STATE;
+
+    state = appReducer(state, {
+      type: "TOGGLE_TOOL_EXPAND",
+      payload: { toolCallId: "tool-1" },
+    });
+    state = appReducer(state, {
+      type: "TOGGLE_TOOL_EXPAND",
+      payload: { toolCallId: "tool-2" },
+    });
+
+    expect(state.expandedToolCalls.has("tool-1")).toBe(true);
+    expect(state.expandedToolCalls.has("tool-2")).toBe(true);
+
+    state = appReducer(state, {
+      type: "TOGGLE_TOOL_EXPAND",
+      payload: { toolCallId: "tool-1" },
+    });
+
+    expect(state.expandedToolCalls.has("tool-1")).toBe(false);
+    expect(state.expandedToolCalls.has("tool-2")).toBe(true);
+  });
+
+  test("COLLAPSE_ALL_TOOLS clears all expanded tool calls", () => {
+    let state = DEFAULT_STATE;
+
+    state = appReducer(state, {
+      type: "TOGGLE_TOOL_EXPAND",
+      payload: { toolCallId: "tool-1" },
+    });
+    state = appReducer(state, {
+      type: "TOGGLE_TOOL_EXPAND",
+      payload: { toolCallId: "tool-2" },
+    });
+    state = appReducer(state, {
+      type: "TOGGLE_TOOL_EXPAND",
+      payload: { toolCallId: "tool-3" },
+    });
+
+    expect(state.expandedToolCalls.size).toBe(3);
+
+    state = appReducer(state, { type: "COLLAPSE_ALL_TOOLS" });
+    expect(state.expandedToolCalls.size).toBe(0);
+  });
+
+  test("CLEAR_MESSAGES resets expanded tool calls", () => {
+    let state = DEFAULT_STATE;
+
+    state = appReducer(state, {
+      type: "TOGGLE_TOOL_EXPAND",
+      payload: { toolCallId: "tool-1" },
+    });
+    expect(state.expandedToolCalls.size).toBe(1);
+
+    state = appReducer(state, { type: "CLEAR_MESSAGES" });
+    expect(state.expandedToolCalls.size).toBe(0);
+  });
+
+  test("SET_ACTIVE_CONVERSATION resets expanded tool calls", () => {
+    let state = DEFAULT_STATE;
+
+    state = appReducer(state, {
+      type: "TOGGLE_TOOL_EXPAND",
+      payload: { toolCallId: "tool-1" },
+    });
+    expect(state.expandedToolCalls.size).toBe(1);
+
+    state = appReducer(state, {
+      type: "SET_ACTIVE_CONVERSATION",
+      payload: "new-conv",
+    });
+    expect(state.expandedToolCalls.size).toBe(0);
+  });
+
+  test("expanded set is immutable across toggles", () => {
+    const state1 = appReducer(DEFAULT_STATE, {
+      type: "TOGGLE_TOOL_EXPAND",
+      payload: { toolCallId: "tool-1" },
+    });
+    const state2 = appReducer(state1, {
+      type: "TOGGLE_TOOL_EXPAND",
+      payload: { toolCallId: "tool-2" },
+    });
+
+    // Original set should not be mutated
+    expect(state1.expandedToolCalls.size).toBe(1);
+    expect(state2.expandedToolCalls.size).toBe(2);
+    expect(state1.expandedToolCalls).not.toBe(state2.expandedToolCalls);
+  });
+});
+
+describe("expand/collapse visual state mapping", () => {
+  test("toolCallsToVisualStates respects expanded set", () => {
+    const toolCalls: DisplayToolCall[] = [
+      createToolCall({ id: "tool-1", name: "bash" }),
+      createToolCall({ id: "tool-2", name: "read" }),
+      createToolCall({ id: "tool-3", name: "grep" }),
+    ];
+
+    const expandedSet = new Set(["tool-2"]);
+    const states = toolCallsToVisualStates(toolCalls, expandedSet);
+
+    expect(states[0].expanded).toBe(false);
+    expect(states[1].expanded).toBe(true);
+    expect(states[2].expanded).toBe(false);
+  });
+
+  test("toolCallsToVisualStates defaults to collapsed when no expanded set", () => {
+    const toolCalls: DisplayToolCall[] = [
+      createToolCall({ id: "tool-1" }),
+      createToolCall({ id: "tool-2" }),
+    ];
+
+    const states = toolCallsToVisualStates(toolCalls);
+
+    expect(states[0].expanded).toBe(false);
+    expect(states[1].expanded).toBe(false);
+  });
+
+  test("toolCallsToVisualStates preserves tool call ordering", () => {
+    const toolCalls: DisplayToolCall[] = [
+      createToolCall({ id: "tool-1", name: "bash" }),
+      createToolCall({ id: "tool-2", name: "read" }),
+      createToolCall({ id: "tool-3", name: "grep" }),
+    ];
+
+    const expandedSet = new Set(["tool-1", "tool-3"]);
+    const states = toolCallsToVisualStates(toolCalls, expandedSet);
+
+    expect(states).toHaveLength(3);
+    expect(states[0].id).toBe("tool-1");
+    expect(states[1].id).toBe("tool-2");
+    expect(states[2].id).toBe("tool-3");
+    expect(states[0].toolName).toBe("bash");
+    expect(states[1].toolName).toBe("read");
+    expect(states[2].toolName).toBe("grep");
+  });
+
+  test("toggling expand does not change ordering of visual states", () => {
+    const toolCalls: DisplayToolCall[] = [
+      createToolCall({ id: "tool-1", name: "bash" }),
+      createToolCall({ id: "tool-2", name: "read" }),
+      createToolCall({ id: "tool-3", name: "grep" }),
+    ];
+
+    // All collapsed
+    const collapsed = toolCallsToVisualStates(toolCalls, new Set());
+    // All expanded
+    const expanded = toolCallsToVisualStates(toolCalls, new Set(["tool-1", "tool-2", "tool-3"]));
+    // Mixed
+    const mixed = toolCallsToVisualStates(toolCalls, new Set(["tool-2"]));
+
+    // Ordering should be identical regardless of expand state
+    for (const states of [collapsed, expanded, mixed]) {
+      expect(states[0].id).toBe("tool-1");
+      expect(states[1].id).toBe("tool-2");
+      expect(states[2].id).toBe("tool-3");
+    }
+  });
+});
+
+describe("error-state auto-expansion", () => {
+  test("shouldAutoExpand returns true for error status", () => {
+    expect(shouldAutoExpand(createToolCall({ status: "error" }))).toBe(true);
+  });
+
+  test("shouldAutoExpand returns true for isError flag", () => {
+    expect(shouldAutoExpand(createToolCall({ status: "complete", isError: true }))).toBe(true);
+  });
+
+  test("shouldAutoExpand returns false for successful tool calls", () => {
+    expect(shouldAutoExpand(createToolCall({ status: "complete" }))).toBe(false);
+  });
+
+  test("shouldAutoExpand returns false for running tool calls", () => {
+    expect(shouldAutoExpand(createToolCall({ status: "running" }))).toBe(false);
+  });
+
+  test("shouldAutoExpand returns false for pending tool calls", () => {
+    expect(shouldAutoExpand(createToolCall({ status: "pending" }))).toBe(false);
+  });
+
+  test("error tool calls are expanded even when not in expanded set", () => {
+    const toolCalls: DisplayToolCall[] = [
+      createToolCall({ id: "tool-1", status: "complete" }),
+      createToolCall({ id: "tool-2", status: "error", result: "Permission denied", isError: true }),
+      createToolCall({ id: "tool-3", status: "complete" }),
+    ];
+
+    // Empty expanded set — only error should be expanded
+    const states = toolCalls.map((dtc) => {
+      const expanded = shouldAutoExpand(dtc) || new Set<string>().has(dtc.id);
+      return { id: dtc.id, expanded };
+    });
+
+    expect(states[0].expanded).toBe(false);
+    expect(states[1].expanded).toBe(true);
+    expect(states[2].expanded).toBe(false);
+  });
+
+  test("error tool calls remain expanded even when toggled off in expanded set", () => {
+    const errorTool = createToolCall({
+      id: "tool-err",
+      status: "error",
+      result: "command not found",
+      isError: true,
+    });
+
+    // shouldAutoExpand overrides the expanded set
+    expect(shouldAutoExpand(errorTool)).toBe(true);
+  });
+});
+
+describe("ordering stability with expand/collapse", () => {
+  test("multi-tool sequence ordering is stable across expand toggles", () => {
+    const base = createStreamingBase();
+
+    const afterTools = applyEvents(base, [
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        name: "bash",
+      },
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.001Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-2",
+        name: "read",
+      },
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.002Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-3",
+        name: "grep",
+      },
+      {
+        type: "tool-call-complete",
+        timestamp: "2026-02-11T00:00:04.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        result: "ok",
+      },
+      {
+        type: "tool-call-complete",
+        timestamp: "2026-02-11T00:00:04.001Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-2",
+        result: "ok",
+      },
+      {
+        type: "tool-call-complete",
+        timestamp: "2026-02-11T00:00:04.002Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-3",
+        result: "ok",
+      },
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:05.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "All done.",
+      },
+    ]);
+
+    // Content blocks should maintain order regardless of expand state
+    const blocks = afterTools.turnState.contentBlocks;
+    expect(blocks).toHaveLength(4);
+    expect(blocks[0].type).toBe("tool-call");
+    expect(blocks[0].toolCallId).toBe("tool-1");
+    expect(blocks[1].type).toBe("tool-call");
+    expect(blocks[1].toolCallId).toBe("tool-2");
+    expect(blocks[2].type).toBe("tool-call");
+    expect(blocks[2].toolCallId).toBe("tool-3");
+    expect(blocks[3].type).toBe("text");
+    expect(blocks[3].text).toBe("All done.");
+
+    // Sequence indices are stable
+    expect(afterTools.toolCalls[0].sequenceIndex).toBe(0);
+    expect(afterTools.toolCalls[1].sequenceIndex).toBe(1);
+    expect(afterTools.toolCalls[2].sequenceIndex).toBe(2);
+  });
+
+  test("synthesis text ordering preserved after tool completion", () => {
+    const base = createStreamingBase();
+
+    const afterComplete = applyEvents(base, [
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:02.500Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "Let me check...",
+      },
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        name: "bash",
+      },
+      {
+        type: "tool-call-complete",
+        timestamp: "2026-02-11T00:00:04.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        result: "ok",
+      },
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:05.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "Here are the results.",
+      },
+      {
+        type: "complete",
+        timestamp: "2026-02-11T00:00:06.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        content: "Let me check...Here are the results.",
+      },
+    ]);
+
+    expect(afterComplete.status).toBe("complete");
+    const blocks = afterComplete.turnState.contentBlocks;
+    expect(blocks).toHaveLength(3);
+    expect(blocks[0]).toEqual({ type: "text", text: "Let me check..." });
+    expect(blocks[1]).toEqual({ type: "tool-call", toolCallId: "tool-1" });
+    expect(blocks[2]).toEqual({ type: "text", text: "Here are the results." });
+  });
+
+  test("error tool calls preserve diagnostics in turn state", () => {
+    const base = createStreamingBase();
+
+    const afterError = applyEvents(base, [
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        name: "bash",
+        args: { command: "rm -rf /" },
+      },
+      {
+        type: "tool-call-complete",
+        timestamp: "2026-02-11T00:00:04.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        error: "Permission denied: cannot remove root",
+      },
+    ]);
+
+    expect(afterError.toolCalls[0].status).toBe("error");
+    expect(afterError.toolCalls[0].error).toBe("Permission denied: cannot remove root");
+    expect(afterError.toolCalls[0].args).toEqual({ command: "rm -rf /" });
+
+    // Content block still references the tool call
+    expect(afterError.turnState.contentBlocks).toHaveLength(1);
+    expect(afterError.turnState.contentBlocks[0].type).toBe("tool-call");
+    expect(afterError.turnState.contentBlocks[0].toolCallId).toBe("tool-1");
+  });
+
+  test("mixed success and error tools maintain ordering", () => {
+    const base = createStreamingBase();
+
+    const afterMixed = applyEvents(base, [
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        name: "bash",
+      },
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.001Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-2",
+        name: "write",
+      },
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.002Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-3",
+        name: "read",
+      },
+      {
+        type: "tool-call-complete",
+        timestamp: "2026-02-11T00:00:04.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        result: "ok",
+      },
+      {
+        type: "tool-call-complete",
+        timestamp: "2026-02-11T00:00:04.001Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-2",
+        error: "Permission denied",
+      },
+      {
+        type: "tool-call-complete",
+        timestamp: "2026-02-11T00:00:04.002Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-3",
+        result: "file contents",
+      },
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:05.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "One tool failed.",
+      },
+    ]);
+
+    // Ordering preserved: tool-1 (success), tool-2 (error), tool-3 (success), synthesis
+    const blocks = afterMixed.turnState.contentBlocks;
+    expect(blocks).toHaveLength(4);
+    expect(blocks[0].toolCallId).toBe("tool-1");
+    expect(blocks[1].toolCallId).toBe("tool-2");
+    expect(blocks[2].toolCallId).toBe("tool-3");
+    expect(blocks[3].text).toBe("One tool failed.");
+
+    // Error tool preserves diagnostics
+    expect(afterMixed.toolCalls[1].status).toBe("error");
+    expect(afterMixed.toolCalls[1].error).toBe("Permission denied");
   });
 });

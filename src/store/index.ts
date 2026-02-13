@@ -10,7 +10,7 @@ import {
   type LayoutAction,
 } from "../state/layout-mode";
 import type { StreamToolCall, TurnContentBlock } from "../state/streaming-state";
-import type { AppState, DisplayContentBlock, DisplayMessage, DisplayToolCall, FocusedPanel } from "./types";
+import type { AppState, DisplayContentBlock, DisplayMessage, DisplayToolCall, DisplayToolCallStatus, FocusedPanel } from "./types";
 import { DEFAULT_STATE } from "./types";
 
 function isFocusedPanel(value: unknown): value is FocusedPanel {
@@ -90,6 +90,8 @@ export type AppAction =
         contentBlocks: TurnContentBlock[];
       };
     }
+  | { type: "TOGGLE_TOOL_EXPAND"; payload: { toolCallId: string } }
+  | { type: "COLLAPSE_ALL_TOOLS" }
   | { type: "CLEAR_MESSAGES" }
   | LayoutModeAction
   | LayoutAction;
@@ -153,6 +155,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return {
         ...state,
         activeConversationId: action.payload,
+        expandedToolCalls: new Set<string>(),
       };
     case "SET_CONVERSATION_FILTER":
       return {
@@ -328,12 +331,31 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         isStreaming: false,
       };
     }
+    case "TOGGLE_TOOL_EXPAND": {
+      const { toolCallId } = action.payload;
+      const nextExpanded = new Set(state.expandedToolCalls);
+      if (nextExpanded.has(toolCallId)) {
+        nextExpanded.delete(toolCallId);
+      } else {
+        nextExpanded.add(toolCallId);
+      }
+      return {
+        ...state,
+        expandedToolCalls: nextExpanded,
+      };
+    }
+    case "COLLAPSE_ALL_TOOLS":
+      return {
+        ...state,
+        expandedToolCalls: new Set<string>(),
+      };
     case "CLEAR_MESSAGES":
       return {
         ...state,
         messages: [],
         streamingMessageId: null,
         isStreaming: false,
+        expandedToolCalls: new Set<string>(),
       };
     case "TOGGLE_PANEL":
     case "DISMISS_PANEL":
@@ -394,6 +416,6 @@ export function useApp(): AppContextValue {
 }
 
 export { DEFAULT_STATE };
-export type { AppState, DisplayContentBlock, DisplayMessage, DisplayToolCall, FocusedPanel };
+export type { AppState, DisplayContentBlock, DisplayMessage, DisplayToolCall, DisplayToolCallStatus, FocusedPanel };
 export type { LayoutMode, PanelId, PanelState } from "../state/layout-mode";
 export { getLayoutVisibility, getLayoutModeLabel } from "../state/layout-mode";

@@ -3,6 +3,14 @@
  *
  * Pin preferences are stored at ~/.config/reins/pin-preferences.json.
  * On startup, pinned state is restored but panels start dismissed.
+ *
+ * Sidebar toggle intent:
+ *   The breakpoint engine uses sidebar toggle intent to decide whether
+ *   to auto-collapse the drawer on narrow terminals. A drawer that is
+ *   either pinned or currently visible counts as "user toggled open",
+ *   meaning the user has expressed intent to see the sidebar. This
+ *   intent is respected as long as the terminal is wide enough to fit
+ *   the sidebar alongside a minimum conversation area.
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -11,6 +19,7 @@ import { join } from "node:path";
 
 import {
   DEFAULT_PIN_PREFERENCES,
+  type PanelState,
   type PinPreferences,
 } from "./layout-mode";
 
@@ -59,6 +68,15 @@ export function savePinPreferences(prefs: PinPreferences): void {
   } catch {
     // Silently fail — pin persistence is best-effort
   }
+}
+
+/**
+ * Derive whether the user has expressed intent to see the sidebar.
+ * Returns true if the drawer is currently visible or pinned.
+ * Used by the breakpoint engine to decide auto-collapse behavior.
+ */
+export function hasSidebarToggleIntent(panels: PanelState): boolean {
+  return panels.drawer.visible || panels.drawer.pinned;
 }
 
 export { PIN_FILE, CONFIG_DIR };

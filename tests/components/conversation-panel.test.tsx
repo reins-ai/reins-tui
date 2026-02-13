@@ -1,9 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 import type { DisplayMessage, DisplayToolCall } from "../../src/store";
 import {
-  EXCHANGE_SEPARATOR,
-  shouldShowSeparator,
+  isExchangeBoundary,
+  MESSAGE_GAP,
+  EXCHANGE_GAP,
+  getStreamingPlaceholderStyle,
 } from "../../src/components/conversation-panel";
 import {
   GLYPH_REINS,
@@ -15,8 +19,10 @@ import {
   getRoleColor,
   getToolGlyph,
   getToolGlyphColor,
+  getMessageBlockStyle,
 } from "../../src/components/message";
 import type { ThemeTokens } from "../../src/theme/theme-schema";
+import type { MessageRole } from "../../src/theme/use-theme-tokens";
 
 function makeMessage(
   role: DisplayMessage["role"],
@@ -186,65 +192,61 @@ describe("tool glyph color mapping", () => {
   });
 });
 
-describe("exchange separator logic", () => {
-  test("no separator before first message", () => {
+describe("exchange boundary detection", () => {
+  test("no boundary before first message", () => {
     const messages = [makeMessage("user", "Hello")];
-    expect(shouldShowSeparator(messages, 0)).toBe(false);
+    expect(isExchangeBoundary(messages, 0)).toBe(false);
   });
 
-  test("separator before user message following assistant", () => {
+  test("boundary before user message following assistant", () => {
     const messages = [
       makeMessage("assistant", "Hi there"),
       makeMessage("user", "Thanks"),
     ];
-    expect(shouldShowSeparator(messages, 1)).toBe(true);
+    expect(isExchangeBoundary(messages, 1)).toBe(true);
   });
 
-  test("separator before user message following tool", () => {
+  test("boundary before user message following tool", () => {
     const messages = [
       makeMessage("tool", "result data"),
       makeMessage("user", "Got it"),
     ];
-    expect(shouldShowSeparator(messages, 1)).toBe(true);
+    expect(isExchangeBoundary(messages, 1)).toBe(true);
   });
 
-  test("no separator between consecutive user messages", () => {
+  test("no boundary between consecutive user messages", () => {
     const messages = [
       makeMessage("user", "First"),
       makeMessage("user", "Second"),
     ];
-    expect(shouldShowSeparator(messages, 1)).toBe(false);
+    expect(isExchangeBoundary(messages, 1)).toBe(false);
   });
 
-  test("no separator between consecutive assistant messages", () => {
+  test("no boundary between consecutive assistant messages", () => {
     const messages = [
       makeMessage("assistant", "Part 1"),
       makeMessage("assistant", "Part 2"),
     ];
-    expect(shouldShowSeparator(messages, 1)).toBe(false);
+    expect(isExchangeBoundary(messages, 1)).toBe(false);
   });
 
-  test("no separator before assistant message following user", () => {
+  test("no boundary before assistant message following user", () => {
     const messages = [
       makeMessage("user", "Question"),
       makeMessage("assistant", "Answer"),
     ];
-    expect(shouldShowSeparator(messages, 1)).toBe(false);
+    expect(isExchangeBoundary(messages, 1)).toBe(false);
   });
 
-  test("no separator before system message", () => {
+  test("no boundary before system message", () => {
     const messages = [
       makeMessage("assistant", "Done"),
       makeMessage("system", "Session started"),
     ];
-    expect(shouldShowSeparator(messages, 1)).toBe(false);
+    expect(isExchangeBoundary(messages, 1)).toBe(false);
   });
 
-  test("separator text is gentle dashed line", () => {
-    expect(EXCHANGE_SEPARATOR).toBe("─ ─ ─");
-  });
-
-  test("multi-turn conversation has correct separator placement", () => {
+  test("multi-turn conversation has correct boundary placement", () => {
     const messages = [
       makeMessage("user", "Hello"),
       makeMessage("assistant", "Hi!"),
@@ -253,11 +255,26 @@ describe("exchange separator logic", () => {
       makeMessage("user", "Bye"),
     ];
 
-    expect(shouldShowSeparator(messages, 0)).toBe(false);
-    expect(shouldShowSeparator(messages, 1)).toBe(false);
-    expect(shouldShowSeparator(messages, 2)).toBe(true);
-    expect(shouldShowSeparator(messages, 3)).toBe(false);
-    expect(shouldShowSeparator(messages, 4)).toBe(true);
+    expect(isExchangeBoundary(messages, 0)).toBe(false);
+    expect(isExchangeBoundary(messages, 1)).toBe(false);
+    expect(isExchangeBoundary(messages, 2)).toBe(true);
+    expect(isExchangeBoundary(messages, 3)).toBe(false);
+    expect(isExchangeBoundary(messages, 4)).toBe(true);
+  });
+});
+
+describe("message spacing rhythm", () => {
+  test("MESSAGE_GAP provides consistent intra-exchange spacing", () => {
+    expect(MESSAGE_GAP).toBeGreaterThan(0);
+  });
+
+  test("EXCHANGE_GAP is larger than MESSAGE_GAP for visual separation", () => {
+    expect(EXCHANGE_GAP).toBeGreaterThan(MESSAGE_GAP);
+  });
+
+  test("spacing values are whole numbers for terminal line alignment", () => {
+    expect(Number.isInteger(MESSAGE_GAP)).toBe(true);
+    expect(Number.isInteger(EXCHANGE_GAP)).toBe(true);
   });
 });
 
@@ -340,7 +357,7 @@ describe("conversation with tool calls", () => {
     expect(getToolGlyph(toolCalls[2].status)).toBe(GLYPH_TOOL_ERROR);
   });
 
-  test("separator appears before user reply after tool-bearing assistant message", () => {
+  test("exchange boundary detected before user reply after tool-bearing assistant message", () => {
     const messages = [
       makeMessage("assistant", "Checking...", {
         toolCalls: [makeToolCall("complete", { name: "search" })],
@@ -348,7 +365,7 @@ describe("conversation with tool calls", () => {
       makeMessage("user", "What did you find?"),
     ];
 
-    expect(shouldShowSeparator(messages, 1)).toBe(true);
+    expect(isExchangeBoundary(messages, 1)).toBe(true);
   });
 });
 
@@ -423,5 +440,134 @@ describe("tool lifecycle rendering in conversation", () => {
 
     expect(withArgs.args).toBeDefined();
     expect(withoutArgs.args).toBeUndefined();
+  });
+});
+
+const mockGetRoleBorder = (role: MessageRole): string => {
+  const borders: Record<MessageRole, string> = {
+    user: "#f0c674",
+    assistant: "#e8976c",
+    system: "#6b6360",
+    tool: "#6ca8e8",
+  };
+  return borders[role];
+};
+
+describe("streaming placeholder block styling", () => {
+  test("streaming placeholder uses assistant accent color", () => {
+    const style = getStreamingPlaceholderStyle(MOCK_TOKENS, mockGetRoleBorder);
+    expect(style.accentColor).toBe(mockGetRoleBorder("assistant"));
+  });
+
+  test("streaming placeholder uses assistant background", () => {
+    const style = getStreamingPlaceholderStyle(MOCK_TOKENS, mockGetRoleBorder);
+    expect(style.backgroundColor).toBe(MOCK_TOKENS["conversation.assistant.bg"]);
+  });
+
+  test("streaming placeholder matches assistant message block padding", () => {
+    const placeholderStyle = getStreamingPlaceholderStyle(MOCK_TOKENS, mockGetRoleBorder);
+    const assistantStyle = getMessageBlockStyle("assistant", MOCK_TOKENS, mockGetRoleBorder);
+    expect(placeholderStyle.paddingLeft).toBe(assistantStyle.paddingLeft);
+    expect(placeholderStyle.paddingRight).toBe(assistantStyle.paddingRight);
+  });
+
+  test("streaming placeholder style has consistent spacing with message blocks", () => {
+    const style = getStreamingPlaceholderStyle(MOCK_TOKENS, mockGetRoleBorder);
+    expect(style.paddingLeft).toBe(2);
+    expect(style.paddingRight).toBe(1);
+    expect(style.marginTop).toBe(0);
+    expect(style.marginBottom).toBe(0);
+  });
+});
+
+describe("tool calls render inside framed message blocks", () => {
+  test("message.tsx renders ToolCallAnchor inside FramedBlock", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/message.tsx"),
+      "utf-8",
+    );
+    // ToolCallAnchor is rendered inside FramedBlock (before closing tag)
+    const framedBlockClose = source.indexOf("</FramedBlock>");
+    const toolCallAnchorPos = source.indexOf("ToolCallAnchor");
+    expect(toolCallAnchorPos).toBeGreaterThan(-1);
+    expect(framedBlockClose).toBeGreaterThan(toolCallAnchorPos);
+  });
+
+  test("conversation-panel.tsx does not render tool calls outside Message component", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/conversation-panel.tsx"),
+      "utf-8",
+    );
+    // No InlineToolCalls or ToolInline rendered directly in conversation panel
+    expect(source).not.toContain("InlineToolCalls");
+    expect(source).not.toContain("<ToolInline");
+  });
+
+  test("conversation-panel.tsx wraps streaming placeholder in FramedBlock", () => {
+    const source = readFileSync(
+      resolve(import.meta.dir, "../../src/components/conversation-panel.tsx"),
+      "utf-8",
+    );
+    expect(source).toContain("FramedBlock");
+    expect(source).toContain("ACCENT_BORDER_CHARS");
+    expect(source).toContain("getStreamingPlaceholderStyle");
+  });
+});
+
+describe("multi-turn message ordering with tools", () => {
+  test("exchange boundary detected after tool-bearing assistant before next user message", () => {
+    const messages = [
+      makeMessage("assistant", "Let me check...", {
+        toolCalls: [
+          makeToolCall("complete", { name: "bash" }),
+          makeToolCall("complete", { name: "read" }),
+        ],
+      }),
+      makeMessage("user", "What did you find?"),
+    ];
+    expect(isExchangeBoundary(messages, 1)).toBe(true);
+  });
+
+  test("no exchange boundary between assistant messages with and without tools", () => {
+    const messages = [
+      makeMessage("assistant", "Running tools...", {
+        toolCalls: [makeToolCall("complete", { name: "bash" })],
+      }),
+      makeMessage("assistant", "Here are the results"),
+    ];
+    expect(isExchangeBoundary(messages, 1)).toBe(false);
+  });
+
+  test("streaming message with tools preserves ordering in multi-turn", () => {
+    const messages = [
+      makeMessage("user", "Run some tools"),
+      makeMessage("assistant", "On it...", {
+        isStreaming: true,
+        toolCalls: [
+          makeToolCall("running", { name: "bash" }),
+          makeToolCall("pending", { name: "read" }),
+        ],
+      }),
+    ];
+    // No exchange boundary between user and streaming assistant
+    expect(isExchangeBoundary(messages, 1)).toBe(false);
+    // Streaming message preserves tool calls
+    expect(messages[1].toolCalls).toHaveLength(2);
+    expect(messages[1].isStreaming).toBe(true);
+  });
+
+  test("completed tool-bearing turn followed by new user turn has correct boundary", () => {
+    const messages = [
+      makeMessage("user", "First question"),
+      makeMessage("assistant", "Let me check", {
+        toolCalls: [makeToolCall("complete", { name: "grep" })],
+      }),
+      makeMessage("user", "Second question"),
+      makeMessage("assistant", "Sure thing"),
+    ];
+    expect(isExchangeBoundary(messages, 0)).toBe(false);
+    expect(isExchangeBoundary(messages, 1)).toBe(false);
+    expect(isExchangeBoundary(messages, 2)).toBe(true);
+    expect(isExchangeBoundary(messages, 3)).toBe(false);
   });
 });

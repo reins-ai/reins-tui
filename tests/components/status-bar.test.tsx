@@ -3,10 +3,26 @@ import { describe, expect, test } from "bun:test";
 import type { DaemonConnectionStatus } from "../../src/daemon/contracts";
 import type { ConversationLifecycleStatus } from "../../src/state/status-machine";
 import {
+  deriveStatusSegments,
+  resolveSegmentVisibility,
+  resolveStatusSegmentSet,
+  formatSegmentText,
+  isSegmentVisible,
+} from "../../src/state/status-machine";
+import {
+  STATUS_SEGMENT_PRIORITY,
+  STATUS_SEGMENT_ORDER,
+  SEGMENT_DROP_THRESHOLDS,
+  type StatusSegment,
+  type StatusSegmentId,
+  type StatusSegmentSources,
+} from "../../src/store/types";
+import {
   HEARTBEAT_GLYPH,
   HEARTBEAT_PULSE_INTERVAL_MS,
   HEARTBEAT_RECONNECT_INTERVAL_MS,
   COMPACTION_INDICATOR_DURATION_MS,
+  SEGMENT_SEPARATOR,
   resolveHeartbeatColor,
   resolveHeartbeatInterval,
   resolveLifecycleDisplay,
@@ -17,6 +33,8 @@ import {
   buildTruncatedLeftText,
   getConnectionGlyph,
   getConnectionLabel,
+  groupSegments,
+  buildGroupText,
   type HeartbeatPhase,
   type LifecycleDisplay,
   type StatusBarSegments,
@@ -705,5 +723,664 @@ describe("all status bar colors use theme tokens exclusively", () => {
       const display = resolveLifecycleDisplay(status, 0, null);
       expect(validTokens).toContain(display.colorToken);
     }
+  });
+});
+
+// --- Status segment data model tests ---
+
+function makeDefaultSources(overrides: Partial<StatusSegmentSources> = {}): StatusSegmentSources {
+  return {
+    connectionStatus: "connected",
+    currentModel: "claude-3.5-sonnet",
+    lifecycleStatus: "idle",
+    activeToolName: null,
+    tokenCount: 0,
+    cost: null,
+    compactionActive: false,
+    terminalWidth: 120,
+    ...overrides,
+  };
+}
+
+describe("STATUS_SEGMENT_PRIORITY", () => {
+  test("connection has highest priority (lowest number)", () => {
+    expect(STATUS_SEGMENT_PRIORITY.connection).toBe(1);
+  });
+
+  test("model has second priority", () => {
+    expect(STATUS_SEGMENT_PRIORITY.model).toBe(2);
+  });
+
+  test("lifecycle has third priority", () => {
+    expect(STATUS_SEGMENT_PRIORITY.lifecycle).toBe(3);
+  });
+
+  test("hints has lowest priority (highest number)", () => {
+    expect(STATUS_SEGMENT_PRIORITY.hints).toBe(4);
+  });
+
+  test("all priorities are unique", () => {
+    const values = Object.values(STATUS_SEGMENT_PRIORITY);
+    const unique = new Set(values);
+    expect(unique.size).toBe(values.length);
+  });
+});
+
+describe("STATUS_SEGMENT_ORDER", () => {
+  test("contains all four segment IDs", () => {
+    expect(STATUS_SEGMENT_ORDER).toHaveLength(4);
+    expect(STATUS_SEGMENT_ORDER).toContain("connection");
+    expect(STATUS_SEGMENT_ORDER).toContain("model");
+    expect(STATUS_SEGMENT_ORDER).toContain("lifecycle");
+    expect(STATUS_SEGMENT_ORDER).toContain("hints");
+  });
+
+  test("is ordered by priority (connection first, hints last)", () => {
+    expect(STATUS_SEGMENT_ORDER[0]).toBe("connection");
+    expect(STATUS_SEGMENT_ORDER[3]).toBe("hints");
+  });
+});
+
+describe("SEGMENT_DROP_THRESHOLDS", () => {
+  test("connection never drops (threshold 0)", () => {
+    expect(SEGMENT_DROP_THRESHOLDS.connection).toBe(0);
+  });
+
+  test("hints drop first (highest threshold)", () => {
+    const thresholds = Object.values(SEGMENT_DROP_THRESHOLDS);
+    expect(SEGMENT_DROP_THRESHOLDS.hints).toBe(Math.max(...thresholds));
+  });
+
+  test("drop order matches priority order", () => {
+    expect(SEGMENT_DROP_THRESHOLDS.hints).toBeGreaterThan(SEGMENT_DROP_THRESHOLDS.lifecycle);
+    expect(SEGMENT_DROP_THRESHOLDS.lifecycle).toBeGreaterThan(SEGMENT_DROP_THRESHOLDS.model);
+    expect(SEGMENT_DROP_THRESHOLDS.model).toBeGreaterThan(SEGMENT_DROP_THRESHOLDS.connection);
+  });
+});
+
+describe("deriveStatusSegments", () => {
+  test("returns exactly four segments", () => {
+    const segments = deriveStatusSegments(makeDefaultSources());
+    expect(segments).toHaveLength(4);
+  });
+
+  test("segments are in priority order", () => {
+    const segments = deriveStatusSegments(makeDefaultSources());
+    const ids = segments.map((s) => s.id);
+    expect(ids).toEqual(["connection", "model", "lifecycle", "hints"]);
+  });
+
+  test("all segments start as visible", () => {
+    const segments = deriveStatusSegments(makeDefaultSources());
+    for (const segment of segments) {
+      expect(segment.visible).toBe(true);
+    }
+  });
+
+  test("connection segment shows connected state", () => {
+    const segments = deriveStatusSegments(makeDefaultSources({ connectionStatus: "connected" }));
+    const conn = segments.find((s) => s.id === "connection")!;
+    expect(conn.content).toContain("Connected");
+    expect(conn.glyph).toBe("●");
+    expect(conn.colorToken).toBe("status.success");
+  });
+
+  test("connection segment shows disconnected state", () => {
+    const segments = deriveStatusSegments(makeDefaultSources({ connectionStatus: "disconnected" }));
+    const conn = segments.find((s) => s.id === "connection")!;
+    expect(conn.content).toContain("Offline");
+    expect(conn.glyph).toBe("○");
+    expect(conn.colorToken).toBe("status.error");
+  });
+
+  test("connection segment shows connecting state", () => {
+    const segments = deriveStatusSegments(makeDefaultSources({ connectionStatus: "connecting" }));
+    const conn = segments.find((s) => s.id === "connection")!;
+    expect(conn.content).toContain("Connecting...");
+    expect(conn.colorToken).toBe("status.warning");
+  });
+
+  test("connection segment shows reconnecting state", () => {
+    const segments = deriveStatusSegments(makeDefaultSources({ connectionStatus: "reconnecting" }));
+    const conn = segments.find((s) => s.id === "connection")!;
+    expect(conn.content).toContain("Reconnecting...");
+    expect(conn.colorToken).toBe("status.warning");
+  });
+
+  test("model segment shows current model name", () => {
+    const segments = deriveStatusSegments(makeDefaultSources({ currentModel: "gpt-4o" }));
+    const model = segments.find((s) => s.id === "model")!;
+    expect(model.content).toBe("gpt-4o");
+  });
+
+  test("lifecycle segment shows idle Ready state", () => {
+    const segments = deriveStatusSegments(makeDefaultSources({ lifecycleStatus: "idle" }));
+    const lc = segments.find((s) => s.id === "lifecycle")!;
+    expect(lc.content).toContain("Ready");
+    expect(lc.glyph).toBe("●");
+    expect(lc.colorToken).toBe("status.success");
+  });
+
+  test("lifecycle segment shows streaming with token count", () => {
+    const segments = deriveStatusSegments(makeDefaultSources({
+      lifecycleStatus: "streaming",
+      tokenCount: 42,
+    }));
+    const lc = segments.find((s) => s.id === "lifecycle")!;
+    expect(lc.content).toContain("Streaming [42 tokens]");
+    expect(lc.colorToken).toBe("status.info");
+  });
+
+  test("lifecycle segment shows tool name during streaming", () => {
+    const segments = deriveStatusSegments(makeDefaultSources({
+      lifecycleStatus: "streaming",
+      activeToolName: "bash",
+    }));
+    const lc = segments.find((s) => s.id === "lifecycle")!;
+    expect(lc.content).toContain("Using tool: bash");
+    expect(lc.glyph).toBe("⚙");
+  });
+
+  test("lifecycle segment includes compaction indicator when active", () => {
+    const segments = deriveStatusSegments(makeDefaultSources({
+      lifecycleStatus: "idle",
+      compactionActive: true,
+    }));
+    const lc = segments.find((s) => s.id === "lifecycle")!;
+    expect(lc.content).toContain("⚡ Compacted");
+  });
+
+  test("lifecycle segment omits compaction indicator when inactive", () => {
+    const segments = deriveStatusSegments(makeDefaultSources({
+      lifecycleStatus: "idle",
+      compactionActive: false,
+    }));
+    const lc = segments.find((s) => s.id === "lifecycle")!;
+    expect(lc.content).not.toContain("Compacted");
+  });
+
+  test("lifecycle segment shows complete with cost", () => {
+    const segments = deriveStatusSegments(makeDefaultSources({
+      lifecycleStatus: "complete",
+      cost: "$0.003",
+    }));
+    const lc = segments.find((s) => s.id === "lifecycle")!;
+    expect(lc.content).toContain("Done [$0.003]");
+  });
+
+  test("lifecycle segment shows error state", () => {
+    const segments = deriveStatusSegments(makeDefaultSources({ lifecycleStatus: "error" }));
+    const lc = segments.find((s) => s.id === "lifecycle")!;
+    expect(lc.content).toContain("Error");
+    expect(lc.glyph).toBe("✗");
+    expect(lc.colorToken).toBe("status.error");
+  });
+
+  test("hints segment contains keyboard shortcuts", () => {
+    const segments = deriveStatusSegments(makeDefaultSources());
+    const hints = segments.find((s) => s.id === "hints")!;
+    expect(hints.content).toContain("Ctrl+K");
+    expect(hints.content).toContain("Ctrl+M");
+  });
+
+  test("each segment has correct priority from constant", () => {
+    const segments = deriveStatusSegments(makeDefaultSources());
+    for (const segment of segments) {
+      expect(segment.priority).toBe(STATUS_SEGMENT_PRIORITY[segment.id]);
+    }
+  });
+});
+
+describe("resolveSegmentVisibility", () => {
+  test("all segments visible at wide terminal (120 cols)", () => {
+    const segments = deriveStatusSegments(makeDefaultSources());
+    const result = resolveSegmentVisibility(segments, 120);
+    expect(result.visibleSegments).toHaveLength(4);
+  });
+
+  test("connection is always visible even at minimum width", () => {
+    const segments = deriveStatusSegments(makeDefaultSources());
+    const result = resolveSegmentVisibility(segments, 20);
+    const connVisible = result.visibleSegments.some((s) => s.id === "connection");
+    expect(connVisible).toBe(true);
+  });
+
+  test("hints drop first as width decreases", () => {
+    const segments = deriveStatusSegments(makeDefaultSources());
+
+    // Find the width where hints just barely don't fit
+    const fullResult = resolveSegmentVisibility(segments, 120);
+    const fullWidth = fullResult.totalWidth;
+
+    // At a width just below full, hints should drop first
+    const narrowResult = resolveSegmentVisibility(segments, fullWidth - 1);
+    if (narrowResult.visibleSegments.length < 4) {
+      const droppedIds = segments
+        .filter((s) => !narrowResult.visibleSegments.some((v) => v.id === s.id))
+        .map((s) => s.id);
+      expect(droppedIds).toContain("hints");
+    }
+  });
+
+  test("drop order is deterministic: hints → lifecycle → model", () => {
+    const segments = deriveStatusSegments(makeDefaultSources());
+
+    // Very wide: all visible
+    const wide = resolveSegmentVisibility(segments, 200);
+    expect(wide.visibleSegments).toHaveLength(4);
+
+    // Progressively narrow: track which segments drop and in what order
+    const droppedOrder: StatusSegmentId[] = [];
+    const alreadyDropped = new Set<StatusSegmentId>();
+
+    for (let width = 200; width > 10; width -= 1) {
+      const result = resolveSegmentVisibility(segments, width);
+      const visibleIds = new Set(result.visibleSegments.map((s) => s.id));
+
+      for (const seg of segments) {
+        if (!visibleIds.has(seg.id) && !alreadyDropped.has(seg.id)) {
+          droppedOrder.push(seg.id);
+          alreadyDropped.add(seg.id);
+        }
+      }
+    }
+
+    // Verify the drop order: hints first, then lifecycle, then model
+    // Connection drops last (if at all, only at extreme widths)
+    const hintsIdx = droppedOrder.indexOf("hints");
+    const lifecycleIdx = droppedOrder.indexOf("lifecycle");
+    const modelIdx = droppedOrder.indexOf("model");
+    const connectionIdx = droppedOrder.indexOf("connection");
+
+    if (hintsIdx >= 0 && lifecycleIdx >= 0) {
+      expect(hintsIdx).toBeLessThan(lifecycleIdx);
+    }
+    if (lifecycleIdx >= 0 && modelIdx >= 0) {
+      expect(lifecycleIdx).toBeLessThan(modelIdx);
+    }
+    if (modelIdx >= 0 && connectionIdx >= 0) {
+      expect(modelIdx).toBeLessThan(connectionIdx);
+    }
+  });
+
+  test("same width always produces same visibility", () => {
+    const segments = deriveStatusSegments(makeDefaultSources());
+
+    for (const width of [30, 50, 80, 120]) {
+      const result1 = resolveSegmentVisibility(segments, width);
+      const result2 = resolveSegmentVisibility(segments, width);
+      const ids1 = result1.visibleSegments.map((s) => s.id);
+      const ids2 = result2.visibleSegments.map((s) => s.id);
+      expect(ids1).toEqual(ids2);
+    }
+  });
+
+  test("visible segments never exceed terminal width", () => {
+    const segments = deriveStatusSegments(makeDefaultSources());
+
+    for (const width of [30, 50, 80, 120, 200]) {
+      const result = resolveSegmentVisibility(segments, width);
+      expect(result.totalWidth).toBeLessThanOrEqual(width);
+    }
+  });
+
+  test("segments array includes visibility flags for all segments", () => {
+    const segments = deriveStatusSegments(makeDefaultSources());
+    const result = resolveSegmentVisibility(segments, 50);
+    expect(result.segments).toHaveLength(4);
+
+    for (const seg of result.segments) {
+      const isVisible = result.visibleSegments.some((v) => v.id === seg.id);
+      expect(seg.visible).toBe(isVisible);
+    }
+  });
+});
+
+describe("resolveStatusSegmentSet", () => {
+  test("full pipeline produces valid segment set", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources());
+    expect(result.segments).toHaveLength(4);
+    expect(result.availableWidth).toBe(120);
+    expect(result.visibleSegments.length).toBeGreaterThan(0);
+  });
+
+  test("narrow terminal drops low-priority segments", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 40 }));
+    expect(result.visibleSegments.length).toBeLessThan(4);
+
+    const visibleIds = result.visibleSegments.map((s) => s.id);
+    expect(visibleIds).toContain("connection");
+  });
+
+  test("wide terminal shows all segments", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    expect(result.visibleSegments).toHaveLength(4);
+  });
+});
+
+describe("formatSegmentText", () => {
+  test("joins visible segments with separator", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const text = formatSegmentText(result);
+    expect(text).toContain(" │ ");
+    expect(text).toContain("Connected");
+    expect(text).toContain("claude-3.5-sonnet");
+  });
+
+  test("single visible segment has no separator", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 20 }));
+    if (result.visibleSegments.length === 1) {
+      const text = formatSegmentText(result);
+      expect(text).not.toContain(" │ ");
+    }
+  });
+});
+
+describe("isSegmentVisible", () => {
+  test("returns true for visible segment", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    expect(isSegmentVisible(result, "connection")).toBe(true);
+    expect(isSegmentVisible(result, "model")).toBe(true);
+  });
+
+  test("returns false for dropped segment", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 30 }));
+    if (!result.visibleSegments.some((s) => s.id === "hints")) {
+      expect(isSegmentVisible(result, "hints")).toBe(false);
+    }
+  });
+});
+
+describe("segment-priority width degradation", () => {
+  test("at 120 cols: all four segments visible", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 120 }));
+    expect(result.visibleSegments).toHaveLength(4);
+  });
+
+  test("connection and model survive at 40 cols", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({
+      terminalWidth: 40,
+      currentModel: "gpt-4o",
+    }));
+    const visibleIds = result.visibleSegments.map((s) => s.id);
+    expect(visibleIds).toContain("connection");
+    expect(visibleIds).toContain("model");
+  });
+
+  test("connection survives at 20 cols", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 20 }));
+    const visibleIds = result.visibleSegments.map((s) => s.id);
+    expect(visibleIds).toContain("connection");
+  });
+
+  test("long model name causes earlier segment drops", () => {
+    const shortModel = resolveStatusSegmentSet(makeDefaultSources({
+      terminalWidth: 80,
+      currentModel: "gpt-4o",
+    }));
+    const longModel = resolveStatusSegmentSet(makeDefaultSources({
+      terminalWidth: 80,
+      currentModel: "claude-3.5-sonnet-20241022-v2-extended",
+    }));
+
+    expect(shortModel.visibleSegments.length).toBeGreaterThanOrEqual(
+      longModel.visibleSegments.length,
+    );
+  });
+
+  test("streaming lifecycle with tool name fits at standard width", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({
+      terminalWidth: 100,
+      lifecycleStatus: "streaming",
+      activeToolName: "bash",
+    }));
+    const lcVisible = result.visibleSegments.some((s) => s.id === "lifecycle");
+    expect(lcVisible).toBe(true);
+  });
+});
+
+describe("segment data model integrity", () => {
+  test("every segment has a non-empty content string", () => {
+    const segments = deriveStatusSegments(makeDefaultSources());
+    for (const segment of segments) {
+      expect(segment.content.length).toBeGreaterThan(0);
+    }
+  });
+
+  test("every segment has a valid color token", () => {
+    const validPrefixes = ["status.", "text."];
+    const segments = deriveStatusSegments(makeDefaultSources());
+    for (const segment of segments) {
+      const hasValidPrefix = validPrefixes.some((p) => segment.colorToken.startsWith(p));
+      expect(hasValidPrefix).toBe(true);
+    }
+  });
+
+  test("segment priorities are monotonically increasing", () => {
+    const segments = deriveStatusSegments(makeDefaultSources());
+    for (let i = 1; i < segments.length; i++) {
+      expect(segments[i].priority).toBeGreaterThan(segments[i - 1].priority);
+    }
+  });
+
+  test("minWidth matches SEGMENT_DROP_THRESHOLDS", () => {
+    const segments = deriveStatusSegments(makeDefaultSources());
+    for (const segment of segments) {
+      expect(segment.minWidth).toBe(SEGMENT_DROP_THRESHOLDS[segment.id]);
+    }
+  });
+});
+
+// --- Segment grouping tests (polished status bar UI) ---
+
+describe("SEGMENT_SEPARATOR", () => {
+  test("separator is the pipe character with surrounding spaces", () => {
+    expect(SEGMENT_SEPARATOR).toBe(" │ ");
+  });
+
+  test("separator is exactly 3 characters wide", () => {
+    expect(SEGMENT_SEPARATOR.length).toBe(3);
+  });
+});
+
+describe("groupSegments", () => {
+  test("places connection, model, lifecycle in left group", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const { left, right } = groupSegments(result.visibleSegments);
+
+    const leftIds = left.map((s) => s.id);
+    expect(leftIds).toContain("connection");
+    expect(leftIds).toContain("model");
+    expect(leftIds).toContain("lifecycle");
+    expect(leftIds).not.toContain("hints");
+  });
+
+  test("places hints in right group", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const { right } = groupSegments(result.visibleSegments);
+
+    const rightIds = right.map((s) => s.id);
+    expect(rightIds).toContain("hints");
+    expect(rightIds).not.toContain("connection");
+    expect(rightIds).not.toContain("model");
+    expect(rightIds).not.toContain("lifecycle");
+  });
+
+  test("right group is empty when hints are dropped", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 40 }));
+    const { right } = groupSegments(result.visibleSegments);
+
+    expect(right).toHaveLength(0);
+  });
+
+  test("left group preserves priority order", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const { left } = groupSegments(result.visibleSegments);
+
+    for (let i = 1; i < left.length; i++) {
+      expect(left[i].priority).toBeGreaterThan(left[i - 1].priority);
+    }
+  });
+
+  test("handles single visible segment (connection only)", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 20 }));
+    const { left, right } = groupSegments(result.visibleSegments);
+
+    expect(left.length).toBeGreaterThanOrEqual(1);
+    expect(right).toHaveLength(0);
+    expect(left[0].id).toBe("connection");
+  });
+});
+
+describe("buildGroupText", () => {
+  test("joins multiple segments with separator", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const { left } = groupSegments(result.visibleSegments);
+    const text = buildGroupText(left);
+
+    expect(text).toContain(" │ ");
+    expect(text).toContain("Connected");
+    expect(text).toContain("claude-3.5-sonnet");
+  });
+
+  test("single segment produces no separator", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 20 }));
+    const { left } = groupSegments(result.visibleSegments);
+
+    if (left.length === 1) {
+      const text = buildGroupText(left);
+      expect(text).not.toContain(" │ ");
+    }
+  });
+
+  test("right group text contains keyboard shortcuts", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const { right } = groupSegments(result.visibleSegments);
+    const text = buildGroupText(right);
+
+    expect(text).toContain("Ctrl+K");
+    expect(text).toContain("Ctrl+M");
+  });
+});
+
+// --- Polished status bar visual behavior tests ---
+
+describe("polished status bar layout stability", () => {
+  test("left group never contains hints segment", () => {
+    for (const width of [30, 50, 80, 120, 200]) {
+      const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: width }));
+      const { left } = groupSegments(result.visibleSegments);
+      const leftIds = left.map((s) => s.id);
+      expect(leftIds).not.toContain("hints");
+    }
+  });
+
+  test("right group never contains non-hint segments", () => {
+    for (const width of [30, 50, 80, 120, 200]) {
+      const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: width }));
+      const { right } = groupSegments(result.visibleSegments);
+      for (const seg of right) {
+        expect(seg.id).toBe("hints");
+      }
+    }
+  });
+
+  test("no drifting separators on wide terminals", () => {
+    // At wide widths, left and right groups are stable and don't produce
+    // extra separators between them — they are in separate flex containers
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const { left, right } = groupSegments(result.visibleSegments);
+
+    const leftText = buildGroupText(left);
+    const rightText = buildGroupText(right);
+
+    // Left text should not end with a separator
+    expect(leftText).not.toMatch(/ │ $/);
+    // Right text should not start with a separator
+    expect(rightText).not.toMatch(/^ │ /);
+  });
+
+  test("total visible content fits within terminal width", () => {
+    for (const width of [30, 50, 80, 120, 200]) {
+      const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: width }));
+      // totalWidth from resolveSegmentVisibility includes padding
+      expect(result.totalWidth).toBeLessThanOrEqual(width);
+    }
+  });
+
+  test("each visible segment has a distinct color token", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    for (const seg of result.visibleSegments) {
+      expect(seg.colorToken.length).toBeGreaterThan(0);
+      expect(seg.colorToken).not.toBe("");
+    }
+  });
+
+  test("connection segment always uses status color tokens", () => {
+    const statuses: DaemonConnectionStatus[] = ["connected", "disconnected", "connecting", "reconnecting"];
+    for (const status of statuses) {
+      const result = resolveStatusSegmentSet(makeDefaultSources({
+        terminalWidth: 200,
+        connectionStatus: status,
+      }));
+      const conn = result.visibleSegments.find((s) => s.id === "connection");
+      expect(conn).toBeDefined();
+      expect(conn!.colorToken).toMatch(/^status\./);
+    }
+  });
+
+  test("model segment uses text.secondary color token", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const model = result.visibleSegments.find((s) => s.id === "model");
+    expect(model).toBeDefined();
+    expect(model!.colorToken).toBe("text.secondary");
+  });
+
+  test("hints segment uses text.muted color token", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const hints = result.visibleSegments.find((s) => s.id === "hints");
+    expect(hints).toBeDefined();
+    expect(hints!.colorToken).toBe("text.muted");
+  });
+});
+
+describe("polished status bar content requirements", () => {
+  test("shows connection health at all widths", () => {
+    for (const width of [20, 40, 80, 120]) {
+      const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: width }));
+      const hasConnection = result.visibleSegments.some((s) => s.id === "connection");
+      expect(hasConnection).toBe(true);
+    }
+  });
+
+  test("shows active model at standard and wide widths", () => {
+    for (const width of [80, 120, 200]) {
+      const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: width }));
+      const hasModel = result.visibleSegments.some((s) => s.id === "model");
+      expect(hasModel).toBe(true);
+    }
+  });
+
+  test("shows at least two keyboard shortcuts in hints", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const hints = result.visibleSegments.find((s) => s.id === "hints");
+    expect(hints).toBeDefined();
+
+    // Count Ctrl+ occurrences — must be at least 2
+    const ctrlMatches = hints!.content.match(/Ctrl\+/g);
+    expect(ctrlMatches).not.toBeNull();
+    expect(ctrlMatches!.length).toBeGreaterThanOrEqual(2);
+  });
+
+  test("hints contain Ctrl+K palette shortcut", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const hints = result.visibleSegments.find((s) => s.id === "hints");
+    expect(hints!.content).toContain("Ctrl+K");
+  });
+
+  test("hints contain Ctrl+M model shortcut", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
+    const hints = result.visibleSegments.find((s) => s.id === "hints");
+    expect(hints!.content).toContain("Ctrl+M");
   });
 });

@@ -5,7 +5,7 @@ import type { DaemonMode } from "../daemon/daemon-context";
 import type { FocusedPanel } from "../store";
 import { useApp } from "../store";
 import { useThemeTokens } from "../theme";
-import { Box, Text, type TerminalDimensions } from "../ui";
+import { Box, Text, ZoneShell, type TerminalDimensions } from "../ui";
 import {
   resolveBreakpointState,
   createResizeDebouncer,
@@ -13,10 +13,44 @@ import {
   type BreakpointState,
 } from "../layout/breakpoints";
 import { ChatScreen } from "../screens/chat-screen";
-import { SidebarContent } from "./sidebar";
+import { SidebarContent, SIDEBAR_CONTEXT_WIDTH } from "./sidebar";
 import { StatusBar } from "./status-bar";
 import { DrawerPanel } from "./drawer-panel";
 import { ModalPanel } from "./modal-panel";
+
+// --- Layout zone configuration ---
+
+/**
+ * The four explicit layout zones that compose the app shell.
+ * Each zone maps to a surface token and optional border treatment
+ * to create clear visual boundaries between regions.
+ */
+export type LayoutZoneName = "conversation" | "input" | "sidebar" | "status";
+
+export interface LayoutZoneConfig {
+  surfaceToken: string;
+  borderSides?: string[];
+}
+
+export const LAYOUT_ZONES: Record<LayoutZoneName, LayoutZoneConfig> = {
+  conversation: {
+    surfaceToken: "surface.primary",
+  },
+  input: {
+    surfaceToken: "surface.secondary",
+    borderSides: ["top"],
+  },
+  sidebar: {
+    surfaceToken: "surface.secondary",
+    borderSides: ["left"],
+  },
+  status: {
+    surfaceToken: "surface.secondary",
+    borderSides: ["top"],
+  },
+};
+
+// --- Panel border focus ---
 
 export interface PanelBorderColors {
   sidebar: string;
@@ -49,31 +83,36 @@ export interface LayoutProps {
  * Apply breakpoint constraints to the current layout mode.
  * When the terminal is too narrow for the user's chosen mode,
  * the breakpoint engine overrides it to a valid alternative.
+ * Also auto-collapses the sidebar drawer when the terminal shrinks
+ * below the minimum fit width.
  */
 function useBreakpointConstraints(columns: number): BreakpointState {
   const { state, dispatch } = useApp();
   const previousColumnsRef = useRef(columns);
 
+  const drawerVisible = state.panels.drawer.visible;
+
   const breakpointState = useMemo(
-    () => resolveBreakpointState(columns, state.layoutMode),
-    [columns, state.layoutMode],
+    () => resolveBreakpointState(columns, state.layoutMode, drawerVisible),
+    [columns, state.layoutMode, drawerVisible],
   );
 
   const applyBandConstraint = useCallback(
     (newColumns: number) => {
-      if (!didBandChange(previousColumnsRef.current, newColumns)) {
-        previousColumnsRef.current = newColumns;
-        return;
-      }
-
+      const bandChanged = didBandChange(previousColumnsRef.current, newColumns);
       previousColumnsRef.current = newColumns;
-      const nextState = resolveBreakpointState(newColumns, state.layoutMode);
 
-      if (nextState.constrainedMode !== state.layoutMode) {
+      const nextState = resolveBreakpointState(newColumns, state.layoutMode, drawerVisible);
+
+      if (bandChanged && nextState.constrainedMode !== state.layoutMode) {
         dispatch({ type: "SET_LAYOUT_MODE", payload: nextState.constrainedMode });
       }
+
+      if (drawerVisible && !nextState.sidebarVisible) {
+        dispatch({ type: "DISMISS_PANEL", payload: "drawer" });
+      }
     },
-    [state.layoutMode, dispatch],
+    [state.layoutMode, drawerVisible, dispatch],
   );
 
   const debouncerRef = useRef(createResizeDebouncer(applyBandConstraint));
@@ -90,7 +129,7 @@ function useBreakpointConstraints(columns: number): BreakpointState {
   return breakpointState;
 }
 
-const DRAWER_WIDTH = 32;
+const DRAWER_WIDTH = SIDEBAR_CONTEXT_WIDTH;
 const TODAY_PANEL_WIDTH = 34;
 
 export function Layout({ version, dimensions, showHelp, connectionStatus, daemonMode, onSubmitMessage }: LayoutProps) {
@@ -115,28 +154,32 @@ export function Layout({ version, dimensions, showHelp, connectionStatus, daemon
 
   return (
     <Box style={{ flexDirection: "column", height: "100%" }}>
-      <Box style={{ flexDirection: "row", flexGrow: 1 }}>
+      {/* Main content zone: conversation + input + optional side panels */}
+      <ZoneShell
+        backgroundColor={tokens["surface.primary"]}
+        style={{ flexGrow: 1, flexDirection: "row" }}
+      >
         <ChatScreen
           panelBorders={panelBorders}
           focusedPanel={state.focusedPanel}
-          showSidebar={false}
           showActivityPanel={false}
           showExpandedPanel={false}
           breakpoint={breakpoint}
           onSubmitMessage={onSubmitMessage}
         />
-      </Box>
+      </ZoneShell>
 
-      {/* Summoned left drawer with sidebar content */}
+      {/* Summoned left drawer with contextual info panel */}
       <DrawerPanel
         side="left"
         width={DRAWER_WIDTH}
         visible={state.panels.drawer.visible}
-        title={state.panels.drawer.pinned ? "Conversations 📌" : "Conversations"}
+        title={state.panels.drawer.pinned ? "Context 📌" : "Context"}
         onClose={dismissDrawer}
       >
         <SidebarContent
           isFocused={state.panels.drawer.visible && state.focusedPanel === "sidebar"}
+          connectionStatus={connectionStatus}
         />
       </DrawerPanel>
 
@@ -161,7 +204,16 @@ export function Layout({ version, dimensions, showHelp, connectionStatus, daemon
         <Text content="Settings and preferences" style={{ color: tokens["text.secondary"] }} />
       </ModalPanel>
 
-      <StatusBar version={version} dimensions={dimensions} showHelp={showHelp} connectionStatus={connectionStatus} daemonMode={daemonMode} />
+      {/* Status zone: anchored footer with connection/model/lifecycle info.
+          flexShrink 0 prevents the footer from being squeezed by content above. */}
+      <ZoneShell
+        borderSides={["top"]}
+        borderColor={tokens["border.subtle"]}
+        backgroundColor={tokens["surface.secondary"]}
+        style={{ flexShrink: 0 }}
+      >
+        <StatusBar version={version} dimensions={dimensions} showHelp={showHelp} connectionStatus={connectionStatus} daemonMode={daemonMode} />
+      </ZoneShell>
     </Box>
   );
 }

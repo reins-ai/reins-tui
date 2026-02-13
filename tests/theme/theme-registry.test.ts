@@ -217,6 +217,61 @@ describe("theme registry", () => {
     expect(Object.isFrozen(theme.tokens)).toBe(true);
     expect(Object.isFrozen(theme.fallback256)).toBe(true);
   });
+
+  test("all themes define depth tokens (panel1, panel2, panel3, interactive)", () => {
+    const registryResult = createThemeRegistry();
+    if (!registryResult.ok) throw new Error("Failed to create registry");
+
+    const registry = registryResult.value;
+    const depthTokens = ["depth.panel1", "depth.panel2", "depth.panel3", "depth.interactive"];
+
+    for (const themeName of registry.listThemes()) {
+      const switchResult = registry.setTheme(themeName);
+      expect(switchResult.ok).toBe(true);
+      if (!switchResult.ok) continue;
+
+      const theme = registry.getTheme();
+      for (const tokenName of depthTokens) {
+        expect(theme.tokens[tokenName as keyof typeof theme.tokens]).toBeDefined();
+        expect(typeof theme.tokens[tokenName as keyof typeof theme.tokens]).toBe("string");
+        expect(theme.tokens[tokenName as keyof typeof theme.tokens]).toMatch(/^#[0-9a-fA-F]{6}$/);
+      }
+    }
+  });
+
+  test("all themes define role border tokens (user, assistant, system)", () => {
+    const registryResult = createThemeRegistry();
+    if (!registryResult.ok) throw new Error("Failed to create registry");
+
+    const registry = registryResult.value;
+    const roleTokens = ["role.user.border", "role.assistant.border", "role.system.border"];
+
+    for (const themeName of registry.listThemes()) {
+      const switchResult = registry.setTheme(themeName);
+      expect(switchResult.ok).toBe(true);
+      if (!switchResult.ok) continue;
+
+      const theme = registry.getTheme();
+      for (const tokenName of roleTokens) {
+        expect(theme.tokens[tokenName as keyof typeof theme.tokens]).toBeDefined();
+        expect(typeof theme.tokens[tokenName as keyof typeof theme.tokens]).toBe("string");
+        expect(theme.tokens[tokenName as keyof typeof theme.tokens]).toMatch(/^#[0-9a-fA-F]{6}$/);
+      }
+    }
+  });
+
+  test("depth tokens map to existing surface tokens for backward compatibility", () => {
+    const registryResult = createThemeRegistry();
+    if (!registryResult.ok) throw new Error("Failed to create registry");
+
+    const registry = registryResult.value;
+    const theme = registry.getTheme();
+
+    expect(theme.tokens["depth.panel1"]).toBe(theme.tokens["surface.primary"]);
+    expect(theme.tokens["depth.panel2"]).toBe(theme.tokens["surface.secondary"]);
+    expect(theme.tokens["depth.panel3"]).toBe(theme.tokens["surface.tertiary"]);
+    expect(theme.tokens["depth.interactive"]).toBe(theme.tokens["surface.elevated"]);
+  });
 });
 
 // ---------------------------------------------------------------------------

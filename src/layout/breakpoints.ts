@@ -7,14 +7,30 @@
  *
  * Bands:
  *   compact  (<60 cols)  — conversation only, forced zen-like
- *   narrow   (60-99)     — normal/zen only, no activity panel
- *   standard (100-160)   — all modes available
+ *   narrow   (60-99)     — normal/zen only, sidebar auto-collapses
+ *   standard (100-160)   — all modes available, sidebar visible
  *   wide     (>160)      — all modes + optional expanded panel
+ *
+ * Sidebar collapse rules:
+ *   The contextual sidebar (40 chars) is visible by default on standard
+ *   and wide bands. On narrow, it auto-collapses unless the user has
+ *   explicitly toggled it and there is enough room for a minimum
+ *   conversation area. On compact, the sidebar is always hidden.
  */
 
 import type { LayoutMode } from "../state/layout-mode";
 
 export type BreakpointBand = "compact" | "narrow" | "standard" | "wide";
+
+/**
+ * Fixed panel width constants.
+ * SIDEBAR_WIDTH matches SIDEBAR_CONTEXT_WIDTH from the contextual info panel.
+ */
+export const SIDEBAR_WIDTH = 40;
+export const ACTIVITY_WIDTH = 32;
+export const EXPANDED_WIDTH = 36;
+export const MIN_CONVERSATION_WIDTH = 30;
+export const PANEL_GAP = 1;
 
 export const BREAKPOINT_THRESHOLDS = {
   compact: 60,
@@ -79,19 +95,44 @@ export interface PanelWidths {
 }
 
 /**
+ * Determine whether the sidebar should auto-collapse for a given width.
+ *
+ * The sidebar is visible when there is enough room for both the sidebar
+ * and a minimum conversation area. On compact, it is always collapsed.
+ * On narrow, it collapses unless the user has explicitly toggled it open
+ * AND there is enough room. On standard and wide, it defaults to visible.
+ *
+ * @param columns - Terminal width in columns
+ * @param band - Current breakpoint band
+ * @param userToggledOpen - Whether the user has explicitly opened the sidebar
+ */
+export function shouldAutoCollapseSidebar(
+  columns: number,
+  band: BreakpointBand,
+  userToggledOpen: boolean = false,
+): boolean {
+  if (band === "compact") return true;
+
+  const availableForConversation = columns - SIDEBAR_WIDTH - PANEL_GAP;
+
+  if (band === "narrow") {
+    if (!userToggledOpen) return true;
+    return availableForConversation < MIN_CONVERSATION_WIDTH;
+  }
+
+  return availableForConversation < MIN_CONVERSATION_WIDTH;
+}
+
+/**
  * Calculate panel widths for a given band and total column count.
  * Returns 0 for panels that should not be rendered in the band.
  *
- * Sidebar: fixed 28 cols (matches existing Sidebar component).
+ * Sidebar: fixed 40 cols (matches contextual info panel).
  * Activity: fixed 32 cols (matches existing activity panel).
  * Expanded: only in wide band, takes remaining space after others.
  * Conversation: fills remaining space.
  */
 export function getPanelWidths(band: BreakpointBand, columns: number): PanelWidths {
-  const SIDEBAR_WIDTH = 28;
-  const ACTIVITY_WIDTH = 32;
-  const GAP = 1;
-
   switch (band) {
     case "compact":
       return {
@@ -102,7 +143,7 @@ export function getPanelWidths(band: BreakpointBand, columns: number): PanelWidt
       };
 
     case "narrow": {
-      const conversationWidth = columns - SIDEBAR_WIDTH - GAP;
+      const conversationWidth = columns - SIDEBAR_WIDTH - PANEL_GAP;
       return {
         sidebar: SIDEBAR_WIDTH,
         conversation: Math.max(conversationWidth, 20),
@@ -112,7 +153,7 @@ export function getPanelWidths(band: BreakpointBand, columns: number): PanelWidt
     }
 
     case "standard": {
-      const conversationWidth = columns - SIDEBAR_WIDTH - ACTIVITY_WIDTH - GAP * 2;
+      const conversationWidth = columns - SIDEBAR_WIDTH - ACTIVITY_WIDTH - PANEL_GAP * 2;
       return {
         sidebar: SIDEBAR_WIDTH,
         conversation: Math.max(conversationWidth, 20),
@@ -122,8 +163,7 @@ export function getPanelWidths(band: BreakpointBand, columns: number): PanelWidt
     }
 
     case "wide": {
-      const EXPANDED_WIDTH = 36;
-      const conversationWidth = columns - SIDEBAR_WIDTH - ACTIVITY_WIDTH - EXPANDED_WIDTH - GAP * 3;
+      const conversationWidth = columns - SIDEBAR_WIDTH - ACTIVITY_WIDTH - EXPANDED_WIDTH - PANEL_GAP * 3;
       return {
         sidebar: SIDEBAR_WIDTH,
         conversation: Math.max(conversationWidth, 30),
@@ -140,15 +180,25 @@ export interface BreakpointState {
   constrainedMode: LayoutMode;
   panelWidths: PanelWidths;
   showExpandedPanel: boolean;
+  sidebarVisible: boolean;
 }
 
 /**
  * Compute the full breakpoint state from terminal width and desired layout mode.
+ *
+ * @param columns - Terminal width in columns
+ * @param desiredMode - The user's preferred layout mode
+ * @param userToggledSidebar - Whether the user has explicitly toggled the sidebar open
  */
-export function resolveBreakpointState(columns: number, desiredMode: LayoutMode): BreakpointState {
+export function resolveBreakpointState(
+  columns: number,
+  desiredMode: LayoutMode,
+  userToggledSidebar: boolean = false,
+): BreakpointState {
   const band = getBreakpointBand(columns);
   const constrainedMode = constrainMode(band, desiredMode);
   const panelWidths = getPanelWidths(band, columns);
+  const collapsed = shouldAutoCollapseSidebar(columns, band, userToggledSidebar);
 
   return {
     band,
@@ -156,6 +206,7 @@ export function resolveBreakpointState(columns: number, desiredMode: LayoutMode)
     constrainedMode,
     panelWidths,
     showExpandedPanel: band === "wide",
+    sidebarVisible: !collapsed,
   };
 }
 
@@ -206,3 +257,10 @@ export const BAND_LABELS: Record<BreakpointBand, string> = {
   standard: "Standard (100-160)",
   wide: "Wide (>160)",
 };
+
+/**
+ * Minimum terminal width required to show the sidebar alongside
+ * a usable conversation area. Used by layout components to decide
+ * whether to auto-dismiss the drawer panel on resize.
+ */
+export const MIN_SIDEBAR_FIT_WIDTH = SIDEBAR_WIDTH + MIN_CONVERSATION_WIDTH + PANEL_GAP;

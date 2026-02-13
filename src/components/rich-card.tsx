@@ -1,7 +1,8 @@
 import type { ReactNode } from "react";
 
 import { useThemeTokens } from "../theme";
-import { Box, Text } from "../ui";
+import { Box, FramedBlock, Text } from "../ui";
+import type { AccentPosition, BorderCharacters } from "../ui/types";
 
 export type RichCardVariant = "default" | "info" | "warning" | "error" | "success";
 
@@ -13,9 +14,18 @@ export interface RichCardProps {
   children: ReactNode;
 }
 
+export interface FramedRichCardProps {
+  title?: string;
+  variant?: RichCardVariant;
+  compact?: boolean;
+  accentPosition?: AccentPosition;
+  borderChars?: BorderCharacters;
+  children: ReactNode;
+}
+
 const DEFAULT_CARD_WIDTH = 34;
 
-// Unicode box-drawing characters
+// Unicode box-drawing characters for full-box card rendering
 const BORDER_TOP_LEFT = "\u256D"; // ╭
 const BORDER_TOP_RIGHT = "\u256E"; // ╮
 const BORDER_BOTTOM_LEFT = "\u2570"; // ╰
@@ -102,5 +112,43 @@ export function RichCard({
       </Box>
       <Text style={{ color: borderColor }}>{bottomBorder}</Text>
     </Box>
+  );
+}
+
+/**
+ * A left-border-accented card variant that uses the shared FramedBlock
+ * primitive. Suitable for inline content panels where a full box border
+ * is too heavy and a left-accent is preferred.
+ */
+export function FramedRichCard({
+  title,
+  variant = "default",
+  compact = false,
+  accentPosition = "full",
+  borderChars,
+  children,
+}: FramedRichCardProps) {
+  const { tokens } = useThemeTokens();
+  const accentColor = resolveVariantColor(variant, tokens);
+
+  return (
+    <FramedBlock
+      accentColor={accentColor}
+      accentPosition={accentPosition}
+      borderChars={borderChars}
+      style={{
+        marginTop: compact ? 0 : 1,
+        marginBottom: compact ? 0 : 1,
+        paddingLeft: 2,
+        paddingRight: 1,
+        paddingTop: title ? 0 : 0,
+        paddingBottom: 0,
+      }}
+    >
+      {title ? (
+        <Text style={{ color: accentColor }}>{title}</Text>
+      ) : null}
+      {children}
+    </FramedBlock>
   );
 }

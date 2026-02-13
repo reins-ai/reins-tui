@@ -37,6 +37,13 @@ export const THEME_TOKEN_NAMES = [
   "input.text",
   "input.placeholder",
   "input.border",
+  "depth.panel1",
+  "depth.panel2",
+  "depth.panel3",
+  "depth.interactive",
+  "role.user.border",
+  "role.assistant.border",
+  "role.system.border",
 ] as const;
 
 export type ThemeTokenName = (typeof THEME_TOKEN_NAMES)[number];

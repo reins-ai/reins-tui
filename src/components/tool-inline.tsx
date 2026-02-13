@@ -1,8 +1,12 @@
 import { useThemeTokens } from "../theme";
 import type { ThemeTokens } from "../theme/theme-schema";
-import type { ToolCall, ToolCallStatus } from "../tools/tool-lifecycle";
+import type { ToolCall, ToolCallStatus, ToolVisualState } from "../tools/tool-lifecycle";
 import { toolCallToMessageContent } from "../tools/tool-lifecycle";
+import type { FramedBlockStyle } from "../ui/types";
 import { Box, Text } from "../ui";
+import { FramedBlock, SUBTLE_BORDER_CHARS } from "../ui/primitives";
+
+// --- Shared helpers (preserved for backward compatibility) ---
 
 export interface ToolInlineProps {
   call: ToolCall;
@@ -60,6 +64,8 @@ function compactStringify(value: unknown): string {
   }
 }
 
+// --- Legacy inline renderer (preserved for backward compatibility) ---
+
 export function ToolInline({ call, collapsed }: ToolInlineProps) {
   const { tokens } = useThemeTokens();
   const content = toolCallToMessageContent(call);
@@ -81,9 +87,8 @@ export function ToolInline({ call, collapsed }: ToolInlineProps) {
         <Box
           style={{
             flexDirection: "column",
-            marginLeft: 3,
             marginTop: 0,
-            paddingLeft: 1,
+            paddingLeft: 2,
           }}
         >
           {detail.split("\n").map((line, i) => (
@@ -94,5 +99,171 @@ export function ToolInline({ call, collapsed }: ToolInlineProps) {
         </Box>
       ) : null}
     </Box>
+  );
+}
+
+// --- Tool Block Component (lifecycle-aware framed renderer) ---
+
+/**
+ * Maximum length for args preview in the tool block header area.
+ */
+const TOOL_BLOCK_ARGS_MAX = 120;
+
+/**
+ * Maximum length for result/error detail in the tool block body.
+ */
+const TOOL_BLOCK_DETAIL_MAX = 500;
+
+export interface ToolBlockProps {
+  visualState: ToolVisualState;
+}
+
+/**
+ * Resolve the FramedBlock style for a tool block based on its lifecycle status.
+ * Running tools use the running accent, completed tools use the done accent,
+ * and errored tools use the error accent. All share a consistent surface
+ * background to distinguish tool blocks from message blocks.
+ *
+ * Pure function — testable without React context.
+ */
+export function getToolBlockStyle(
+  visualState: ToolVisualState,
+  tokens: Readonly<ThemeTokens>,
+): FramedBlockStyle {
+  const accentColor = tokens[visualState.colorToken as keyof ThemeTokens] ?? tokens["glyph.tool.running"];
+
+  return {
+    accentColor,
+    backgroundColor: tokens["surface.secondary"],
+    paddingLeft: 2,
+    paddingRight: 1,
+    paddingTop: 0,
+    paddingBottom: 0,
+    marginTop: 0,
+    marginBottom: 0,
+  };
+}
+
+/**
+ * Format a compact args preview string for the tool block header.
+ * Returns undefined if no args are present or args are empty.
+ */
+export function formatToolBlockArgs(
+  args: Record<string, unknown> | undefined,
+  maxLength: number = TOOL_BLOCK_ARGS_MAX,
+): string | undefined {
+  if (args === undefined || Object.keys(args).length === 0) {
+    return undefined;
+  }
+
+  try {
+    const json = JSON.stringify(args);
+    if (json === undefined || json === "{}") {
+      return undefined;
+    }
+
+    if (json.length <= maxLength) {
+      return json;
+    }
+
+    return `${json.slice(0, maxLength)}…`;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Format the result or error detail for the tool block body.
+ * Truncates long content with an ellipsis indicator.
+ */
+export function formatToolBlockDetail(
+  detail: string | undefined,
+  maxLength: number = TOOL_BLOCK_DETAIL_MAX,
+): string | undefined {
+  if (detail === undefined || detail.length === 0) {
+    return undefined;
+  }
+
+  if (detail.length <= maxLength) {
+    return detail;
+  }
+
+  return `${detail.slice(0, maxLength)}…`;
+}
+
+/**
+ * Resolve the status label suffix shown after the tool name.
+ * Running shows ellipsis, success shows duration, error shows "failed".
+ */
+export function getToolBlockStatusSuffix(visualState: ToolVisualState): string {
+  switch (visualState.status) {
+    case "queued":
+      return "queued...";
+    case "running":
+      return "running...";
+    case "success":
+      return visualState.duration !== undefined
+        ? `done (${visualState.duration}ms)`
+        : "done";
+    case "error":
+      return "failed";
+  }
+}
+
+/**
+ * ToolBlock renders a tool call as a framed block with lifecycle-aware
+ * visual treatment. Distinct from message blocks: uses surface.secondary
+ * background with status-driven left-border accent colors.
+ *
+ * Structure:
+ *   ┃ ◎ bash  running...
+ *   ┃   {"command":"ls -la"}
+ *
+ *   ┃ ✦ bash  done (42ms)
+ *   ┃   file1.ts
+ *   ┃   file2.ts
+ *
+ *   ┃ ✧ write  failed
+ *   ┃   Permission denied
+ */
+export function ToolBlock({ visualState }: ToolBlockProps) {
+  const { tokens } = useThemeTokens();
+  const blockStyle = getToolBlockStyle(visualState, tokens);
+  const accentColor = blockStyle.accentColor ?? tokens["glyph.tool.running"];
+  const statusSuffix = getToolBlockStatusSuffix(visualState);
+  const formattedDetail = formatToolBlockDetail(visualState.detail);
+
+  return (
+    <FramedBlock style={blockStyle} borderChars={SUBTLE_BORDER_CHARS}>
+      {/* Header: glyph + tool name + status + expand indicator */}
+      <Box style={{ flexDirection: "row" }}>
+        <Text style={{ color: accentColor }}>{visualState.glyph}</Text>
+        <Text style={{ color: tokens["text.secondary"] }}>{` ${visualState.toolName}`}</Text>
+        <Text style={{ color: tokens["text.muted"] }}>{`  ${statusSuffix}`}</Text>
+        {visualState.hasDetail ? (
+          <Text style={{ color: tokens["text.muted"] }}>
+            {visualState.expanded ? "  [-]" : "  [+]"}
+          </Text>
+        ) : null}
+      </Box>
+
+      {/* Detail body: args, result, or error content */}
+      {visualState.expanded && formattedDetail ? (
+        <Box style={{ flexDirection: "column", marginTop: 0, paddingLeft: 2 }}>
+          {formattedDetail.split("\n").map((line, i) => (
+            <Text
+              key={i}
+              style={{
+                color: visualState.status === "error"
+                  ? tokens["glyph.tool.error"]
+                  : tokens["text.muted"],
+              }}
+            >
+              {line}
+            </Text>
+          ))}
+        </Box>
+      ) : null}
+    </FramedBlock>
   );
 }

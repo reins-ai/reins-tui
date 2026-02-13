@@ -7,12 +7,14 @@ import { useDaemon } from "../daemon/daemon-context";
 import { useApp } from "../store";
 import { InputHistory } from "../lib";
 import { useThemeContext, useThemeTokens } from "../theme";
+import type { ThemeTokens } from "../theme/theme-schema";
+import type { BorderCharacters, FramedBlockStyle } from "../ui/types";
 import { Box, Input, Text, useKeyboard, useRenderer } from "../ui";
+import { ACCENT_BORDER_CHARS, FramedBlock, SUBTLE_BORDER_CHARS } from "../ui/primitives";
 import { useConversations } from "../hooks";
 
 export interface InputAreaProps {
   isFocused: boolean;
-  borderColor: string;
   onSubmit(text: string): void;
 }
 
@@ -80,6 +82,89 @@ export function classifyInputSubmission(text: string): InputSubmissionKind {
   return "message";
 }
 
+// --- Input frame styling ---
+
+export type InputFrameState = "focused" | "disabled" | "default";
+
+/**
+ * Resolve the visual state of the input frame based on focus and daemon mode.
+ * Disabled state takes priority over focus.
+ */
+export function resolveInputFrameState(isFocused: boolean, daemonMode: string): InputFrameState {
+  if (daemonMode === "mock") {
+    return "disabled";
+  }
+  return isFocused ? "focused" : "default";
+}
+
+/**
+ * Resolve the FramedBlock style for the input area based on its visual state.
+ * Focused: accent border with input background for active composition.
+ * Disabled: warning-tinted accent for offline/mock mode.
+ * Default: subtle border with secondary surface for passive state.
+ */
+export function getInputBlockStyle(
+  frameState: InputFrameState,
+  tokens: Readonly<ThemeTokens>,
+): FramedBlockStyle {
+  switch (frameState) {
+    case "focused":
+      return {
+        accentColor: tokens["border.focus"],
+        backgroundColor: tokens["input.bg"],
+        paddingLeft: 2,
+        paddingRight: 1,
+        paddingTop: 0,
+        paddingBottom: 0,
+        marginTop: 0,
+        marginBottom: 0,
+      };
+    case "disabled":
+      return {
+        accentColor: tokens["status.warning"],
+        backgroundColor: tokens["surface.secondary"],
+        paddingLeft: 2,
+        paddingRight: 1,
+        paddingTop: 0,
+        paddingBottom: 0,
+        marginTop: 0,
+        marginBottom: 0,
+      };
+    case "default":
+      return {
+        accentColor: tokens["border.subtle"],
+        backgroundColor: tokens["surface.secondary"],
+        paddingLeft: 2,
+        paddingRight: 1,
+        paddingTop: 0,
+        paddingBottom: 0,
+        marginTop: 0,
+        marginBottom: 0,
+      };
+  }
+}
+
+/**
+ * Select the border character preset based on input frame state.
+ * Focused input uses the accent (heavy) border for visual prominence;
+ * other states use the subtle (light) border for quieter weight.
+ */
+export function getInputBorderChars(frameState: InputFrameState): BorderCharacters {
+  return frameState === "focused" ? ACCENT_BORDER_CHARS : SUBTLE_BORDER_CHARS;
+}
+
+/**
+ * Format the character count display string.
+ * Returns a compact count when input is non-empty, empty string otherwise.
+ * This keeps the count non-noisy — only visible when actively composing.
+ */
+export function formatCharCount(inputLength: number, maxLength: number): string {
+  if (inputLength === 0) {
+    return "";
+  }
+  return `${inputLength}/${maxLength}`;
+}
+
 function destroyRenderer(renderer: unknown): void {
   if (
     typeof renderer === "object" &&
@@ -104,7 +189,7 @@ function toDate(value: Date | string | number): Date {
   return asDate;
 }
 
-export function InputArea({ isFocused, borderColor, onSubmit }: InputAreaProps) {
+export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
   const { state, dispatch } = useApp();
   const conversations = useConversations();
   const { client: daemonClient, mode: daemonMode } = useDaemon();
@@ -268,17 +353,24 @@ export function InputArea({ isFocused, borderColor, onSubmit }: InputAreaProps) 
     setValidationError(null);
   };
 
+  const frameState = resolveInputFrameState(isFocused, daemonMode);
+  const blockStyle = getInputBlockStyle(frameState, tokens);
+  const borderChars = getInputBorderChars(frameState);
+  const charCount = formatCharCount(input.length, MAX_INPUT_LENGTH);
+
+  const hintText = validationError
+    ?? (daemonMode === "mock"
+      ? "⚠ Daemon disconnected — start daemon for real responses"
+      : isFocused ? "Enter to send · Ctrl+K palette" : "Tab to focus · Ctrl+K palette");
+
+  const hintColor = validationError
+    ? tokens["status.error"]
+    : daemonMode === "mock"
+      ? tokens["status.warning"]
+      : tokens["text.muted"];
+
   return (
-    <Box
-      style={{
-        height: 3,
-        border: true,
-        borderColor,
-        marginTop: 1,
-        padding: 1,
-        flexDirection: "column",
-      }}
-    >
+    <FramedBlock style={blockStyle} borderChars={borderChars}>
       <Input
         focused={isFocused}
         placeholder={daemonMode === "mock" ? "⚠ Daemon offline — responses are simulated" : "Type a message... (Enter to send)"}
@@ -287,17 +379,19 @@ export function InputArea({ isFocused, borderColor, onSubmit }: InputAreaProps) 
         onSubmit={handleSubmit}
       />
       <Box style={{ flexDirection: "row" }}>
-        <Text
-          content={
-            validationError
-              ?? (daemonMode === "mock"
-                ? "⚠ Daemon disconnected — start daemon for real responses"
-                : isFocused ? "Enter to send" : "Press Tab to focus input")
-          }
-          style={{ color: validationError ? tokens["status.error"] : daemonMode === "mock" ? tokens["status.warning"] : tokens["text.secondary"] }}
-        />
-        <Text content={` ${input.length}/${MAX_INPUT_LENGTH}`} style={{ color: tokens["text.secondary"] }} />
+        <Box style={{ flexGrow: 1 }}>
+          <Text
+            content={hintText}
+            style={{ color: hintColor }}
+          />
+        </Box>
+        {charCount ? (
+          <Text
+            content={charCount}
+            style={{ color: tokens["text.muted"] }}
+          />
+        ) : null}
       </Box>
-    </Box>
+    </FramedBlock>
   );
 }

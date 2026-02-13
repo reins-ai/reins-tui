@@ -3,7 +3,10 @@ import type { ConversationLifecycleStatus } from "../state/status-machine";
 import type { DisplayMessage, DisplayToolCall } from "../store";
 import { useThemeTokens } from "../theme";
 import type { ThemeTokens } from "../theme/theme-schema";
+import type { MessageRole } from "../theme/use-theme-tokens";
+import type { FramedBlockStyle } from "../ui/types";
 import { Box, Text } from "../ui";
+import { ACCENT_BORDER_CHARS, FramedBlock, SUBTLE_BORDER_CHARS } from "../ui/primitives";
 import { CardRenderer } from "./cards";
 import { StreamingText } from "./streaming-text";
 
@@ -57,6 +60,83 @@ export function getToolGlyphColor(status: DisplayToolCall["status"], tokens: Rea
       return tokens["glyph.tool.done"];
     case "error":
       return tokens["glyph.tool.error"];
+  }
+}
+
+/**
+ * Resolve the FramedBlock style for a message based on its role.
+ * User messages get a subtle border with user-specific background;
+ * assistant messages get an accent border with assistant background.
+ * System messages use a muted, minimal treatment.
+ */
+export function getMessageBlockStyle(
+  role: DisplayMessage["role"],
+  tokens: Readonly<ThemeTokens>,
+  getRoleBorder: (role: MessageRole) => string,
+): FramedBlockStyle {
+  switch (role) {
+    case "user":
+      return {
+        accentColor: getRoleBorder("user"),
+        backgroundColor: tokens["conversation.user.bg"],
+        paddingLeft: 2,
+        paddingRight: 1,
+        paddingTop: 0,
+        paddingBottom: 0,
+        marginTop: 0,
+        marginBottom: 0,
+      };
+    case "assistant":
+      return {
+        accentColor: getRoleBorder("assistant"),
+        backgroundColor: tokens["conversation.assistant.bg"],
+        paddingLeft: 2,
+        paddingRight: 1,
+        paddingTop: 0,
+        paddingBottom: 0,
+        marginTop: 0,
+        marginBottom: 0,
+      };
+    case "system":
+      return {
+        accentColor: getRoleBorder("system"),
+        backgroundColor: tokens["surface.primary"],
+        paddingLeft: 2,
+        paddingRight: 1,
+        paddingTop: 0,
+        paddingBottom: 0,
+        marginTop: 0,
+        marginBottom: 0,
+      };
+    case "tool":
+      return {
+        accentColor: tokens["glyph.tool.running"],
+        backgroundColor: tokens["surface.secondary"],
+        paddingLeft: 2,
+        paddingRight: 1,
+        paddingTop: 0,
+        paddingBottom: 0,
+        marginTop: 0,
+        marginBottom: 0,
+      };
+  }
+}
+
+/**
+ * Select the border character preset based on role.
+ * User messages use the subtle (light) border for a quieter visual weight;
+ * assistant messages use the accent (heavy) border for prominence.
+ */
+export function getMessageBorderChars(role: DisplayMessage["role"]) {
+  switch (role) {
+    case "user":
+      return SUBTLE_BORDER_CHARS;
+    case "assistant":
+      return ACCENT_BORDER_CHARS;
+    case "system":
+      return SUBTLE_BORDER_CHARS;
+    case "tool":
+      return SUBTLE_BORDER_CHARS;
   }
 }
 
@@ -157,22 +237,31 @@ export function ToolCallAnchor({ toolCall }: ToolCallAnchorProps) {
 export interface MessageProps {
   message: DisplayMessage;
   lifecycleStatus?: ConversationLifecycleStatus;
+  /**
+   * When true, tool calls are rendered externally as standalone ToolBlock
+   * components rather than inline ToolCallAnchors within this message.
+   * The Message component skips its own tool call rendering in this case.
+   */
+  renderToolBlocks?: boolean;
 }
 
-export function Message({ message, lifecycleStatus }: MessageProps) {
-  const { tokens } = useThemeTokens();
+export function Message({ message, lifecycleStatus, renderToolBlocks }: MessageProps) {
+  const { tokens, getRoleBorder } = useThemeTokens();
   const glyph = getRoleGlyph(message.role);
   const glyphColor = getRoleColor(message.role, tokens);
   const isUser = message.role === "user";
   const isSystem = message.role === "system";
 
+  const blockStyle = getMessageBlockStyle(message.role, tokens, getRoleBorder);
+  const borderChars = getMessageBorderChars(message.role);
+
   return (
-    <Box style={{ flexDirection: "column", marginBottom: 0 }}>
+    <FramedBlock style={blockStyle} borderChars={borderChars}>
       {isUser ? (
         <Box style={{ flexDirection: "row" }}>
-          <Text style={{ color: tokens["conversation.user.text"] }}>{message.content}</Text>
-          <Text>{" "}</Text>
           <Text style={{ color: glyphColor }}>{glyph}</Text>
+          <Text>{" "}</Text>
+          <Text style={{ color: tokens["conversation.user.text"] }}>{message.content}</Text>
         </Box>
       ) : isSystem ? (
         <Box style={{ flexDirection: "row" }}>
@@ -185,19 +274,17 @@ export function Message({ message, lifecycleStatus }: MessageProps) {
             <Text style={{ color: glyphColor }}>{glyph}</Text>
             <Text>{" "}</Text>
           </Box>
-          <Box style={{ marginLeft: 2 }}>
-            <StreamingText
-              content={message.content}
-              isStreaming={message.isStreaming}
-              lifecycleStatus={message.isStreaming ? lifecycleStatus : undefined}
-            />
-          </Box>
+          <StreamingText
+            content={message.content}
+            isStreaming={message.isStreaming}
+            lifecycleStatus={message.isStreaming ? lifecycleStatus : undefined}
+          />
         </Box>
       )}
 
-      {message.toolCalls?.map((toolCall) => (
+      {!renderToolBlocks && message.toolCalls?.map((toolCall) => (
         <ToolCallAnchor key={toolCall.id} toolCall={toolCall} />
       ))}
-    </Box>
+    </FramedBlock>
   );
 }
