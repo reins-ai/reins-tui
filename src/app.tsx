@@ -112,6 +112,7 @@ function toDisplayMessages(snapshot: ConversationStoreState): DisplayMessage[] {
             id: toolCall.id,
             name: toolCall.name,
             status: toDisplayToolCallStatus(toolCall.status),
+            args: toolCall.args,
             result: toolCall.error ?? toolCall.result,
             isError: toolCall.status === "error",
           }))
