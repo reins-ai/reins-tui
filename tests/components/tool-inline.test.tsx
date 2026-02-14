@@ -1228,6 +1228,25 @@ describe("tool output reload parity — live vs reloaded equivalence", () => {
 });
 
 describe("tool output reload parity — structured JSON result handling", () => {
+  test("structured result title is rendered as summary heading", () => {
+    const result = '{"title":"Listed 3 entries","output":"a.txt\\nb.txt\\nc.txt"}';
+    const text = buildSimplifiedToolText({ command: "ls" }, result, undefined);
+    expect(text).toBeDefined();
+    expect(text).toContain("# Listed 3 entries");
+    expect(text).toContain("$ ls");
+    expect(text).toContain("a.txt");
+  });
+
+  test("double-encoded structured result is parsed cleanly", () => {
+    const result = '"{\\"title\\":\\"Listed 2 entries\\",\\"output\\":\\"src\\nREADME.md\\"}"';
+    const text = buildSimplifiedToolText({ command: "ls" }, result, undefined);
+    expect(text).toBeDefined();
+    expect(text).toContain("# Listed 2 entries");
+    expect(text).toContain("$ ls");
+    expect(text).toContain("src");
+    expect(text).not.toContain('\\"title\\"');
+  });
+
   test("JSON result with command and output extracts fields correctly", () => {
     const jsonResult = '{"command":"git status","output":"On branch main\\nnothing to commit"}';
     const text = buildSimplifiedToolText({ command: "git status" }, jsonResult, undefined);

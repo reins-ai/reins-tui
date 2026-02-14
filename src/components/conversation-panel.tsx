@@ -39,6 +39,15 @@ export const MESSAGE_GAP = 1;
 /** Additional spacing (in lines) at exchange boundaries between turns. */
 export const EXCHANGE_GAP = 2;
 
+/**
+ * Framed chat blocks now include a bottom padding row to ensure full
+ * background coverage. Keep at least one external separator line so
+ * adjacent messages remain visually distinct.
+ */
+function adjustedBlockGap(gap: number): number {
+  return Math.max(1, gap - 1);
+}
+
 /** Scrollbar hidden temporarily; no gutter needed. */
 const SCROLLBAR_GUTTER = 0;
 
@@ -150,7 +159,7 @@ export function ToolBlockList({ toolCalls, expandedSet }: ToolBlockListProps) {
   return (
     <>
       {visualStates.map((vs, index) => (
-        <Box key={vs.id} style={{ marginTop: index === 0 ? 0 : MESSAGE_GAP }}>
+        <Box key={vs.id} style={{ marginTop: index === 0 ? 0 : adjustedBlockGap(MESSAGE_GAP) }}>
           <ToolBlock visualState={vs} />
         </Box>
       ))}
@@ -221,7 +230,10 @@ export function ConversationPanel({ isFocused, borderColor: _borderColor }: Conv
         stickyScroll={true}
         stickyStart="bottom"
         verticalScrollbarOptions={{ visible: false }}
-        contentOptions={{ paddingRight: SCROLLBAR_GUTTER }}
+        contentOptions={{
+          paddingRight: SCROLLBAR_GUTTER,
+          paddingBottom: 1,
+        }}
       >
         {showEmptyState ? (
           <Box style={{ flexDirection: "column", flexGrow: 1, justifyContent: "center", alignItems: "center" }}>
@@ -231,11 +243,11 @@ export function ConversationPanel({ isFocused, borderColor: _borderColor }: Conv
             </Text>
           </Box>
         ) : messages.length > 0 ? (
-          <Box style={{ flexDirection: "column", gap: MESSAGE_GAP }}>
+          <Box style={{ flexDirection: "column" }}>
           {messages.map((message, index) => {
-            const gap = isExchangeBoundary(messages, index)
-              ? EXCHANGE_GAP - MESSAGE_GAP
-              : 0;
+            const marginTop = index === 0
+              ? 0
+              : adjustedBlockGap(isExchangeBoundary(messages, index) ? EXCHANGE_GAP : MESSAGE_GAP);
 
             const useToolBlocks = shouldRenderToolBlocks(message);
             const useOrderedBlocks = hasOrderedToolBlocks(message);
@@ -266,7 +278,7 @@ export function ConversationPanel({ isFocused, borderColor: _borderColor }: Conv
                       isStreaming: message.isStreaming === true && blockIndex === lastTextBlockIndex,
                     };
 
-                    const marginTop = renderedBlockCount === 0 ? 0 : MESSAGE_GAP;
+                    const marginTop = renderedBlockCount === 0 ? 0 : adjustedBlockGap(MESSAGE_GAP);
                     renderedBlockCount += 1;
 
                     return (
@@ -288,7 +300,7 @@ export function ConversationPanel({ isFocused, borderColor: _borderColor }: Conv
                     renderedToolIds.add(toolCall.id);
                     const expanded = shouldAutoExpand(toolCall) || toolCall.status === "complete" || expandedToolCalls.has(toolCall.id);
                     const visualState = displayToolCallToVisualState(toolCall, expanded);
-                    const marginTop = renderedBlockCount === 0 ? 0 : MESSAGE_GAP;
+                    const marginTop = renderedBlockCount === 0 ? 0 : adjustedBlockGap(MESSAGE_GAP);
                     renderedBlockCount += 1;
 
                     return (
@@ -305,7 +317,7 @@ export function ConversationPanel({ isFocused, borderColor: _borderColor }: Conv
             const remainingToolCalls = (message.toolCalls ?? []).filter((toolCall) => !renderedToolIds.has(toolCall.id));
 
             return (
-              <Box key={message.id} style={{ flexDirection: "column", marginTop: gap }}>
+              <Box key={message.id} style={{ flexDirection: "column", marginTop }}>
                 {useOrderedBlocks ? renderableOrderedBlocks : (
                   <Message
                     message={message}
@@ -314,7 +326,7 @@ export function ConversationPanel({ isFocused, borderColor: _borderColor }: Conv
                   />
                 )}
                 {useToolBlocks && remainingToolCalls.length > 0 ? (
-                  <Box style={{ marginTop: MESSAGE_GAP }}>
+                  <Box style={{ marginTop: adjustedBlockGap(MESSAGE_GAP) }}>
                     <ToolBlockList
                       toolCalls={remainingToolCalls}
                       expandedSet={expandedToolCalls}
@@ -328,7 +340,7 @@ export function ConversationPanel({ isFocused, borderColor: _borderColor }: Conv
         ) : null}
 
       {isStreaming && !hasContent ? (
-        <Box style={{ marginTop: MESSAGE_GAP }}>
+        <Box style={{ marginTop: adjustedBlockGap(MESSAGE_GAP) }}>
           <FramedBlock
             style={getStreamingPlaceholderStyle(tokens, getRoleBorder)}
             borderChars={SUBTLE_BORDER_CHARS}

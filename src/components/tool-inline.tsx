@@ -234,6 +234,12 @@ export function ToolBlock({ visualState }: ToolBlockProps) {
   const { tokens } = useThemeTokens();
   const blockStyle = getToolBlockStyle(visualState, tokens);
   const formattedDetail = formatToolBlockDetail(visualState.detail);
+  const statusSuffix = getToolBlockStatusSuffix(visualState);
+  const statusColor = visualState.status === "error"
+    ? tokens["glyph.tool.error"]
+    : visualState.status === "success"
+      ? tokens["glyph.tool.done"]
+      : tokens["glyph.tool.running"];
 
   return (
     <FramedBlock style={blockStyle} borderChars={SUBTLE_BORDER_CHARS}>
@@ -241,6 +247,7 @@ export function ToolBlock({ visualState }: ToolBlockProps) {
       <Box style={{ flexDirection: "row" }}>
         <Text style={{ color: tokens["text.muted"] }}>Tool</Text>
         <Text style={{ color: tokens["text.secondary"] }}>{` ${visualState.toolName}`}</Text>
+        <Text style={{ color: statusColor }}>{`  ${statusSuffix}`}</Text>
       </Box>
 
       {/* Detail body: args, result, or error content */}

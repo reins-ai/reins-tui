@@ -17,7 +17,7 @@
   "status.success": "#4ade80",
   "status.warning": "#fbbf24",
   "status.info": "#38bdf8",
-  "glyph.reins": "#f4f4f5",
+  "glyph.reins": "#e4e4e7",
   "glyph.user": "#c4b5fd",
   "glyph.tool.running": "#fbbf24",
   "glyph.tool.done": "#4ade80",
