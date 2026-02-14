@@ -13,6 +13,7 @@ import {
 import { useThemeTokens } from "../../theme";
 import { Box, Text, useKeyboard } from "../../ui";
 import { ProgressBar, STEP_LABELS } from "./progress-bar";
+import { STEP_VIEW_MAP } from "./steps";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -300,9 +301,10 @@ function ResumePromptView({ tokens, resumeStep, selectedIndex }: ResumePromptVie
 interface ActiveStepViewProps {
   tokens: Record<string, string>;
   engineState: EngineState;
+  onStepData: (data: Record<string, unknown>) => void;
 }
 
-function ActiveStepView({ tokens, engineState }: ActiveStepViewProps) {
+function ActiveStepView({ tokens, engineState, onStepData }: ActiveStepViewProps) {
   const currentStep = engineState.currentStep;
   const stepLabel = currentStep !== null
     ? STEP_LABELS[currentStep] ?? currentStep
@@ -330,6 +332,9 @@ function ActiveStepView({ tokens, engineState }: ActiveStepViewProps) {
     </Box>
   );
 
+  // Resolve the step view component from the registry
+  const StepComponent = currentStep !== null ? STEP_VIEW_MAP[currentStep] : null;
+
   return (
     <WizardFrame
       title="Reins Setup"
@@ -349,26 +354,28 @@ function ActiveStepView({ tokens, engineState }: ActiveStepViewProps) {
           />
         </Box>
         <Box style={{ marginTop: 2, flexDirection: "column" }}>
-          <Box
-            style={{
-              flexDirection: "column",
-              paddingLeft: 2,
-              paddingTop: 1,
-              paddingBottom: 1,
-              backgroundColor: tokens["surface.secondary"],
-            }}
-          >
-            <Text
-              content="Step content will be rendered here"
-              style={{ color: tokens["text.muted"] }}
+          {StepComponent !== null ? (
+            <StepComponent
+              tokens={tokens}
+              engineState={engineState}
+              onStepData={onStepData}
             />
-            <Box style={{ marginTop: 1 }}>
+          ) : (
+            <Box
+              style={{
+                flexDirection: "column",
+                paddingLeft: 2,
+                paddingTop: 1,
+                paddingBottom: 1,
+                backgroundColor: tokens["surface.secondary"],
+              }}
+            >
               <Text
-                content={`[${currentStep ?? "none"}]`}
+                content={`Unknown step: ${currentStep ?? "none"}`}
                 style={{ color: tokens["text.muted"] }}
               />
             </Box>
-          </Box>
+          )}
         </Box>
       </Box>
     </WizardFrame>
@@ -416,6 +423,12 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
   const engineRef = useRef<OnboardingEngine | null>(null);
   const checkpointRef = useRef<OnboardingCheckpointService | null>(null);
   const initStartedRef = useRef(false);
+  const stepDataRef = useRef<Record<string, unknown>>({});
+
+  // Callback for step views to report collected data
+  const handleStepData = useCallback((data: Record<string, unknown>) => {
+    stepDataRef.current = { ...stepDataRef.current, ...data };
+  }, []);
 
   // Engine event handler
   const handleEngineEvent = useCallback((event: OnboardingEvent) => {
@@ -665,6 +678,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
         <ActiveStepView
           tokens={tokens}
           engineState={state.engineState}
+          onStepData={handleStepData}
         />
       );
 
