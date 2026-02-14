@@ -41,21 +41,16 @@ export const handleEnvironmentCommand: CommandHandler = async (args, context) =>
   }
 
   const resolvedEnv = resolveEnvironment(context.environment.availableEnvironments, requestedEnv);
-  if (!resolvedEnv) {
-    return err({
-      code: "NOT_FOUND",
-      message: `Environment '${requestedEnv}' not found. Use /env to list available environments.`,
-    });
-  }
+  const targetEnvironment = resolvedEnv ?? requestedEnv.trim().toLowerCase();
 
-  if (resolvedEnv === context.environment.activeEnvironment) {
+  if (targetEnvironment === context.environment.activeEnvironment) {
     return ok({
-      statusMessage: `Already using environment '${resolvedEnv}'`,
-      responseText: `Environment '${resolvedEnv}' is already active.`,
+      statusMessage: `Already using environment '${targetEnvironment}'`,
+      responseText: `Environment '${targetEnvironment}' is already active.`,
     });
   }
 
-  const switchResult = await context.environment.switchEnvironment(resolvedEnv);
+  const switchResult = await context.environment.switchEnvironment(targetEnvironment);
   if (!switchResult.ok) {
     return switchResult;
   }

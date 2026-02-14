@@ -95,10 +95,24 @@ export class DaemonEnvironmentClient implements EnvironmentCommandContext {
     }
 
     this._activeEnvironment = result.value.activeEnvironment;
+
+    const refreshResult = await this.refresh();
+    if (!refreshResult.ok) {
+      this.ensureEnvironmentListed(this._activeEnvironment);
+    }
+
     return ok({
       activeEnvironment: result.value.activeEnvironment,
       previousEnvironment: result.value.previousEnvironment,
     });
+  }
+
+  private ensureEnvironmentListed(environment: string): void {
+    if (this._availableEnvironments.includes(environment)) {
+      return;
+    }
+
+    this._availableEnvironments = [...this._availableEnvironments, environment];
   }
 
   private async requestJson<T>(method: HttpMethod, path: string, body?: unknown): Promise<DaemonResult<T>> {
