@@ -578,6 +578,7 @@ function makeSegmentSources(overrides: Partial<StatusSegmentSources> = {}): Stat
   return {
     connectionStatus: "connected",
     currentModel: "claude-3.5-sonnet",
+    activeEnvironment: null,
     lifecycleStatus: "idle",
     activeToolName: null,
     tokenCount: 0,
@@ -776,11 +777,14 @@ describe("shortcut hint parity", () => {
     expect(SEGMENT_DROP_THRESHOLDS.hints).toBeGreaterThanOrEqual(BREAKPOINT_THRESHOLDS.compact);
     expect(SEGMENT_DROP_THRESHOLDS.hints).toBeLessThan(BREAKPOINT_THRESHOLDS.narrow);
 
-    // Lifecycle drops at 50 — within compact band (<60)
-    expect(SEGMENT_DROP_THRESHOLDS.lifecycle).toBeLessThan(BREAKPOINT_THRESHOLDS.compact);
+    // Lifecycle drops at 60 — at compact band boundary
+    expect(SEGMENT_DROP_THRESHOLDS.lifecycle).toBeLessThanOrEqual(BREAKPOINT_THRESHOLDS.compact);
+
+    // Environment drops at 50 — within compact band (<60)
+    expect(SEGMENT_DROP_THRESHOLDS.environment).toBeLessThan(BREAKPOINT_THRESHOLDS.compact);
 
     // Model drops at 30 — deep compact
-    expect(SEGMENT_DROP_THRESHOLDS.model).toBeLessThan(SEGMENT_DROP_THRESHOLDS.lifecycle);
+    expect(SEGMENT_DROP_THRESHOLDS.model).toBeLessThan(SEGMENT_DROP_THRESHOLDS.environment);
 
     // Connection never drops
     expect(SEGMENT_DROP_THRESHOLDS.connection).toBe(0);

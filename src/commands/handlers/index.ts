@@ -2,6 +2,7 @@ import { err, type Result } from "../../daemon/contracts";
 import type { ParsedCommand } from "../parser";
 import type { SlashCommandHandlerKey } from "../registry";
 import { handleConnectCommand } from "./connect";
+import { handleEnvironmentCommand } from "./environment";
 import { handleMemoryCommand, handleRememberCommand } from "./memory";
 import { handleMemorySetupCommand } from "./memory-setup";
 import { handleModelCommand } from "./model";
@@ -18,6 +19,7 @@ const HANDLER_MAP: Record<SlashCommandHandlerKey, CommandHandler> = {
   HELP: handleHelpCommand,
   SWITCH_MODEL: handleModelCommand,
   SWITCH_THEME: handleThemeCommand,
+  SWITCH_ENVIRONMENT: handleEnvironmentCommand,
   CONNECT_PROVIDER: handleConnectCommand,
   SHOW_STATUS: handleStatusCommand,
   NEW_CONVERSATION: handleNewConversationCommand,
@@ -53,6 +55,7 @@ export type {
   CommandResult,
   CommandSignal,
   CommandSignalType,
+  EnvironmentCommandContext,
   MemoryCommandContext,
   MemoryEntry,
   MemoryLayer,

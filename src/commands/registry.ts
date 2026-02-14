@@ -1,9 +1,10 @@
-export type SlashCommandCategory = "conversation" | "model" | "appearance" | "system" | "memory";
+export type SlashCommandCategory = "conversation" | "model" | "appearance" | "environment" | "system" | "memory";
 
 export type SlashCommandHandlerKey =
   | "HELP"
   | "SWITCH_MODEL"
   | "SWITCH_THEME"
+  | "SWITCH_ENVIRONMENT"
   | "CONNECT_PROVIDER"
   | "SHOW_STATUS"
   | "NEW_CONVERSATION"
@@ -77,6 +78,14 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     usage: "/status",
     category: "system",
     handlerKey: "SHOW_STATUS",
+  }),
+  Object.freeze({
+    name: "env",
+    aliases: Object.freeze(["environment"]),
+    description: "Switch or list environments.",
+    usage: "/env [name]",
+    category: "environment",
+    handlerKey: "SWITCH_ENVIRONMENT",
   }),
   Object.freeze({
     name: "new",
