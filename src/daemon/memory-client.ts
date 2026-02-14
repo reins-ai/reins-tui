@@ -108,6 +108,9 @@ function mapDaemonError(daemonError: DaemonClientError): CommandError {
   if (daemonError.code === "DAEMON_INVALID_REQUEST") {
     return { code: "INVALID_ARGUMENT", message: daemonError.message };
   }
+  if (daemonError.code === "DAEMON_EMBEDDING_NOT_CONFIGURED") {
+    return { code: "UNSUPPORTED", message: daemonError.message };
+  }
   return { code: "UNSUPPORTED", message: daemonError.message };
 }
 
@@ -250,7 +253,7 @@ export class DaemonMemoryClient implements MemoryCommandContext {
       });
 
       if (!response.ok) {
-        return err(this.mapHttpError(response.status, method, path));
+        return err(await this.mapHttpErrorWithBody(response, method, path));
       }
 
       return ok(response);
@@ -259,6 +262,39 @@ export class DaemonMemoryClient implements MemoryCommandContext {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  /**
+   * Parse the response body for structured error details before falling
+   * back to status-code-only mapping. This enables the client to
+   * distinguish embedding-not-configured (503 with specific code) from
+   * generic service unavailability.
+   */
+  private async mapHttpErrorWithBody(
+    response: Response,
+    method: HttpMethod,
+    path: string,
+  ): Promise<DaemonClientError> {
+    if (response.status === 503) {
+      try {
+        const body = await response.json() as Record<string, unknown>;
+        if (body.code === "EMBEDDING_NOT_CONFIGURED") {
+          const message = typeof body.error === "string"
+            ? body.error
+            : "Embedding provider setup is required. Run /memory setup to configure.";
+          return {
+            code: "DAEMON_EMBEDDING_NOT_CONFIGURED",
+            message,
+            retryable: false,
+            fallbackHint: "Run /memory setup to configure an embedding provider.",
+          };
+        }
+      } catch {
+        // Fall through to generic 503 handling
+      }
+    }
+
+    return this.mapHttpError(response.status, method, path);
   }
 
   private mapHttpError(status: number, method: HttpMethod, path: string): DaemonClientError {

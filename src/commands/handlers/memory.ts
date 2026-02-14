@@ -454,6 +454,12 @@ const handleMemorySearch: CommandHandler = async (args, context) => {
   });
 
   if (!result.ok) {
+    if (isEmbeddingSetupRequired(result.error)) {
+      return err({
+        code: "UNSUPPORTED",
+        message: "Semantic search requires embedding provider setup. Run /memory setup to configure.",
+      });
+    }
     return result;
   }
 
@@ -462,3 +468,17 @@ const handleMemorySearch: CommandHandler = async (args, context) => {
     responseText: formatMemoryList(result.value),
   });
 };
+
+/**
+ * Check whether a command error indicates that embedding setup is required.
+ * The daemon returns 503 with code EMBEDDING_NOT_CONFIGURED for gated features,
+ * which the memory client maps to UNSUPPORTED with a descriptive message.
+ */
+function isEmbeddingSetupRequired(error: { code: string; message: string }): boolean {
+  return (
+    error.code === "UNSUPPORTED" &&
+    (error.message.includes("embedding") ||
+      error.message.includes("not ready") ||
+      error.message.includes("setup"))
+  );
+}
