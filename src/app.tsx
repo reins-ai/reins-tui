@@ -4,6 +4,7 @@ import { CommandPalette, type CommandPaletteDataSources, ErrorBoundary, Layout }
 import { ModelSelectorModal, type ProviderModelGroup } from "./components/model-selector";
 import { ConnectFlow, type ConnectResult } from "./components/connect-flow";
 import { EmbeddingSetupWizard, type EmbeddingSetupResult } from "./components/setup/embedding-setup-wizard";
+import { SearchSettingsModal } from "./components/search-settings-modal";
 import { DaemonMemoryClient } from "./daemon/memory-client";
 import { HelpScreen } from "./screens";
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "./daemon/client";
@@ -596,6 +597,11 @@ function AppView({ version, dimensions }: AppViewProps) {
     dispatch({ type: "SET_STATUS", payload: "Ready" });
   }, [dispatch]);
 
+  const closeSearchSettings = useCallback(() => {
+    dispatch({ type: "SET_SEARCH_SETTINGS_OPEN", payload: false });
+    dispatch({ type: "SET_STATUS", payload: "Ready" });
+  }, [dispatch]);
+
   const closeHelp = useCallback(() => {
     setShowHelp(false);
     dispatch({ type: "SET_STATUS", payload: "Ready" });
@@ -817,6 +823,10 @@ function AppView({ version, dimensions }: AppViewProps) {
         dispatch({ type: "SET_CONNECT_FLOW_OPEN", payload: true });
         dispatch({ type: "SET_STATUS", payload: "Connect provider" });
         break;
+      case "search-settings":
+        dispatch({ type: "SET_SEARCH_SETTINGS_OPEN", payload: true });
+        dispatch({ type: "SET_STATUS", payload: "Search settings" });
+        break;
       case "memory-setup":
         dispatch({ type: "SET_EMBEDDING_SETUP_OPEN", payload: true });
         dispatch({ type: "SET_STATUS", payload: "Embedding setup" });
@@ -928,7 +938,7 @@ function AppView({ version, dimensions }: AppViewProps) {
       return;
     }
 
-    if (state.isConnectFlowOpen || state.isModelSelectorOpen) {
+    if (state.isConnectFlowOpen || state.isModelSelectorOpen || state.isSearchSettingsOpen) {
       return;
     }
 
@@ -1039,6 +1049,11 @@ function AppView({ version, dimensions }: AppViewProps) {
         currentModel={state.currentModel}
         onSelect={handleModelSelect}
         onClose={closeModelSelector}
+      />
+      <SearchSettingsModal
+        visible={state.isSearchSettingsOpen}
+        connectService={connectService}
+        onClose={closeSearchSettings}
       />
       <HelpScreen isOpen={showHelp} startup={startupContent} />
       {state.isConnectFlowOpen ? (
