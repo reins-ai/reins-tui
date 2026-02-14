@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { ok } from "../../src/daemon/contracts";
+import { err, ok } from "../../src/daemon/contracts";
 import { parseSlashCommand } from "../../src/commands/parser";
 import { dispatchCommand, type CommandHandlerContext } from "../../src/commands/handlers";
 import type { EnvironmentCommandContext } from "../../src/commands/handlers/types";
@@ -12,11 +12,21 @@ import type { StatusSegmentSources } from "../../src/store/types";
 function createEnvironmentContext(
   overrides: Partial<EnvironmentCommandContext> = {},
 ): EnvironmentCommandContext {
+  const availableEnvironments = ["default", "work", "personal"];
+
   return {
     activeEnvironment: "default",
-    availableEnvironments: ["default", "work", "personal"],
-    switchEnvironment: async (name: string) =>
-      ok({ activeEnvironment: name, previousEnvironment: "default" }),
+    availableEnvironments,
+    switchEnvironment: async (name: string) => {
+      if (!availableEnvironments.includes(name)) {
+        return err({
+          code: "NOT_FOUND",
+          message: `Environment '${name}' not found.`,
+        });
+      }
+
+      return ok({ activeEnvironment: name, previousEnvironment: "default" });
+    },
     ...overrides,
   };
 }

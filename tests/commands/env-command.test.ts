@@ -14,11 +14,21 @@ function makeArgs(positional: string[] = [], flags: Record<string, string | bool
 }
 
 function makeEnvironmentContext(overrides: Partial<EnvironmentCommandContext> = {}): EnvironmentCommandContext {
+  const availableEnvironments = ["default", "work", "personal"];
+
   return {
     activeEnvironment: "default",
-    availableEnvironments: ["default", "work", "personal"],
-    switchEnvironment: async (name: string) =>
-      ok({ activeEnvironment: name, previousEnvironment: "default" }),
+    availableEnvironments,
+    switchEnvironment: async (name: string) => {
+      if (!availableEnvironments.includes(name)) {
+        return err({
+          code: "NOT_FOUND",
+          message: `Environment '${name}' not found.`,
+        });
+      }
+
+      return ok({ activeEnvironment: name, previousEnvironment: "default" });
+    },
     ...overrides,
   };
 }

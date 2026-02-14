@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { dispatchCommand, type CommandResult } from "../commands/handlers";
 import { parseSlashCommand } from "../commands/parser";
@@ -213,6 +213,25 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
     () => createEnvironmentClient(isConnected, DEFAULT_DAEMON_HTTP_BASE_URL),
     [isConnected],
   );
+
+  useEffect(() => {
+    if (!environmentClient) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      const result = await environmentClient.refresh();
+      if (!cancelled && result.ok) {
+        dispatch({ type: "SET_ENVIRONMENT", payload: result.value.activeEnvironment });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [environmentClient, dispatch]);
 
   const appendCommandResponse = (text: string) => {
     dispatch({
