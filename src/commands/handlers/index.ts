@@ -3,6 +3,7 @@ import type { ParsedCommand } from "../parser";
 import type { SlashCommandHandlerKey } from "../registry";
 import { handleConnectCommand } from "./connect";
 import { handleMemoryCommand, handleRememberCommand } from "./memory";
+import { handleMemorySetupCommand } from "./memory-setup";
 import { handleModelCommand } from "./model";
 import {
   handleClearConversationCommand,
@@ -27,12 +28,13 @@ const HANDLER_MAP: Record<SlashCommandHandlerKey, CommandHandler> = {
   QUIT_TUI: handleQuitCommand,
   REMEMBER: handleRememberCommand,
   MEMORY: handleMemoryCommand,
+  MEMORY_SETUP: handleMemorySetupCommand,
 };
 
-export function dispatchCommand(
+export async function dispatchCommand(
   parsedCommand: ParsedCommand,
   context: CommandHandlerContext,
-): Result<CommandResult, CommandError> {
+): Promise<Result<CommandResult, CommandError>> {
   const handler = HANDLER_MAP[parsedCommand.command.handlerKey];
   if (!handler) {
     return err({
@@ -47,6 +49,7 @@ export function dispatchCommand(
 export type {
   CommandError,
   CommandHandlerContext,
+  CommandHandlerResult,
   CommandResult,
   CommandSignal,
   CommandSignalType,

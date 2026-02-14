@@ -13,7 +13,8 @@ export type SlashCommandHandlerKey =
   | "OPEN_SETTINGS"
   | "QUIT_TUI"
   | "REMEMBER"
-  | "MEMORY";
+  | "MEMORY"
+  | "MEMORY_SETUP";
 
 export interface SlashCommandDefinition {
   readonly name: string;
@@ -136,8 +137,8 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
   Object.freeze({
     name: "memory",
     aliases: Object.freeze(["mem"]),
-    description: "List or inspect memory entries.",
-    usage: "/memory <list|show> [options]",
+    description: "List, inspect, or search memory entries.",
+    usage: "/memory <list|show|search> [options]",
     category: "memory",
     handlerKey: "MEMORY",
   }),

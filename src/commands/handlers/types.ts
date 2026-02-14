@@ -3,7 +3,7 @@ import type { Result } from "../../daemon/contracts";
 import type { ParsedCommand } from "../parser";
 import type { SlashCommandDefinition } from "../registry";
 
-export type CommandSignalType = "OPEN_CONNECT_FLOW" | "OPEN_SETTINGS" | "QUIT_TUI";
+export type CommandSignalType = "OPEN_CONNECT_FLOW" | "OPEN_EMBEDDING_SETUP" | "OPEN_SETTINGS" | "QUIT_TUI";
 
 export interface CommandSignal {
   readonly type: CommandSignalType;
@@ -120,13 +120,19 @@ export interface MemoryCommandContext {
     type?: MemoryType;
     tags?: string[];
     conversationId?: string;
-  }): Result<MemoryEntry, CommandError>;
+  }): Promise<Result<MemoryEntry, CommandError>>;
   list(options?: {
     type?: MemoryType;
     layer?: MemoryLayer;
     limit?: number;
-  }): Result<readonly MemoryEntry[], CommandError>;
-  show(id: string): Result<MemoryEntry | null, CommandError>;
+  }): Promise<Result<readonly MemoryEntry[], CommandError>>;
+  show(id: string): Promise<Result<MemoryEntry | null, CommandError>>;
+  search?(input: {
+    query: string;
+    type?: MemoryType;
+    layer?: MemoryLayer;
+    limit?: number;
+  }): Promise<Result<readonly MemoryEntry[], CommandError>>;
   reindex?(input: {
     provider: string;
     onProgress?: (progress: MemoryReindexProgress) => void;
@@ -145,7 +151,9 @@ export interface CommandHandlerContext {
 
 export type CommandArgs = ParsedCommand["args"];
 
+export type CommandHandlerResult = Result<CommandResult, CommandError> | Promise<Result<CommandResult, CommandError>>;
+
 export type CommandHandler = (
   args: CommandArgs,
   context: CommandHandlerContext,
-) => Result<CommandResult, CommandError>;
+) => CommandHandlerResult;

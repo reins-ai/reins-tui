@@ -59,7 +59,7 @@ function createTestContext(
     available: overrides.available ?? true,
     settingsManager: manager,
 
-    remember(input) {
+    async remember(input) {
       const entry = createMemoryEntry({
         content: input.content,
         type: input.type ?? "fact",
@@ -68,11 +68,11 @@ function createTestContext(
       return ok(entry);
     },
 
-    list() {
+    async list() {
       return ok(overrides.entries ?? []);
     },
 
-    show(id) {
+    async show(id) {
       const entry = (overrides.entries ?? []).find(
         (e) => e.id === id || e.id.startsWith(id),
       );
@@ -113,7 +113,7 @@ function createTestContext(
   };
 }
 
-function runCommand(input: string, context: CommandHandlerContext) {
+async function runCommand(input: string, context: CommandHandlerContext) {
   const parsed = parseSlashCommand(input);
   if (!parsed.ok) {
     return parsed;
@@ -479,9 +479,9 @@ describe("ProactiveMemorySettingsManager serialization", () => {
 });
 
 describe("/memory settings command via dispatch", () => {
-  test("shows current settings", () => {
+  test("shows current settings", async () => {
     const context = createTestContext();
-    const result = runCommand("/memory settings", context);
+    const result = await runCommand("/memory settings", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -495,11 +495,11 @@ describe("/memory settings command via dispatch", () => {
     }
   });
 
-  test("enables a feature", () => {
+  test("enables a feature", async () => {
     const manager = new ProactiveMemorySettingsManager();
     manager.disableFeature("nudges");
     const context = createTestContext({ manager });
-    const result = runCommand("/memory settings enable nudges", context);
+    const result = await runCommand("/memory settings enable nudges", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -510,10 +510,10 @@ describe("/memory settings command via dispatch", () => {
     expect(manager.getSettings().nudges.enabled).toBe(true);
   });
 
-  test("disables a feature", () => {
+  test("disables a feature", async () => {
     const manager = new ProactiveMemorySettingsManager();
     const context = createTestContext({ manager });
-    const result = runCommand("/memory settings disable briefing", context);
+    const result = await runCommand("/memory settings disable briefing", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -524,11 +524,11 @@ describe("/memory settings command via dispatch", () => {
     expect(manager.getSettings().briefing.enabled).toBe(false);
   });
 
-  test("enables master switch when no feature specified", () => {
+  test("enables master switch when no feature specified", async () => {
     const manager = new ProactiveMemorySettingsManager();
     manager.updateSettings({ enabled: false });
     const context = createTestContext({ manager });
-    const result = runCommand("/memory settings enable", context);
+    const result = await runCommand("/memory settings enable", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -538,10 +538,10 @@ describe("/memory settings command via dispatch", () => {
     expect(manager.getSettings().enabled).toBe(true);
   });
 
-  test("disables master switch when no feature specified", () => {
+  test("disables master switch when no feature specified", async () => {
     const manager = new ProactiveMemorySettingsManager();
     const context = createTestContext({ manager });
-    const result = runCommand("/memory settings disable", context);
+    const result = await runCommand("/memory settings disable", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -551,10 +551,10 @@ describe("/memory settings command via dispatch", () => {
     expect(manager.getSettings().enabled).toBe(false);
   });
 
-  test("sets a specific setting value", () => {
+  test("sets a specific setting value", async () => {
     const manager = new ProactiveMemorySettingsManager();
     const context = createTestContext({ manager });
-    const result = runCommand("/memory settings set priming maxTokens 4096", context);
+    const result = await runCommand("/memory settings set priming maxTokens 4096", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -565,21 +565,21 @@ describe("/memory settings command via dispatch", () => {
     expect(manager.getSettings().priming.maxTokens).toBe(4096);
   });
 
-  test("sets a boolean setting value", () => {
+  test("sets a boolean setting value", async () => {
     const manager = new ProactiveMemorySettingsManager();
     const context = createTestContext({ manager });
-    const result = runCommand("/memory settings set nudges enabled false", context);
+    const result = await runCommand("/memory settings set nudges enabled false", context);
 
     expect(result.ok).toBe(true);
     expect(manager.getSettings().nudges.enabled).toBe(false);
   });
 
-  test("resets settings to defaults", () => {
+  test("resets settings to defaults", async () => {
     const manager = new ProactiveMemorySettingsManager();
     manager.updateSettings({ enabled: false });
     manager.disableFeature("priming");
     const context = createTestContext({ manager });
-    const result = runCommand("/memory settings reset", context);
+    const result = await runCommand("/memory settings reset", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -591,9 +591,9 @@ describe("/memory settings command via dispatch", () => {
     expect(manager.getSettings().priming.enabled).toBe(true);
   });
 
-  test("returns error for invalid feature name on enable", () => {
+  test("returns error for invalid feature name on enable", async () => {
     const context = createTestContext();
-    const result = runCommand("/memory settings enable invalid", context);
+    const result = await runCommand("/memory settings enable invalid", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -602,9 +602,9 @@ describe("/memory settings command via dispatch", () => {
     }
   });
 
-  test("returns error for invalid feature name on disable", () => {
+  test("returns error for invalid feature name on disable", async () => {
     const context = createTestContext();
-    const result = runCommand("/memory settings disable nonexistent", context);
+    const result = await runCommand("/memory settings disable nonexistent", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -613,9 +613,9 @@ describe("/memory settings command via dispatch", () => {
     }
   });
 
-  test("returns error for missing feature in set", () => {
+  test("returns error for missing feature in set", async () => {
     const context = createTestContext();
-    const result = runCommand("/memory settings set", context);
+    const result = await runCommand("/memory settings set", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -624,9 +624,9 @@ describe("/memory settings command via dispatch", () => {
     }
   });
 
-  test("returns error for missing key in set", () => {
+  test("returns error for missing key in set", async () => {
     const context = createTestContext();
-    const result = runCommand("/memory settings set priming", context);
+    const result = await runCommand("/memory settings set priming", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -635,9 +635,9 @@ describe("/memory settings command via dispatch", () => {
     }
   });
 
-  test("returns error for missing value in set", () => {
+  test("returns error for missing value in set", async () => {
     const context = createTestContext();
-    const result = runCommand("/memory settings set priming maxTokens", context);
+    const result = await runCommand("/memory settings set priming maxTokens", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -646,9 +646,9 @@ describe("/memory settings command via dispatch", () => {
     }
   });
 
-  test("returns error for invalid setting key", () => {
+  test("returns error for invalid setting key", async () => {
     const context = createTestContext();
-    const result = runCommand("/memory settings set priming nonexistent 42", context);
+    const result = await runCommand("/memory settings set priming nonexistent 42", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -657,9 +657,9 @@ describe("/memory settings command via dispatch", () => {
     }
   });
 
-  test("returns error for invalid setting value type", () => {
+  test("returns error for invalid setting value type", async () => {
     const context = createTestContext();
-    const result = runCommand("/memory settings set priming maxTokens notanumber", context);
+    const result = await runCommand("/memory settings set priming maxTokens notanumber", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -668,9 +668,9 @@ describe("/memory settings command via dispatch", () => {
     }
   });
 
-  test("returns error for unknown settings action", () => {
+  test("returns error for unknown settings action", async () => {
     const context = createTestContext();
-    const result = runCommand("/memory settings unknown", context);
+    const result = await runCommand("/memory settings unknown", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -679,9 +679,9 @@ describe("/memory settings command via dispatch", () => {
     }
   });
 
-  test("returns error when memory service unavailable", () => {
+  test("returns error when memory service unavailable", async () => {
     const context = createTestContext({ available: false });
-    const result = runCommand("/memory settings", context);
+    const result = await runCommand("/memory settings", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -689,9 +689,9 @@ describe("/memory settings command via dispatch", () => {
     }
   });
 
-  test("works with /mem alias", () => {
+  test("works with /mem alias", async () => {
     const context = createTestContext();
-    const result = runCommand("/mem settings", context);
+    const result = await runCommand("/mem settings", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -699,10 +699,10 @@ describe("/memory settings command via dispatch", () => {
     }
   });
 
-  test("validation rejects out-of-range relevance score", () => {
+  test("validation rejects out-of-range relevance score", async () => {
     const manager = new ProactiveMemorySettingsManager();
     const context = createTestContext({ manager });
-    const result = runCommand("/memory settings set nudges minRelevanceScore 1.5", context);
+    const result = await runCommand("/memory settings set nudges minRelevanceScore 1.5", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -782,9 +782,9 @@ describe("handleMemorySettingsCommand direct invocation", () => {
 });
 
 describe("existing memory commands still work", () => {
-  test("/remember still works", () => {
+  test("/remember still works", async () => {
     const context = createTestContext();
-    const result = runCommand("/remember User likes TypeScript", context);
+    const result = await runCommand("/remember User likes TypeScript", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -792,10 +792,10 @@ describe("existing memory commands still work", () => {
     }
   });
 
-  test("/memory list still works", () => {
+  test("/memory list still works", async () => {
     const entries = [createMemoryEntry({ id: "mem-001" })];
     const context = createTestContext({ entries });
-    const result = runCommand("/memory list", context);
+    const result = await runCommand("/memory list", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -803,10 +803,10 @@ describe("existing memory commands still work", () => {
     }
   });
 
-  test("/memory show still works", () => {
+  test("/memory show still works", async () => {
     const entries = [createMemoryEntry({ id: "mem-001-abc-def" })];
     const context = createTestContext({ entries });
-    const result = runCommand("/memory show mem-001", context);
+    const result = await runCommand("/memory show mem-001", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -814,9 +814,9 @@ describe("existing memory commands still work", () => {
     }
   });
 
-  test("unknown subcommand error message includes settings", () => {
+  test("unknown subcommand error message includes settings", async () => {
     const context = createTestContext();
-    const result = runCommand("/memory delete mem-001", context);
+    const result = await runCommand("/memory delete mem-001", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {

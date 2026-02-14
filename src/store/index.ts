@@ -72,6 +72,7 @@ export type AppAction =
   | { type: "SET_ACTIVE_TOOL_NAME"; payload: string | null }
   | { type: "SET_COMMAND_PALETTE_OPEN"; payload: boolean }
   | { type: "SET_CONNECT_FLOW_OPEN"; payload: boolean }
+  | { type: "SET_EMBEDDING_SETUP_OPEN"; payload: boolean }
   | { type: "SET_MODEL_SELECTOR_OPEN"; payload: boolean }
   | { type: "SET_MODEL"; payload: string }
   | { type: "SET_PROVIDER"; payload: string }
@@ -423,6 +424,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "SET_CONNECT_FLOW_OPEN":
       return typeof action.payload === "boolean"
         ? { ...state, isConnectFlowOpen: action.payload }
+        : state;
+    case "SET_EMBEDDING_SETUP_OPEN":
+      return typeof action.payload === "boolean"
+        ? { ...state, isEmbeddingSetupOpen: action.payload }
         : state;
     case "SET_MODEL_SELECTOR_OPEN":
       return typeof action.payload === "boolean"

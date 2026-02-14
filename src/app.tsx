@@ -3,6 +3,8 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import { CommandPalette, type CommandPaletteDataSources, ErrorBoundary, Layout } from "./components";
 import { ModelSelectorModal, type ProviderModelGroup } from "./components/model-selector";
 import { ConnectFlow, type ConnectResult } from "./components/connect-flow";
+import { EmbeddingSetupWizard, type EmbeddingSetupResult } from "./components/setup/embedding-setup-wizard";
+import { DaemonMemoryClient } from "./daemon/memory-client";
 import { HelpScreen } from "./screens";
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "./daemon/client";
 import { DaemonProvider, useDaemon } from "./daemon/daemon-context";
@@ -669,6 +671,57 @@ function AppView({ version, dimensions }: AppViewProps) {
 
   const connectService = useMemo(() => new ConnectService({ daemonClient }), [daemonClient]);
 
+  const memoryClient = useMemo(
+    () =>
+      new DaemonMemoryClient({
+        baseUrl: DEFAULT_DAEMON_HTTP_BASE_URL,
+      }),
+    [],
+  );
+
+  // First-launch embedding setup check
+  const embeddingCheckDoneRef = useRef(false);
+  useEffect(() => {
+    if (embeddingCheckDoneRef.current || !isConnected) return;
+    embeddingCheckDoneRef.current = true;
+
+    let cancelled = false;
+
+    void (async () => {
+      const result = await memoryClient.checkCapabilities();
+      if (cancelled) return;
+
+      if (result.ok && result.value.setupRequired) {
+        dispatch({ type: "SET_EMBEDDING_SETUP_OPEN", payload: true });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isConnected, memoryClient, dispatch]);
+
+  const handleEmbeddingSetupComplete = useCallback((result: EmbeddingSetupResult) => {
+    dispatch({ type: "SET_EMBEDDING_SETUP_OPEN", payload: false });
+    if (result.configured) {
+      dispatch({
+        type: "ADD_MESSAGE",
+        payload: {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: `[ok] Embedding provider configured: ${result.provider ?? "unknown"} (${result.model ?? "unknown"})`,
+          createdAt: new Date(),
+        },
+      });
+      dispatch({ type: "SET_STATUS", payload: "Embedding provider configured" });
+    }
+  }, [dispatch]);
+
+  const handleEmbeddingSetupCancel = useCallback(() => {
+    dispatch({ type: "SET_EMBEDDING_SETUP_OPEN", payload: false });
+    dispatch({ type: "SET_STATUS", payload: "Ready" });
+  }, [dispatch]);
+
   const handleConnectComplete = useCallback(async (result: ConnectResult) => {
     dispatch({ type: "SET_CONNECT_FLOW_OPEN", payload: false });
     if (result.success && result.connection) {
@@ -763,6 +816,10 @@ function AppView({ version, dimensions }: AppViewProps) {
       case "connect":
         dispatch({ type: "SET_CONNECT_FLOW_OPEN", payload: true });
         dispatch({ type: "SET_STATUS", payload: "Connect provider" });
+        break;
+      case "memory-setup":
+        dispatch({ type: "SET_EMBEDDING_SETUP_OPEN", payload: true });
+        dispatch({ type: "SET_STATUS", payload: "Embedding setup" });
         break;
       case "quit":
         exitApp();
@@ -989,6 +1046,13 @@ function AppView({ version, dimensions }: AppViewProps) {
           connectService={connectService}
           onComplete={handleConnectComplete}
           onCancel={handleConnectCancel}
+        />
+      ) : null}
+      {state.isEmbeddingSetupOpen ? (
+        <EmbeddingSetupWizard
+          memoryClient={memoryClient}
+          onComplete={handleEmbeddingSetupComplete}
+          onCancel={handleEmbeddingSetupCancel}
         />
       ) : null}
     </>

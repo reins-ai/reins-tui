@@ -128,6 +128,7 @@ export interface AppState {
   expandedToolCalls: Set<string>;
   isCommandPaletteOpen: boolean;
   isConnectFlowOpen: boolean;
+  isEmbeddingSetupOpen: boolean;
   isModelSelectorOpen: boolean;
   currentModel: string;
   currentProvider: string;
@@ -151,6 +152,7 @@ export const DEFAULT_STATE: AppState = {
   expandedToolCalls: new Set<string>(),
   isCommandPaletteOpen: false,
   isConnectFlowOpen: false,
+  isEmbeddingSetupOpen: false,
   isModelSelectorOpen: false,
   currentModel: "default",
   currentProvider: "",

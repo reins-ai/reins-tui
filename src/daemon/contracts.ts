@@ -18,7 +18,8 @@ export type DaemonErrorCode =
   | "DAEMON_TIMEOUT"
   | "DAEMON_INVALID_REQUEST"
   | "DAEMON_NOT_FOUND"
-  | "DAEMON_INTERNAL_ERROR";
+  | "DAEMON_INTERNAL_ERROR"
+  | "DAEMON_EMBEDDING_NOT_CONFIGURED";
 
 export interface DaemonClientError {
   code: DaemonErrorCode;

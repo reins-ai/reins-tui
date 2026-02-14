@@ -88,7 +88,7 @@ function createTestContext(overrides: Partial<MutableTestState> = {}): {
   return { context, state };
 }
 
-function runCommand(input: string, context: CommandHandlerContext) {
+async function runCommand(input: string, context: CommandHandlerContext) {
   const parsed = parseSlashCommand(input);
   if (!parsed.ok) {
     return parsed;
@@ -98,9 +98,9 @@ function runCommand(input: string, context: CommandHandlerContext) {
 }
 
 describe("slash command handlers", () => {
-  test("/help includes all registered commands", () => {
+  test("/help includes all registered commands", async () => {
     const { context } = createTestContext();
-    const result = runCommand("/help", context);
+    const result = await runCommand("/help", context);
 
     expect(result.ok).toBe(true);
     if (!result.ok) {
@@ -113,37 +113,37 @@ describe("slash command handlers", () => {
     }
   });
 
-  test("/model lists and switches models", () => {
+  test("/model lists and switches models", async () => {
     const { context, state } = createTestContext();
 
-    const listResult = runCommand("/model", context);
+    const listResult = await runCommand("/model", context);
     expect(listResult.ok).toBe(true);
     if (listResult.ok) {
       expect(listResult.value.responseText).toContain("Available models:");
       expect(listResult.value.responseText).toContain("default (active)");
     }
 
-    const switchResult = runCommand("/model gpt-4o", context);
+    const switchResult = await runCommand("/model gpt-4o", context);
     expect(switchResult.ok).toBe(true);
     expect(state.model).toBe("gpt-4o");
   });
 
-  test("/theme lists and switches themes", () => {
+  test("/theme lists and switches themes", async () => {
     const { context, state } = createTestContext();
 
-    const listResult = runCommand("/theme", context);
+    const listResult = await runCommand("/theme", context);
     expect(listResult.ok).toBe(true);
     if (listResult.ok) {
       expect(listResult.value.responseText).toContain("Available themes:");
       expect(listResult.value.responseText).toContain("reins-dark (active)");
     }
 
-    const switchResult = runCommand("/theme reins-light", context);
+    const switchResult = await runCommand("/theme reins-light", context);
     expect(switchResult.ok).toBe(true);
     expect(state.theme).toBe("reins-light");
   });
 
-  test("session handlers return expected behavior", () => {
+  test("session handlers return expected behavior", async () => {
     const { context, state } = createTestContext({
       messages: [
         { role: "user", content: "hello", createdAt: new Date("2026-02-11T10:00:00.000Z") },
@@ -151,7 +151,7 @@ describe("slash command handlers", () => {
       ],
     });
 
-    const exportResult = runCommand("/export", context);
+    const exportResult = await runCommand("/export", context);
     expect(exportResult.ok).toBe(true);
     if (exportResult.ok) {
       expect(exportResult.value.responseText).toContain("# Conversation Export");
@@ -159,35 +159,35 @@ describe("slash command handlers", () => {
       expect(exportResult.value.responseText).toContain("## Assistant");
     }
 
-    const clearResult = runCommand("/clear", context);
+    const clearResult = await runCommand("/clear", context);
     expect(clearResult.ok).toBe(true);
     expect(state.messages).toHaveLength(0);
 
-    const newResult = runCommand("/new", context);
+    const newResult = await runCommand("/new", context);
     expect(newResult.ok).toBe(true);
     expect(state.conversationId).toBe("conversation-2");
   });
 
-  test("system handlers expose integration signals", () => {
+  test("system handlers expose integration signals", async () => {
     const { context, state } = createTestContext();
 
-    const compactResult = runCommand("/compact", context);
+    const compactResult = await runCommand("/compact", context);
     expect(compactResult.ok).toBe(true);
     expect(state.compactMode).toBe(true);
 
-    const connectResult = runCommand("/connect", context);
+    const connectResult = await runCommand("/connect", context);
     expect(connectResult.ok).toBe(true);
     if (connectResult.ok) {
       expect(connectResult.value.signals).toEqual([{ type: "OPEN_CONNECT_FLOW" }]);
     }
 
-    const settingsResult = runCommand("/settings", context);
+    const settingsResult = await runCommand("/settings", context);
     expect(settingsResult.ok).toBe(true);
     if (settingsResult.ok) {
       expect(settingsResult.value.signals).toEqual([{ type: "OPEN_SETTINGS" }]);
     }
 
-    const quitResult = runCommand("/quit", context);
+    const quitResult = await runCommand("/quit", context);
     expect(quitResult.ok).toBe(true);
     if (quitResult.ok) {
       expect(quitResult.value.signals).toEqual([{ type: "QUIT_TUI" }]);
