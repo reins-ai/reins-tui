@@ -136,8 +136,8 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
   Object.freeze({
     name: "memory",
     aliases: Object.freeze(["mem"]),
-    description: "List or inspect memory entries.",
-    usage: "/memory <list|show> [options]",
+    description: "List, inspect, or search memory entries.",
+    usage: "/memory <list|show|search> [options]",
     category: "memory",
     handlerKey: "MEMORY",
   }),

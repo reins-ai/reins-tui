@@ -29,10 +29,10 @@ const HANDLER_MAP: Record<SlashCommandHandlerKey, CommandHandler> = {
   MEMORY: handleMemoryCommand,
 };
 
-export function dispatchCommand(
+export async function dispatchCommand(
   parsedCommand: ParsedCommand,
   context: CommandHandlerContext,
-): Result<CommandResult, CommandError> {
+): Promise<Result<CommandResult, CommandError>> {
   const handler = HANDLER_MAP[parsedCommand.command.handlerKey];
   if (!handler) {
     return err({
@@ -47,6 +47,7 @@ export function dispatchCommand(
 export type {
   CommandError,
   CommandHandlerContext,
+  CommandHandlerResult,
   CommandResult,
   CommandSignal,
   CommandSignalType,

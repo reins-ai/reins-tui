@@ -56,7 +56,7 @@ function createMockMemoryContext(
   const memory: MemoryCommandContext = {
     available: overrides.available ?? true,
 
-    remember(input) {
+    async remember(input) {
       state.lastRememberInput = input;
       const entry = createMemoryEntry({
         id: `mem-${String(nextId++).padStart(3, "0")}-gen`,
@@ -72,7 +72,7 @@ function createMockMemoryContext(
       return ok(entry);
     },
 
-    list(options) {
+    async list(options) {
       let filtered = [...state.entries];
 
       if (options?.type) {
@@ -87,7 +87,7 @@ function createMockMemoryContext(
       return ok(filtered.slice(0, limit));
     },
 
-    show(id) {
+    async show(id) {
       const entry = state.entries.find(
         (e) => e.id === id || e.id.startsWith(id),
       );
@@ -141,7 +141,7 @@ function createTestContext(
   return { context, memoryState };
 }
 
-function runCommand(input: string, context: CommandHandlerContext) {
+async function runCommand(input: string, context: CommandHandlerContext) {
   const parsed = parseSlashCommand(input);
   if (!parsed.ok) {
     return parsed;
@@ -167,9 +167,9 @@ describe("memory command registration", () => {
     expect(memoryCmd!.aliases).toContain("mem");
   });
 
-  test("memory commands appear in /help output", () => {
+  test("memory commands appear in /help output", async () => {
     const { context } = createTestContext();
-    const result = runCommand("/help", context);
+    const result = await runCommand("/help", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -181,9 +181,9 @@ describe("memory command registration", () => {
 });
 
 describe("/remember command", () => {
-  test("saves explicit memory with content", () => {
+  test("saves explicit memory with content", async () => {
     const { context, memoryState } = createTestContext();
-    const result = runCommand("/remember User likes TypeScript", context);
+    const result = await runCommand("/remember User likes TypeScript", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -195,57 +195,57 @@ describe("/remember command", () => {
     expect(memoryState.lastRememberInput!.content).toBe("User likes TypeScript");
   });
 
-  test("saves memory with --type flag", () => {
+  test("saves memory with --type flag", async () => {
     const { context, memoryState } = createTestContext();
-    const result = runCommand("/remember --type preference Prefers dark mode", context);
+    const result = await runCommand("/remember --type preference Prefers dark mode", context);
 
     expect(result.ok).toBe(true);
     expect(memoryState.lastRememberInput!.type).toBe("preference");
     expect(memoryState.lastRememberInput!.content).toBe("Prefers dark mode");
   });
 
-  test("saves memory with --type=value syntax", () => {
+  test("saves memory with --type=value syntax", async () => {
     const { context, memoryState } = createTestContext();
-    const result = runCommand("/remember --type=decision Chose PostgreSQL", context);
+    const result = await runCommand("/remember --type=decision Chose PostgreSQL", context);
 
     expect(result.ok).toBe(true);
     expect(memoryState.lastRememberInput!.type).toBe("decision");
   });
 
-  test("maps 'note' type to 'fact'", () => {
+  test("maps 'note' type to 'fact'", async () => {
     const { context, memoryState } = createTestContext();
-    const result = runCommand("/remember --type note Meeting at 3pm", context);
+    const result = await runCommand("/remember --type note Meeting at 3pm", context);
 
     expect(result.ok).toBe(true);
     expect(memoryState.lastRememberInput!.type).toBe("fact");
   });
 
-  test("saves memory with --tags flag", () => {
+  test("saves memory with --tags flag", async () => {
     const { context, memoryState } = createTestContext();
-    const result = runCommand("/remember --tags work,project Important deadline", context);
+    const result = await runCommand("/remember --tags work,project Important deadline", context);
 
     expect(result.ok).toBe(true);
     expect(memoryState.lastRememberInput!.tags).toEqual(["work", "project"]);
   });
 
-  test("passes active conversation ID as source", () => {
+  test("passes active conversation ID as source", async () => {
     const { context, memoryState } = createTestContext();
-    runCommand("/remember Some fact", context);
+    await runCommand("/remember Some fact", context);
 
     expect(memoryState.lastRememberInput!.conversationId).toBe("conv-123");
   });
 
-  test("works with /rem alias", () => {
+  test("works with /rem alias", async () => {
     const { context, memoryState } = createTestContext();
-    const result = runCommand("/rem Quick note", context);
+    const result = await runCommand("/rem Quick note", context);
 
     expect(result.ok).toBe(true);
     expect(memoryState.lastRememberInput!.content).toBe("Quick note");
   });
 
-  test("returns error for empty content", () => {
+  test("returns error for empty content", async () => {
     const { context } = createTestContext();
-    const result = runCommand("/remember", context);
+    const result = await runCommand("/remember", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -254,9 +254,9 @@ describe("/remember command", () => {
     }
   });
 
-  test("returns error for invalid type", () => {
+  test("returns error for invalid type", async () => {
     const { context } = createTestContext();
-    const result = runCommand("/remember --type invalid Some text", context);
+    const result = await runCommand("/remember --type invalid Some text", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -265,9 +265,9 @@ describe("/remember command", () => {
     }
   });
 
-  test("returns error for empty tags", () => {
+  test("returns error for empty tags", async () => {
     const { context } = createTestContext();
-    const result = runCommand("/remember --tags= Some text", context);
+    const result = await runCommand("/remember --tags= Some text", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -276,9 +276,9 @@ describe("/remember command", () => {
     }
   });
 
-  test("returns error when memory service unavailable", () => {
+  test("returns error when memory service unavailable", async () => {
     const { context } = createTestContext({ available: false });
-    const result = runCommand("/remember Some text", context);
+    const result = await runCommand("/remember Some text", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -287,10 +287,10 @@ describe("/remember command", () => {
     }
   });
 
-  test("returns error when memory context is null", () => {
+  test("returns error when memory context is null", async () => {
     const { context } = createTestContext();
     const contextWithoutMemory = { ...context, memory: null };
-    const result = runCommand("/remember Some text", contextWithoutMemory);
+    const result = await runCommand("/remember Some text", contextWithoutMemory);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -300,13 +300,13 @@ describe("/remember command", () => {
 });
 
 describe("/memory list command", () => {
-  test("lists all memories", () => {
+  test("lists all memories", async () => {
     const entries = [
       createMemoryEntry({ id: "mem-001", content: "Fact one", type: "fact", importance: 0.8 }),
       createMemoryEntry({ id: "mem-002", content: "Preference two", type: "preference", importance: 0.6 }),
     ];
     const { context } = createTestContext({ entries });
-    const result = runCommand("/memory list", context);
+    const result = await runCommand("/memory list", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -317,10 +317,10 @@ describe("/memory list command", () => {
     }
   });
 
-  test("defaults to list when no subcommand given", () => {
+  test("defaults to list when no subcommand given", async () => {
     const entries = [createMemoryEntry({ id: "mem-001", content: "A fact" })];
     const { context } = createTestContext({ entries });
-    const result = runCommand("/memory", context);
+    const result = await runCommand("/memory", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -328,13 +328,13 @@ describe("/memory list command", () => {
     }
   });
 
-  test("filters by --type flag", () => {
+  test("filters by --type flag", async () => {
     const entries = [
       createMemoryEntry({ id: "mem-001", type: "fact" }),
       createMemoryEntry({ id: "mem-002", type: "preference" }),
     ];
     const { context } = createTestContext({ entries });
-    const result = runCommand("/memory list --type fact", context);
+    const result = await runCommand("/memory list --type fact", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -344,13 +344,13 @@ describe("/memory list command", () => {
     }
   });
 
-  test("filters by --layer flag", () => {
+  test("filters by --layer flag", async () => {
     const entries = [
       createMemoryEntry({ id: "mem-001", layer: "stm" }),
       createMemoryEntry({ id: "mem-002", layer: "ltm" }),
     ];
     const { context } = createTestContext({ entries });
-    const result = runCommand("/memory list --layer ltm", context);
+    const result = await runCommand("/memory list --layer ltm", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -359,12 +359,12 @@ describe("/memory list command", () => {
     }
   });
 
-  test("respects --limit flag", () => {
+  test("respects --limit flag", async () => {
     const entries = Array.from({ length: 5 }, (_, i) =>
       createMemoryEntry({ id: `mem-${String(i + 1).padStart(3, "0")}` }),
     );
     const { context } = createTestContext({ entries });
-    const result = runCommand("/memory list --limit 2", context);
+    const result = await runCommand("/memory list --limit 2", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -372,9 +372,9 @@ describe("/memory list command", () => {
     }
   });
 
-  test("shows empty state message", () => {
+  test("shows empty state message", async () => {
     const { context } = createTestContext({ entries: [] });
-    const result = runCommand("/memory list", context);
+    const result = await runCommand("/memory list", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -382,10 +382,10 @@ describe("/memory list command", () => {
     }
   });
 
-  test("shows importance stars in list", () => {
+  test("shows importance stars in list", async () => {
     const entries = [createMemoryEntry({ importance: 0.8 })];
     const { context } = createTestContext({ entries });
-    const result = runCommand("/memory list", context);
+    const result = await runCommand("/memory list", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -393,11 +393,11 @@ describe("/memory list command", () => {
     }
   });
 
-  test("truncates long content in list preview", () => {
+  test("truncates long content in list preview", async () => {
     const longContent = "A".repeat(200);
     const entries = [createMemoryEntry({ content: longContent })];
     const { context } = createTestContext({ entries });
-    const result = runCommand("/memory list", context);
+    const result = await runCommand("/memory list", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -406,9 +406,9 @@ describe("/memory list command", () => {
     }
   });
 
-  test("returns error for invalid type filter", () => {
+  test("returns error for invalid type filter", async () => {
     const { context } = createTestContext();
-    const result = runCommand("/memory list --type invalid", context);
+    const result = await runCommand("/memory list --type invalid", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -417,9 +417,9 @@ describe("/memory list command", () => {
     }
   });
 
-  test("returns error for invalid layer filter", () => {
+  test("returns error for invalid layer filter", async () => {
     const { context } = createTestContext();
-    const result = runCommand("/memory list --layer invalid", context);
+    const result = await runCommand("/memory list --layer invalid", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -428,9 +428,9 @@ describe("/memory list command", () => {
     }
   });
 
-  test("returns error for invalid limit", () => {
+  test("returns error for invalid limit", async () => {
     const { context } = createTestContext();
-    const result = runCommand("/memory list --limit abc", context);
+    const result = await runCommand("/memory list --limit abc", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -439,9 +439,9 @@ describe("/memory list command", () => {
     }
   });
 
-  test("returns error when memory service unavailable", () => {
+  test("returns error when memory service unavailable", async () => {
     const { context } = createTestContext({ available: false });
-    const result = runCommand("/memory list", context);
+    const result = await runCommand("/memory list", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -449,10 +449,10 @@ describe("/memory list command", () => {
     }
   });
 
-  test("works with /mem alias", () => {
+  test("works with /mem alias", async () => {
     const entries = [createMemoryEntry({ id: "mem-001" })];
     const { context } = createTestContext({ entries });
-    const result = runCommand("/mem list", context);
+    const result = await runCommand("/mem list", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -460,10 +460,10 @@ describe("/memory list command", () => {
     }
   });
 
-  test("singular 'memory' for single result", () => {
+  test("singular 'memory' for single result", async () => {
     const entries = [createMemoryEntry()];
     const { context } = createTestContext({ entries });
-    const result = runCommand("/memory list", context);
+    const result = await runCommand("/memory list", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -474,7 +474,7 @@ describe("/memory list command", () => {
 });
 
 describe("/memory show command", () => {
-  test("shows full memory details", () => {
+  test("shows full memory details", async () => {
     const entry = createMemoryEntry({
       id: "mem-001-abc-def",
       content: "User prefers dark themes",
@@ -490,7 +490,7 @@ describe("/memory show command", () => {
       accessedAt: "2026-02-13T10:00:00.000Z",
     });
     const { context } = createTestContext({ entries: [entry] });
-    const result = runCommand("/memory show mem-001-abc-def", context);
+    const result = await runCommand("/memory show mem-001-abc-def", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -511,14 +511,14 @@ describe("/memory show command", () => {
     }
   });
 
-  test("shows supersession info when present", () => {
+  test("shows supersession info when present", async () => {
     const entry = createMemoryEntry({
       id: "mem-002",
       supersedes: "mem-001",
       supersededBy: "mem-003",
     });
     const { context } = createTestContext({ entries: [entry] });
-    const result = runCommand("/memory show mem-002", context);
+    const result = await runCommand("/memory show mem-002", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -527,10 +527,10 @@ describe("/memory show command", () => {
     }
   });
 
-  test("matches by prefix", () => {
+  test("matches by prefix", async () => {
     const entry = createMemoryEntry({ id: "mem-001-abc-def" });
     const { context } = createTestContext({ entries: [entry] });
-    const result = runCommand("/memory show mem-001", context);
+    const result = await runCommand("/memory show mem-001", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -538,9 +538,9 @@ describe("/memory show command", () => {
     }
   });
 
-  test("returns error for missing ID", () => {
+  test("returns error for missing ID", async () => {
     const { context } = createTestContext();
-    const result = runCommand("/memory show", context);
+    const result = await runCommand("/memory show", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -549,9 +549,9 @@ describe("/memory show command", () => {
     }
   });
 
-  test("returns error for non-existent memory", () => {
+  test("returns error for non-existent memory", async () => {
     const { context } = createTestContext({ entries: [] });
-    const result = runCommand("/memory show mem-999", context);
+    const result = await runCommand("/memory show mem-999", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -560,9 +560,9 @@ describe("/memory show command", () => {
     }
   });
 
-  test("returns error when memory service unavailable", () => {
+  test("returns error when memory service unavailable", async () => {
     const { context } = createTestContext({ available: false });
-    const result = runCommand("/memory show mem-001", context);
+    const result = await runCommand("/memory show mem-001", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -572,9 +572,9 @@ describe("/memory show command", () => {
 });
 
 describe("/memory subcommand routing", () => {
-  test("returns error for unknown subcommand", () => {
+  test("returns error for unknown subcommand", async () => {
     const { context } = createTestContext();
-    const result = runCommand("/memory delete mem-001", context);
+    const result = await runCommand("/memory delete mem-001", context);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {
@@ -585,13 +585,13 @@ describe("/memory subcommand routing", () => {
 });
 
 describe("memory output formatting", () => {
-  test("importance stars reflect value correctly", () => {
+  test("importance stars reflect value correctly", async () => {
     const entries = [
       createMemoryEntry({ id: "mem-low", importance: 0.2 }),
       createMemoryEntry({ id: "mem-high", importance: 1.0 }),
     ];
     const { context } = createTestContext({ entries });
-    const result = runCommand("/memory list", context);
+    const result = await runCommand("/memory list", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -603,14 +603,14 @@ describe("memory output formatting", () => {
     }
   });
 
-  test("type labels are formatted correctly in list", () => {
+  test("type labels are formatted correctly in list", async () => {
     const entries = [
       createMemoryEntry({ id: "mem-f", type: "fact" }),
       createMemoryEntry({ id: "mem-p", type: "preference" }),
       createMemoryEntry({ id: "mem-d", type: "decision" }),
     ];
     const { context } = createTestContext({ entries });
-    const result = runCommand("/memory list", context);
+    const result = await runCommand("/memory list", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {
@@ -620,10 +620,10 @@ describe("memory output formatting", () => {
     }
   });
 
-  test("list includes header row", () => {
+  test("list includes header row", async () => {
     const entries = [createMemoryEntry()];
     const { context } = createTestContext({ entries });
-    const result = runCommand("/memory list", context);
+    const result = await runCommand("/memory list", context);
 
     expect(result.ok).toBe(true);
     if (result.ok) {

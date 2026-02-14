@@ -173,7 +173,7 @@ function formatMemoryDetail(entry: MemoryEntry): string {
   return sections.join("\n");
 }
 
-export const handleRememberCommand: CommandHandler = (args, context) => {
+export const handleRememberCommand: CommandHandler = async (args, context) => {
   if (!context.memory?.available) {
     return err({
       code: "UNSUPPORTED",
@@ -221,7 +221,7 @@ export const handleRememberCommand: CommandHandler = (args, context) => {
     }
   }
 
-  const result = context.memory.remember({
+  const result = await context.memory.remember({
     content,
     type: memoryType,
     tags,
@@ -239,7 +239,7 @@ export const handleRememberCommand: CommandHandler = (args, context) => {
   });
 };
 
-export const handleMemoryCommand: CommandHandler = (args, context) => {
+export const handleMemoryCommand: CommandHandler = async (args, context) => {
   if (!context.memory?.available) {
     return err({
       code: "UNSUPPORTED",
@@ -255,6 +255,10 @@ export const handleMemoryCommand: CommandHandler = (args, context) => {
 
   if (subcommand === "show") {
     return handleMemoryShow(args, context);
+  }
+
+  if (subcommand === "search") {
+    return handleMemorySearch(args, context);
   }
 
   if (subcommand === "settings") {
@@ -281,11 +285,11 @@ export const handleMemoryCommand: CommandHandler = (args, context) => {
 
   return err({
     code: "INVALID_ARGUMENT",
-    message: `Unknown memory subcommand '${subcommand}'. Usage: /memory <list|show|settings|reindex> [options]`,
+    message: `Unknown memory subcommand '${subcommand}'. Usage: /memory <list|show|search|settings|reindex> [options]`,
   });
 };
 
-const handleMemoryList: CommandHandler = (args, context) => {
+const handleMemoryList: CommandHandler = async (args, context) => {
   // Skip the subcommand ("list") from positional args if present
   const subcommand = args.positional[0]?.trim().toLowerCase();
   const positionalAfterSubcommand = subcommand === "list" ? args.positional.slice(1) : args.positional;
@@ -333,7 +337,7 @@ const handleMemoryList: CommandHandler = (args, context) => {
     limit = parsed;
   }
 
-  const result = context.memory!.list({
+  const result = await context.memory!.list({
     type: filterType,
     layer: filterLayer,
     limit,
@@ -349,7 +353,7 @@ const handleMemoryList: CommandHandler = (args, context) => {
   });
 };
 
-const handleMemoryShow: CommandHandler = (args, context) => {
+const handleMemoryShow: CommandHandler = async (args, context) => {
   const memoryId = args.positional[1]?.trim();
 
   if (!memoryId) {
@@ -359,7 +363,7 @@ const handleMemoryShow: CommandHandler = (args, context) => {
     });
   }
 
-  const result = context.memory!.show(memoryId);
+  const result = await context.memory!.show(memoryId);
 
   if (!result.ok) {
     return result;
@@ -375,5 +379,81 @@ const handleMemoryShow: CommandHandler = (args, context) => {
   return ok({
     statusMessage: `Memory ${memoryId.slice(0, 8)}`,
     responseText: formatMemoryDetail(result.value),
+  });
+};
+
+const handleMemorySearch: CommandHandler = async (args, context) => {
+  const positionalAfterSubcommand = args.positional.slice(1);
+
+  const typeExtracted = extractFlagValue("type", args.flags, positionalAfterSubcommand);
+  const layerExtracted = extractFlagValue("layer", args.flags, typeExtracted.remaining);
+  const limitExtracted = extractFlagValue("limit", args.flags, layerExtracted.remaining);
+
+  const query = limitExtracted.remaining.join(" ").trim();
+
+  if (query.length === 0) {
+    return err({
+      code: "INVALID_ARGUMENT",
+      message: "Missing search query. Usage: /memory search [--type fact|preference] [--limit N] <query>",
+    });
+  }
+
+  if (!context.memory!.search) {
+    return err({
+      code: "UNSUPPORTED",
+      message: "Memory search is not available.",
+    });
+  }
+
+  let filterType: MemoryType | undefined;
+  if (typeExtracted.value !== undefined) {
+    const normalizedType = typeExtracted.value.trim().toLowerCase();
+    if (!isValidMemoryType(normalizedType)) {
+      return err({
+        code: "INVALID_ARGUMENT",
+        message: `Invalid memory type '${typeExtracted.value}'. Valid types: ${VALID_MEMORY_TYPES.join(", ")}.`,
+      });
+    }
+    filterType = normalizedType;
+  }
+
+  let filterLayer: MemoryLayer | undefined;
+  if (layerExtracted.value !== undefined) {
+    const normalizedLayer = layerExtracted.value.trim().toLowerCase();
+    if (!isValidMemoryLayer(normalizedLayer)) {
+      return err({
+        code: "INVALID_ARGUMENT",
+        message: `Invalid memory layer '${layerExtracted.value}'. Valid layers: stm, ltm.`,
+      });
+    }
+    filterLayer = normalizedLayer;
+  }
+
+  let limit = DEFAULT_LIST_LIMIT;
+  if (limitExtracted.value !== undefined) {
+    const parsed = Number.parseInt(limitExtracted.value, 10);
+    if (Number.isNaN(parsed) || parsed < 1) {
+      return err({
+        code: "INVALID_ARGUMENT",
+        message: "Limit must be a positive integer.",
+      });
+    }
+    limit = parsed;
+  }
+
+  const result = await context.memory!.search({
+    query,
+    type: filterType,
+    layer: filterLayer,
+    limit,
+  });
+
+  if (!result.ok) {
+    return result;
+  }
+
+  return ok({
+    statusMessage: `${result.value.length} memor${result.value.length === 1 ? "y" : "ies"} found for "${query}"`,
+    responseText: formatMemoryList(result.value),
   });
 };

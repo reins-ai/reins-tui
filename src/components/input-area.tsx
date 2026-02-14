@@ -1,9 +1,11 @@
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 import { dispatchCommand, type CommandResult } from "../commands/handlers";
 import { parseSlashCommand } from "../commands/parser";
 import { SLASH_COMMANDS } from "../commands/registry";
+import { DEFAULT_DAEMON_HTTP_BASE_URL } from "../daemon/client";
 import { useDaemon } from "../daemon/daemon-context";
+import { createMemoryClient } from "../daemon/memory-client";
 import { useApp } from "../store";
 import { InputHistory } from "../lib";
 import { useThemeContext, useThemeTokens } from "../theme";
@@ -192,7 +194,7 @@ function toDate(value: Date | string | number): Date {
 export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
   const { state, dispatch } = useApp();
   const conversations = useConversations();
-  const { client: daemonClient, mode: daemonMode } = useDaemon();
+  const { client: daemonClient, mode: daemonMode, isConnected } = useDaemon();
   const { tokens } = useThemeTokens();
   const { registry, setTheme } = useThemeContext();
   const renderer = useRenderer();
@@ -200,6 +202,11 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
   const [input, setInput] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [compactMode, setCompactMode] = useState(false);
+
+  const memoryClient = useMemo(
+    () => createMemoryClient(isConnected, DEFAULT_DAEMON_HTTP_BASE_URL),
+    [isConnected],
+  );
 
   const appendCommandResponse = (text: string) => {
     dispatch({
@@ -231,7 +238,7 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
     }
   };
 
-  const handleCommand = (commandInput: string): void => {
+  const handleCommand = async (commandInput: string): Promise<void> => {
     const parseResult = parseSlashCommand(commandInput);
     if (!parseResult.ok) {
       const message = parseResult.error.message;
@@ -240,7 +247,7 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
       return;
     }
 
-    const commandResult = dispatchCommand(parseResult.value, {
+    const commandResult = await dispatchCommand(parseResult.value, {
       catalog: SLASH_COMMANDS,
       model: {
         availableModels: state.availableModels,
@@ -274,7 +281,7 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
         compactMode,
         setCompactMode,
       },
-      memory: null,
+      memory: memoryClient,
       daemonClient,
     });
 
@@ -342,7 +349,7 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
     }
 
     if (kind === "command") {
-      handleCommand(input);
+      void handleCommand(input);
       history.current.push(input);
       setInput("");
       return;
