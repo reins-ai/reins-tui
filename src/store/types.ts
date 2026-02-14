@@ -120,6 +120,8 @@ export interface DisplayMessage {
   createdAt: Date;
 }
 
+export type OnboardingStatus = "checking" | "first-run" | "resume" | "complete";
+
 export interface AppState {
   conversations: ConversationSummary[];
   activeConversationId: string | null;
@@ -136,6 +138,8 @@ export interface AppState {
   isEmbeddingSetupOpen: boolean;
   isModelSelectorOpen: boolean;
   isSearchSettingsOpen: boolean;
+  isDaemonPanelOpen: boolean;
+  onboardingStatus: OnboardingStatus;
   currentModel: string;
   currentProvider: string;
   availableModels: string[];
@@ -162,6 +166,8 @@ export const DEFAULT_STATE: AppState = {
   isEmbeddingSetupOpen: false,
   isModelSelectorOpen: false,
   isSearchSettingsOpen: false,
+  isDaemonPanelOpen: false,
+  onboardingStatus: "checking",
   currentModel: "default",
   currentProvider: "",
   availableModels: [],
