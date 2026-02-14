@@ -99,6 +99,7 @@ interface DaemonOAuthStatusPayload {
 }
 
 interface DaemonProviderPayload {
+  success?: boolean;
   valid?: boolean;
   configured?: boolean;
   connected?: boolean;
@@ -373,6 +374,7 @@ function normalizePayload(value: unknown): DaemonProviderPayload {
   }
 
   return {
+    success: typeof value.success === "boolean" ? value.success : undefined,
     valid: typeof value.valid === "boolean" ? value.valid : undefined,
     configured: typeof value.configured === "boolean" ? value.configured : undefined,
     connected: typeof value.connected === "boolean" ? value.connected : undefined,
@@ -1054,7 +1056,28 @@ export class ConnectService {
     logger.connect.info("BYOK configure response", { payload: configureResult.value as Record<string, unknown> });
 
     const configurePayload = normalizePayload(configureResult.value);
-    if (configurePayload.configured === false || configurePayload.valid === false) {
+    const legacySuccessResponse = configurePayload.success === true && configurePayload.configured === undefined;
+
+    if (legacySuccessResponse) {
+      const statusResult = await this.getProviderAuthStatus(normalizedProvider);
+      if (statusResult.ok && statusResult.value.configured) {
+        return ok({
+          providerId: statusResult.value.providerId,
+          providerName: statusResult.value.providerName,
+          mode: "byok",
+          models: pickModels(configurePayload),
+          configuredAt: pickConfiguredAt(configurePayload),
+        });
+      }
+
+      return err({
+        code: "VALIDATION_FAILED",
+        message: "Credential was not persisted by the daemon. Restart Reins daemon and try again.",
+        retryable: true,
+      });
+    }
+
+    if (configurePayload.configured !== true || configurePayload.valid === false) {
       return err({
         code: "VALIDATION_FAILED",
         message: pickValidationError(configurePayload, "API key validation failed."),

@@ -727,6 +727,67 @@ describe("BYOK configuration flow", () => {
     expect(result.error.message).toContain("Invalid Anthropic API key format");
   });
 
+  test("configureBYOK treats ambiguous daemon success payload as validation failure", async () => {
+    const transport = new MockProviderTransport();
+    transport.onPost("/api/providers/auth/configure", () =>
+      ok({
+        success: true,
+      }),
+    );
+    transport.onGet("/api/providers/auth/status/brave_search", () =>
+      ok({
+        provider: "brave_search",
+        providerName: "brave_search",
+        configured: false,
+        requiresAuth: true,
+        authModes: ["api_key"],
+        connectionState: "requires_auth",
+      }),
+    );
+
+    const service = new ConnectService({ transport });
+    const result = await service.configureBYOK("brave_search", "brv-test-key");
+
+    expect(result.ok).toBe(false);
+    if (result.ok) {
+      return;
+    }
+
+    expect(result.error.code).toBe("VALIDATION_FAILED");
+    expect(result.error.message).toContain("Restart Reins daemon");
+  });
+
+  test("configureBYOK accepts legacy success payload when auth status is configured", async () => {
+    const transport = new MockProviderTransport();
+    transport.onPost("/api/providers/auth/configure", () =>
+      ok({
+        success: true,
+      }),
+    );
+    transport.onGet("/api/providers/auth/status/brave_search", () =>
+      ok({
+        provider: "brave_search",
+        providerName: "Brave Search",
+        configured: true,
+        requiresAuth: true,
+        authModes: ["api_key"],
+        connectionState: "ready",
+      }),
+    );
+
+    const service = new ConnectService({ transport });
+    const result = await service.configureBYOK("brave_search", "brv-test-key");
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      return;
+    }
+
+    expect(result.value.providerId).toBe("brave_search");
+    expect(result.value.providerName).toBe("Brave Search");
+    expect(result.value.mode).toBe("byok");
+  });
+
   test("configureBYOK rejects empty provider or key", async () => {
     const service = new ConnectService({ transport: new MockProviderTransport() });
 

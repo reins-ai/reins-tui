@@ -268,9 +268,24 @@ export function SearchSettingsModal({
     const result = await connectService.configureBYOK(keyName, key);
 
     if (result.ok) {
-      dispatch({ type: "SET_KEY_STATUS", provider, status: "configured" });
+      const statusResult = await connectService.getProviderAuthStatus(keyName);
+      const isConfigured = statusResult.ok && statusResult.value.configured;
+
+      dispatch({
+        type: "SET_KEY_STATUS",
+        provider,
+        status: isConfigured ? "configured" : "not_configured",
+      });
       dispatch({ type: "SET_EDITING_PROVIDER", provider: null });
-      dispatch({ type: "SET_SUCCESS", message: `${getProviderLabel(provider)} API key configured` });
+
+      if (isConfigured) {
+        dispatch({ type: "SET_SUCCESS", message: `${getProviderLabel(provider)} API key configured` });
+      } else {
+        dispatch({
+          type: "SET_ERROR",
+          message: `${getProviderLabel(provider)} API key could not be verified after saving`,
+        });
+      }
     } else {
       dispatch({ type: "SET_ERROR", message: result.error.message });
     }
