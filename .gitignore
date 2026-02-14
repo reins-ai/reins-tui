@@ -1,9 +1,27 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
+coverage/
+*.tsbuildinfo
+
+# Environment files
 .env
 .env.*
+
+# Logs and archives
 *.log
-.DS_Store
-bun.lockb
 *.tgz
+
+# Bun
+bun.lockb
+
+# Local tooling/runtime artifacts
 .goopspec/
+.opencode/
+.reins/
+
+# OS files
+.DS_Store
+Thumbs.db

@@ -9,6 +9,7 @@ import type { FramedBlockStyle } from "../ui/types";
 import { Box, Text } from "../ui";
 import { FramedBlock, SUBTLE_BORDER_CHARS } from "../ui/primitives";
 import { CardRenderer } from "./cards";
+import { MarkdownText } from "./markdown-text";
 import { StreamingText } from "./streaming-text";
 
 // Chat label vocabulary (text-only, symbol-free)
@@ -290,15 +291,19 @@ export function Message({ message, lifecycleStatus, renderToolBlocks }: MessageP
   return (
     <FramedBlock style={blockStyle} borderChars={borderChars}>
       <Box style={{ flexDirection: "column" }}>
-        <Text style={{ color: roleLabelColor }}>{roleLabel}</Text>
+        <Text style={{ color: roleLabelColor }}><b>{roleLabel}</b></Text>
         {message.content.trim().length > 0 || message.isStreaming ? (
           <Box style={{ marginTop: 0 }}>
             {message.role === "assistant" ? (
-              <StreamingText
-                content={message.content}
-                isStreaming={message.isStreaming}
-                lifecycleStatus={message.isStreaming ? lifecycleStatus : undefined}
-              />
+              message.isStreaming ? (
+                <StreamingText
+                  content={message.content}
+                  isStreaming={message.isStreaming}
+                  lifecycleStatus={lifecycleStatus}
+                />
+              ) : (
+                <MarkdownText content={message.content} color={contentColor} />
+              )
             ) : (
               <Text style={{ color: contentColor }}>{message.content}</Text>
             )}
