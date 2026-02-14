@@ -263,6 +263,9 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
       if (signal.type === "OPEN_EMBEDDING_SETUP") {
         dispatch({ type: "SET_EMBEDDING_SETUP_OPEN", payload: true });
       }
+      if (signal.type === "OPEN_SEARCH_SETTINGS") {
+        dispatch({ type: "SET_SEARCH_SETTINGS_OPEN", payload: true });
+      }
       if (signal.type === "ENVIRONMENT_SWITCHED" && signal.payload) {
         dispatch({ type: "SET_ENVIRONMENT", payload: signal.payload });
       }
