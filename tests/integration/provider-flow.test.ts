@@ -374,6 +374,21 @@ describe("provider flow integration", () => {
     expect(configureAttempts).toBe(2);
   });
 
+  test("treats ambiguous configure response as failure", async () => {
+    const transport = new MockProviderTransport();
+    transport.onPost("/api/providers/auth/configure", () =>
+      ok({ success: true }),
+    );
+
+    const connectService = new ConnectService({ transport });
+    const result = await connectService.configureBYOK("brave_search", "brv-test-key");
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+
+    expect(result.error.code).toBe("VALIDATION_FAILED");
+  });
+
   test("handles OAuth initiation failure gracefully", async () => {
     const transport = new MockProviderTransport();
     transport.onPost("/api/providers/auth/oauth/initiate", () =>
