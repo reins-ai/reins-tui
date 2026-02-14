@@ -6,6 +6,7 @@ import { handleEnvironmentCommand } from "./environment";
 import { handleMemoryCommand, handleRememberCommand } from "./memory";
 import { handleMemorySetupCommand } from "./memory-setup";
 import { handleModelCommand } from "./model";
+import { handleSearchSettingsCommand } from "./search-settings";
 import {
   handleClearConversationCommand,
   handleExportConversationCommand,
@@ -27,6 +28,7 @@ const HANDLER_MAP: Record<SlashCommandHandlerKey, CommandHandler> = {
   EXPORT_CONVERSATION: handleExportConversationCommand,
   TOGGLE_COMPACT_MODE: handleCompactCommand,
   OPEN_SETTINGS: handleSettingsCommand,
+  SEARCH_SETTINGS: handleSearchSettingsCommand,
   QUIT_TUI: handleQuitCommand,
   REMEMBER: handleRememberCommand,
   MEMORY: handleMemoryCommand,

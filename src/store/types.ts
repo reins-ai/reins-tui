@@ -135,6 +135,7 @@ export interface AppState {
   isConnectFlowOpen: boolean;
   isEmbeddingSetupOpen: boolean;
   isModelSelectorOpen: boolean;
+  isSearchSettingsOpen: boolean;
   currentModel: string;
   currentProvider: string;
   availableModels: string[];
@@ -160,6 +161,7 @@ export const DEFAULT_STATE: AppState = {
   isConnectFlowOpen: false,
   isEmbeddingSetupOpen: false,
   isModelSelectorOpen: false,
+  isSearchSettingsOpen: false,
   currentModel: "default",
   currentProvider: "",
   availableModels: [],

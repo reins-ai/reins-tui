@@ -74,6 +74,7 @@ export type AppAction =
   | { type: "SET_CONNECT_FLOW_OPEN"; payload: boolean }
   | { type: "SET_EMBEDDING_SETUP_OPEN"; payload: boolean }
   | { type: "SET_MODEL_SELECTOR_OPEN"; payload: boolean }
+  | { type: "SET_SEARCH_SETTINGS_OPEN"; payload: boolean }
   | { type: "SET_MODEL"; payload: string }
   | { type: "SET_PROVIDER"; payload: string }
   | { type: "SET_AVAILABLE_MODELS"; payload: string[] }
@@ -433,6 +434,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "SET_MODEL_SELECTOR_OPEN":
       return typeof action.payload === "boolean"
         ? { ...state, isModelSelectorOpen: action.payload }
+        : state;
+    case "SET_SEARCH_SETTINGS_OPEN":
+      return typeof action.payload === "boolean"
+        ? { ...state, isSearchSettingsOpen: action.payload }
         : state;
     case "SET_MODEL":
       return typeof action.payload === "string"

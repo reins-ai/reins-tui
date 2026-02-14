@@ -12,6 +12,7 @@ export type SlashCommandHandlerKey =
   | "EXPORT_CONVERSATION"
   | "TOGGLE_COMPACT_MODE"
   | "OPEN_SETTINGS"
+  | "SEARCH_SETTINGS"
   | "QUIT_TUI"
   | "REMEMBER"
   | "MEMORY"
@@ -126,6 +127,14 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     usage: "/settings",
     category: "system",
     handlerKey: "OPEN_SETTINGS",
+  }),
+  Object.freeze({
+    name: "search-settings",
+    aliases: Object.freeze(["ss"]),
+    description: "Configure web search provider and API keys.",
+    usage: "/search-settings",
+    category: "system",
+    handlerKey: "SEARCH_SETTINGS",
   }),
   Object.freeze({
     name: "quit",
