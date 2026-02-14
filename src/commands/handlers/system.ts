@@ -2,7 +2,7 @@ import { err, ok } from "../../daemon/contracts";
 import { getSlashCommandByNameOrAlias, type SlashCommandCategory, type SlashCommandDefinition } from "../registry";
 import type { CommandHandler } from "./types";
 
-const CATEGORY_ORDER: readonly SlashCommandCategory[] = ["conversation", "model", "appearance", "system"];
+const CATEGORY_ORDER: readonly SlashCommandCategory[] = ["conversation", "model", "appearance", "memory", "system"];
 
 function capitalizeCategory(category: SlashCommandCategory): string {
   return category.slice(0, 1).toUpperCase() + category.slice(1);

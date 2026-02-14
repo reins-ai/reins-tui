@@ -56,12 +56,90 @@ export interface ViewCommandContext {
   setCompactMode(compactMode: boolean): void;
 }
 
+export type MemoryType = "fact" | "preference" | "decision" | "episode" | "skill" | "entity" | "document_chunk";
+export type MemoryLayer = "stm" | "ltm";
+
+export interface MemoryEntry {
+  readonly id: string;
+  readonly content: string;
+  readonly type: MemoryType;
+  readonly layer: MemoryLayer;
+  readonly importance: number;
+  readonly confidence: number;
+  readonly tags: readonly string[];
+  readonly entities: readonly string[];
+  readonly source: {
+    readonly type: string;
+    readonly conversationId?: string;
+  };
+  readonly supersedes?: string;
+  readonly supersededBy?: string;
+  readonly createdAt: string;
+  readonly updatedAt: string;
+  readonly accessedAt: string;
+}
+
+export interface MemorySettingsManager {
+  getSettings(): unknown;
+  updateSettings(partial: unknown): Result<unknown, { message: string }>;
+  resetToDefaults(): unknown;
+  enableFeature(feature: string): Result<unknown, { message: string }>;
+  disableFeature(feature: string): Result<unknown, { message: string }>;
+  setFeatureSetting(feature: string, key: string, value: unknown): Result<unknown, { message: string }>;
+  serialize(): string;
+}
+
+export interface MemoryReindexProgress {
+  readonly phase: "reindex" | "validation";
+  readonly totalRecords: number;
+  readonly processed: number;
+  readonly reindexed: number;
+  readonly failed: number;
+  readonly currentRecordId?: string;
+}
+
+export interface MemoryReindexResult {
+  readonly totalRecords: number;
+  readonly reindexed: number;
+  readonly failed: number;
+  readonly durationMs: number;
+  readonly failedRecordIds: readonly string[];
+  readonly provider: string;
+  readonly model?: string;
+  readonly validation?: {
+    readonly performed: boolean;
+    readonly passed: boolean;
+  };
+}
+
+export interface MemoryCommandContext {
+  readonly available: boolean;
+  readonly settingsManager?: MemorySettingsManager;
+  remember(input: {
+    content: string;
+    type?: MemoryType;
+    tags?: string[];
+    conversationId?: string;
+  }): Result<MemoryEntry, CommandError>;
+  list(options?: {
+    type?: MemoryType;
+    layer?: MemoryLayer;
+    limit?: number;
+  }): Result<readonly MemoryEntry[], CommandError>;
+  show(id: string): Result<MemoryEntry | null, CommandError>;
+  reindex?(input: {
+    provider: string;
+    onProgress?: (progress: MemoryReindexProgress) => void;
+  }): Result<MemoryReindexResult, CommandError>;
+}
+
 export interface CommandHandlerContext {
   readonly catalog: readonly SlashCommandDefinition[];
   readonly model: ModelCommandContext;
   readonly theme: ThemeCommandContext;
   readonly session: SessionCommandContext;
   readonly view: ViewCommandContext;
+  readonly memory: MemoryCommandContext | null;
   readonly daemonClient: DaemonClient | null;
 }
 

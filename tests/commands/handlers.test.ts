@@ -81,6 +81,7 @@ function createTestContext(overrides: Partial<MutableTestState> = {}): {
         state.compactMode = compactMode;
       },
     },
+    memory: null,
     daemonClient: null,
   };
 

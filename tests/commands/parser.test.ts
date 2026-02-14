@@ -20,6 +20,8 @@ describe("slash command registry", () => {
       "compact",
       "settings",
       "quit",
+      "remember",
+      "memory",
     ]);
   });
 
@@ -38,6 +40,8 @@ describe("slash command registry", () => {
       compact: "appearance",
       settings: "system",
       quit: "system",
+      remember: "memory",
+      memory: "memory",
     });
   });
 
@@ -176,9 +180,11 @@ describe("getCommandAutocomplete", () => {
       "connect",
       "export",
       "help",
+      "memory",
       "model",
       "new",
       "quit",
+      "remember",
       "settings",
       "status",
       "theme",
