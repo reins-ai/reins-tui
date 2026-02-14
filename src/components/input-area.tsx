@@ -235,6 +235,9 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
       if (signal.type === "OPEN_CONNECT_FLOW") {
         dispatch({ type: "SET_CONNECT_FLOW_OPEN", payload: true });
       }
+      if (signal.type === "OPEN_EMBEDDING_SETUP") {
+        dispatch({ type: "SET_EMBEDDING_SETUP_OPEN", payload: true });
+      }
     }
   };
 

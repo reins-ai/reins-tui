@@ -15,6 +15,29 @@ import type {
 } from "../commands/handlers/types";
 import type { Result } from "./contracts";
 
+/** Capability state for a single memory feature. */
+export interface MemoryCapabilityState {
+  enabled: boolean;
+  reason?: string;
+}
+
+/** Response shape from GET /api/memory/capabilities. */
+export interface MemoryCapabilitiesResponse {
+  ready: boolean;
+  embeddingConfigured: boolean;
+  setupRequired: boolean;
+  configPath: string;
+  features: {
+    crud: MemoryCapabilityState;
+    semanticSearch: MemoryCapabilityState;
+    consolidation: MemoryCapabilityState;
+  };
+  embedding?: {
+    provider: string;
+    model: string;
+  };
+}
+
 type HttpMethod = "GET" | "POST" | "PUT" | "DELETE";
 
 export interface DaemonMemoryClientOptions {
@@ -155,6 +178,21 @@ export class DaemonMemoryClient implements MemoryCommandContext {
     }
 
     return ok(mapDtoToEntry(result.value));
+  }
+
+  async checkCapabilities(): Promise<DaemonResult<MemoryCapabilitiesResponse>> {
+    return this.requestJson<MemoryCapabilitiesResponse>("GET", "/api/memory/capabilities");
+  }
+
+  async saveEmbeddingConfig(config: {
+    provider: string;
+    model: string;
+  }): Promise<DaemonResult<MemoryCapabilitiesResponse>> {
+    return this.requestJson<MemoryCapabilitiesResponse>(
+      "POST",
+      "/api/memory/capabilities",
+      { embedding: config },
+    );
   }
 
   async search(input: {

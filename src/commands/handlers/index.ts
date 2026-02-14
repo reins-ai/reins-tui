@@ -3,6 +3,7 @@ import type { ParsedCommand } from "../parser";
 import type { SlashCommandHandlerKey } from "../registry";
 import { handleConnectCommand } from "./connect";
 import { handleMemoryCommand, handleRememberCommand } from "./memory";
+import { handleMemorySetupCommand } from "./memory-setup";
 import { handleModelCommand } from "./model";
 import {
   handleClearConversationCommand,
@@ -27,6 +28,7 @@ const HANDLER_MAP: Record<SlashCommandHandlerKey, CommandHandler> = {
   QUIT_TUI: handleQuitCommand,
   REMEMBER: handleRememberCommand,
   MEMORY: handleMemoryCommand,
+  MEMORY_SETUP: handleMemorySetupCommand,
 };
 
 export async function dispatchCommand(
