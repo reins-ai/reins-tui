@@ -77,6 +77,7 @@ export type AppAction =
   | { type: "SET_MODEL"; payload: string }
   | { type: "SET_PROVIDER"; payload: string }
   | { type: "SET_AVAILABLE_MODELS"; payload: string[] }
+  | { type: "SET_ENVIRONMENT"; payload: string | null }
   | { type: "ADD_MESSAGE"; payload: DisplayMessage }
   | { type: "SET_MESSAGES"; payload: DisplayMessage[] }
   | { type: "APPEND_TOKEN"; payload: { messageId: string; token: string } }
@@ -445,6 +446,8 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return Array.isArray(action.payload)
         ? { ...state, availableModels: action.payload }
         : state;
+    case "SET_ENVIRONMENT":
+      return { ...state, activeEnvironment: action.payload };
     case "ADD_MESSAGE":
       return {
         ...state,

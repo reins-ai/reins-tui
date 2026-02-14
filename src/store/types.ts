@@ -11,12 +11,13 @@ export type FocusedPanel = "sidebar" | "conversation" | "input";
 
 /**
  * Identifies a status bar segment. Ordered by display priority (highest first):
- *   connection → model → lifecycle → hints
+ *   connection → model → environment → lifecycle → hints
  *
  * Connection and model are critical — they survive all truncation levels.
- * Lifecycle provides streaming/tool context. Hints are first to drop.
+ * Environment shows active context. Lifecycle provides streaming/tool context.
+ * Hints are first to drop.
  */
-export type StatusSegmentId = "connection" | "model" | "lifecycle" | "hints";
+export type StatusSegmentId = "connection" | "model" | "environment" | "lifecycle" | "hints";
 
 /**
  * Priority levels for status segments. Lower number = higher priority
@@ -25,8 +26,9 @@ export type StatusSegmentId = "connection" | "model" | "lifecycle" | "hints";
 export const STATUS_SEGMENT_PRIORITY: Record<StatusSegmentId, number> = {
   connection: 1,
   model: 2,
-  lifecycle: 3,
-  hints: 4,
+  environment: 3,
+  lifecycle: 4,
+  hints: 5,
 } as const;
 
 /**
@@ -35,6 +37,7 @@ export const STATUS_SEGMENT_PRIORITY: Record<StatusSegmentId, number> = {
 export const STATUS_SEGMENT_ORDER: readonly StatusSegmentId[] = [
   "connection",
   "model",
+  "environment",
   "lifecycle",
   "hints",
 ] as const;
@@ -58,7 +61,8 @@ export interface StatusSegment {
  */
 export const SEGMENT_DROP_THRESHOLDS: Record<StatusSegmentId, number> = {
   hints: 80,
-  lifecycle: 50,
+  lifecycle: 60,
+  environment: 50,
   model: 30,
   connection: 0,
 } as const;
@@ -80,6 +84,7 @@ export interface StatusSegmentSet {
 export interface StatusSegmentSources {
   connectionStatus: DaemonConnectionStatus;
   currentModel: string;
+  activeEnvironment: string | null;
   lifecycleStatus: ConversationLifecycleStatus;
   activeToolName: string | null;
   tokenCount: number;
@@ -133,6 +138,7 @@ export interface AppState {
   currentModel: string;
   currentProvider: string;
   availableModels: string[];
+  activeEnvironment: string | null;
   status: string;
   focusedPanel: FocusedPanel;
   layoutMode: LayoutMode;
@@ -157,6 +163,7 @@ export const DEFAULT_STATE: AppState = {
   currentModel: "default",
   currentProvider: "",
   availableModels: [],
+  activeEnvironment: null,
   status: "Ready",
   focusedPanel: "conversation",
   layoutMode: "zen",

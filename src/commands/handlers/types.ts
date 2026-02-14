@@ -3,10 +3,11 @@ import type { Result } from "../../daemon/contracts";
 import type { ParsedCommand } from "../parser";
 import type { SlashCommandDefinition } from "../registry";
 
-export type CommandSignalType = "OPEN_CONNECT_FLOW" | "OPEN_EMBEDDING_SETUP" | "OPEN_SETTINGS" | "QUIT_TUI";
+export type CommandSignalType = "OPEN_CONNECT_FLOW" | "OPEN_EMBEDDING_SETUP" | "OPEN_SETTINGS" | "QUIT_TUI" | "ENVIRONMENT_SWITCHED";
 
 export interface CommandSignal {
   readonly type: CommandSignalType;
+  readonly payload?: string;
 }
 
 export interface CommandResult {
@@ -139,12 +140,19 @@ export interface MemoryCommandContext {
   }): Result<MemoryReindexResult, CommandError>;
 }
 
+export interface EnvironmentCommandContext {
+  readonly activeEnvironment: string;
+  readonly availableEnvironments: readonly string[];
+  switchEnvironment(name: string): Promise<Result<{ activeEnvironment: string; previousEnvironment: string }, CommandError>>;
+}
+
 export interface CommandHandlerContext {
   readonly catalog: readonly SlashCommandDefinition[];
   readonly model: ModelCommandContext;
   readonly theme: ThemeCommandContext;
   readonly session: SessionCommandContext;
   readonly view: ViewCommandContext;
+  readonly environment: EnvironmentCommandContext | null;
   readonly memory: MemoryCommandContext | null;
   readonly daemonClient: DaemonClient | null;
 }

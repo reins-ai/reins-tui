@@ -2,7 +2,7 @@ import { err, ok } from "../../daemon/contracts";
 import { getSlashCommandByNameOrAlias, type SlashCommandCategory, type SlashCommandDefinition } from "../registry";
 import type { CommandHandler } from "./types";
 
-const CATEGORY_ORDER: readonly SlashCommandCategory[] = ["conversation", "model", "appearance", "memory", "system"];
+const CATEGORY_ORDER: readonly SlashCommandCategory[] = ["conversation", "model", "environment", "appearance", "memory", "system"];
 
 function capitalizeCategory(category: SlashCommandCategory): string {
   return category.slice(0, 1).toUpperCase() + category.slice(1);
@@ -93,12 +93,14 @@ export const handleSettingsCommand: CommandHandler = () => {
 export const handleStatusCommand: CommandHandler = (_args, context) => {
   const daemonStatus = context.daemonClient?.getConnectionState().status ?? "disconnected";
   const conversationId = context.session.activeConversationId ?? "none";
+  const environment = context.environment?.activeEnvironment ?? "unknown";
 
   return ok({
     statusMessage: `Daemon ${daemonStatus}`,
     responseText: [
       `Daemon: ${daemonStatus}`,
       `Model: ${context.model.currentModel}`,
+      `Environment: ${environment}`,
       `Active conversation: ${conversationId}`,
       `Messages: ${context.session.messages.length}`,
     ].join("\n"),

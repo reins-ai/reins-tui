@@ -385,6 +385,7 @@ export function StatusBar({
   const sources: StatusSegmentSources = {
     connectionStatus,
     currentModel: state.currentModel,
+    activeEnvironment: state.activeEnvironment,
     lifecycleStatus: state.streamingLifecycleStatus,
     activeToolName: state.activeToolName,
     tokenCount,

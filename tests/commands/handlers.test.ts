@@ -82,6 +82,7 @@ function createTestContext(overrides: Partial<MutableTestState> = {}): {
       },
     },
     memory: null,
+    environment: null,
     daemonClient: null,
   };
 

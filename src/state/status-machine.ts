@@ -382,6 +382,13 @@ export function deriveStatusSegments(sources: StatusSegmentSources): StatusSegme
       case "model":
         // Model segment removed - return empty segment that will be filtered out
         return buildSegment(id, "", "", "text.secondary");
+      case "environment": {
+        const envName = sources.activeEnvironment;
+        if (!envName || envName === "default") {
+          return buildSegment(id, "", "", "text.secondary");
+        }
+        return buildSegment(id, "◆", `◆ ${envName}`, "text.secondary");
+      }
       case "lifecycle": {
         // Show lifecycle segment for warnings/errors or active states
         const showLifecycle = 

@@ -5,6 +5,7 @@ import { parseSlashCommand } from "../commands/parser";
 import { SLASH_COMMANDS } from "../commands/registry";
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "../daemon/client";
 import { useDaemon } from "../daemon/daemon-context";
+import { createEnvironmentClient } from "../daemon/environment-client";
 import { createMemoryClient } from "../daemon/memory-client";
 import { useApp } from "../store";
 import { InputHistory } from "../lib";
@@ -208,6 +209,11 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
     [isConnected],
   );
 
+  const environmentClient = useMemo(
+    () => createEnvironmentClient(isConnected, DEFAULT_DAEMON_HTTP_BASE_URL),
+    [isConnected],
+  );
+
   const appendCommandResponse = (text: string) => {
     dispatch({
       type: "ADD_MESSAGE",
@@ -237,6 +243,9 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
       }
       if (signal.type === "OPEN_EMBEDDING_SETUP") {
         dispatch({ type: "SET_EMBEDDING_SETUP_OPEN", payload: true });
+      }
+      if (signal.type === "ENVIRONMENT_SWITCHED" && signal.payload) {
+        dispatch({ type: "SET_ENVIRONMENT", payload: signal.payload });
       }
     }
   };
@@ -284,6 +293,7 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
         compactMode,
         setCompactMode,
       },
+      environment: environmentClient,
       memory: memoryClient,
       daemonClient,
     });

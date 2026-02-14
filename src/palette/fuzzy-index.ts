@@ -286,6 +286,8 @@ function mapSlashCategoryToKeyword(category: SlashCommandCategory): string {
       return "system";
     case "memory":
       return "memory";
+    case "environment":
+      return "environment";
     default: {
       const exhaustive: never = category;
       return exhaustive;

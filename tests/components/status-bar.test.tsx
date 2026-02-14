@@ -732,6 +732,7 @@ function makeDefaultSources(overrides: Partial<StatusSegmentSources> = {}): Stat
   return {
     connectionStatus: "connected",
     currentModel: "claude-3.5-sonnet",
+    activeEnvironment: null,
     lifecycleStatus: "idle",
     activeToolName: null,
     tokenCount: 0,
@@ -751,12 +752,16 @@ describe("STATUS_SEGMENT_PRIORITY", () => {
     expect(STATUS_SEGMENT_PRIORITY.model).toBe(2);
   });
 
-  test("lifecycle has third priority", () => {
-    expect(STATUS_SEGMENT_PRIORITY.lifecycle).toBe(3);
+  test("environment has third priority", () => {
+    expect(STATUS_SEGMENT_PRIORITY.environment).toBe(3);
+  });
+
+  test("lifecycle has fourth priority", () => {
+    expect(STATUS_SEGMENT_PRIORITY.lifecycle).toBe(4);
   });
 
   test("hints has lowest priority (highest number)", () => {
-    expect(STATUS_SEGMENT_PRIORITY.hints).toBe(4);
+    expect(STATUS_SEGMENT_PRIORITY.hints).toBe(5);
   });
 
   test("all priorities are unique", () => {
@@ -767,17 +772,18 @@ describe("STATUS_SEGMENT_PRIORITY", () => {
 });
 
 describe("STATUS_SEGMENT_ORDER", () => {
-  test("contains all four segment IDs", () => {
-    expect(STATUS_SEGMENT_ORDER).toHaveLength(4);
+  test("contains all five segment IDs", () => {
+    expect(STATUS_SEGMENT_ORDER).toHaveLength(5);
     expect(STATUS_SEGMENT_ORDER).toContain("connection");
     expect(STATUS_SEGMENT_ORDER).toContain("model");
+    expect(STATUS_SEGMENT_ORDER).toContain("environment");
     expect(STATUS_SEGMENT_ORDER).toContain("lifecycle");
     expect(STATUS_SEGMENT_ORDER).toContain("hints");
   });
 
   test("is ordered by priority (connection first, hints last)", () => {
     expect(STATUS_SEGMENT_ORDER[0]).toBe("connection");
-    expect(STATUS_SEGMENT_ORDER[3]).toBe("hints");
+    expect(STATUS_SEGMENT_ORDER[4]).toBe("hints");
   });
 });
 
@@ -799,15 +805,15 @@ describe("SEGMENT_DROP_THRESHOLDS", () => {
 });
 
 describe("deriveStatusSegments", () => {
-  test("returns exactly four segments", () => {
+  test("returns exactly five segments", () => {
     const segments = deriveStatusSegments(makeDefaultSources());
-    expect(segments).toHaveLength(4);
+    expect(segments).toHaveLength(5);
   });
 
   test("segments are in priority order", () => {
     const segments = deriveStatusSegments(makeDefaultSources());
     const ids = segments.map((s) => s.id);
-    expect(ids).toEqual(["connection", "model", "lifecycle", "hints"]);
+    expect(ids).toEqual(["connection", "model", "environment", "lifecycle", "hints"]);
   });
 
   test("all segments start as visible", () => {
@@ -935,7 +941,7 @@ describe("resolveSegmentVisibility", () => {
   test("all segments visible at wide terminal (120 cols)", () => {
     const segments = deriveStatusSegments(makeDefaultSources());
     const result = resolveSegmentVisibility(segments, 120);
-    expect(result.visibleSegments).toHaveLength(4);
+    expect(result.visibleSegments).toHaveLength(5);
   });
 
   test("connection is always visible even at minimum width", () => {
@@ -954,7 +960,7 @@ describe("resolveSegmentVisibility", () => {
 
     // At a width just below full, hints should drop first
     const narrowResult = resolveSegmentVisibility(segments, fullWidth - 1);
-    if (narrowResult.visibleSegments.length < 4) {
+    if (narrowResult.visibleSegments.length < 5) {
       const droppedIds = segments
         .filter((s) => !narrowResult.visibleSegments.some((v) => v.id === s.id))
         .map((s) => s.id);
@@ -962,12 +968,12 @@ describe("resolveSegmentVisibility", () => {
     }
   });
 
-  test("drop order is deterministic: hints → lifecycle → model", () => {
+  test("drop order is deterministic: hints → lifecycle → environment → model", () => {
     const segments = deriveStatusSegments(makeDefaultSources());
 
     // Very wide: all visible
     const wide = resolveSegmentVisibility(segments, 200);
-    expect(wide.visibleSegments).toHaveLength(4);
+    expect(wide.visibleSegments).toHaveLength(5);
 
     // Progressively narrow: track which segments drop and in what order
     const droppedOrder: StatusSegmentId[] = [];
@@ -985,18 +991,22 @@ describe("resolveSegmentVisibility", () => {
       }
     }
 
-    // Verify the drop order: hints first, then lifecycle, then model
+    // Verify the drop order: hints first, then lifecycle, then environment, then model
     // Connection drops last (if at all, only at extreme widths)
     const hintsIdx = droppedOrder.indexOf("hints");
     const lifecycleIdx = droppedOrder.indexOf("lifecycle");
+    const environmentIdx = droppedOrder.indexOf("environment");
     const modelIdx = droppedOrder.indexOf("model");
     const connectionIdx = droppedOrder.indexOf("connection");
 
     if (hintsIdx >= 0 && lifecycleIdx >= 0) {
       expect(hintsIdx).toBeLessThan(lifecycleIdx);
     }
-    if (lifecycleIdx >= 0 && modelIdx >= 0) {
-      expect(lifecycleIdx).toBeLessThan(modelIdx);
+    if (lifecycleIdx >= 0 && environmentIdx >= 0) {
+      expect(lifecycleIdx).toBeLessThan(environmentIdx);
+    }
+    if (environmentIdx >= 0 && modelIdx >= 0) {
+      expect(environmentIdx).toBeLessThan(modelIdx);
     }
     if (modelIdx >= 0 && connectionIdx >= 0) {
       expect(modelIdx).toBeLessThan(connectionIdx);
@@ -1027,7 +1037,7 @@ describe("resolveSegmentVisibility", () => {
   test("segments array includes visibility flags for all segments", () => {
     const segments = deriveStatusSegments(makeDefaultSources());
     const result = resolveSegmentVisibility(segments, 50);
-    expect(result.segments).toHaveLength(4);
+    expect(result.segments).toHaveLength(5);
 
     for (const seg of result.segments) {
       const isVisible = result.visibleSegments.some((v) => v.id === seg.id);
@@ -1039,14 +1049,14 @@ describe("resolveSegmentVisibility", () => {
 describe("resolveStatusSegmentSet", () => {
   test("full pipeline produces valid segment set", () => {
     const result = resolveStatusSegmentSet(makeDefaultSources());
-    expect(result.segments).toHaveLength(4);
+    expect(result.segments).toHaveLength(5);
     expect(result.availableWidth).toBe(120);
     expect(result.visibleSegments.length).toBeGreaterThan(0);
   });
 
   test("narrow terminal drops low-priority segments", () => {
     const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 40 }));
-    expect(result.visibleSegments.length).toBeLessThan(4);
+    expect(result.visibleSegments.length).toBeLessThan(5);
 
     const visibleIds = result.visibleSegments.map((s) => s.id);
     expect(visibleIds).toContain("connection");
@@ -1054,7 +1064,7 @@ describe("resolveStatusSegmentSet", () => {
 
   test("wide terminal shows all segments", () => {
     const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
-    expect(result.visibleSegments).toHaveLength(4);
+    expect(result.visibleSegments).toHaveLength(5);
   });
 });
 
@@ -1092,9 +1102,9 @@ describe("isSegmentVisible", () => {
 });
 
 describe("segment-priority width degradation", () => {
-  test("at 120 cols: all four segments visible", () => {
+  test("at 120 cols: all five segments visible", () => {
     const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 120 }));
-    expect(result.visibleSegments).toHaveLength(4);
+    expect(result.visibleSegments).toHaveLength(5);
   });
 
   test("connection and model survive at 40 cols", () => {
@@ -1184,13 +1194,14 @@ describe("SEGMENT_SEPARATOR", () => {
 });
 
 describe("groupSegments", () => {
-  test("places connection, model, lifecycle in left group", () => {
+  test("places connection, model, environment, lifecycle in left group", () => {
     const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
     const { left, right } = groupSegments(result.visibleSegments);
 
     const leftIds = left.map((s) => s.id);
     expect(leftIds).toContain("connection");
     expect(leftIds).toContain("model");
+    expect(leftIds).toContain("environment");
     expect(leftIds).toContain("lifecycle");
     expect(leftIds).not.toContain("hints");
   });
