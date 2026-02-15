@@ -1,6 +1,7 @@
 import { err, type Result } from "../../daemon/contracts";
 import type { ParsedCommand } from "../parser";
 import type { SlashCommandHandlerKey } from "../registry";
+import { handleChannelsCommand } from "./channels";
 import { handleConnectCommand } from "./connect";
 import { handleDaemonCommand } from "./daemon";
 import { handleEnvironmentCommand } from "./environment";
@@ -36,6 +37,7 @@ const HANDLER_MAP: Record<SlashCommandHandlerKey, CommandHandler> = {
   MEMORY: handleMemoryCommand,
   MEMORY_SETUP: handleMemorySetupCommand,
   DAEMON: handleDaemonCommand,
+  CHANNELS: handleChannelsCommand,
   SETUP: handleSetupCommand,
 };
 
