@@ -705,7 +705,7 @@ describe("formatStatusIndicator", () => {
     const result = formatStatusIndicator("connected");
     expect(result).toContain("\x1b[32m");
     expect(result).toContain("connected");
-    expect(result).toContain("●");
+    expect(result).toContain("*");
     expect(result).toContain("\x1b[0m");
   });
 
@@ -713,14 +713,14 @@ describe("formatStatusIndicator", () => {
     const result = formatStatusIndicator("error");
     expect(result).toContain("\x1b[31m");
     expect(result).toContain("error");
-    expect(result).toContain("●");
+    expect(result).toContain("*");
   });
 
   it("returns yellow indicator for disconnected state", () => {
     const result = formatStatusIndicator("disconnected");
     expect(result).toContain("\x1b[33m");
     expect(result).toContain("disconnected");
-    expect(result).toContain("●");
+    expect(result).toContain("*");
   });
 
   it("returns yellow indicator for connecting state", () => {
@@ -745,13 +745,13 @@ describe("formatRelativeTime", () => {
 
   it("returns dim dash for undefined timestamp", () => {
     const result = formatRelativeTime(undefined, fixedNow);
-    expect(result).toContain("—");
+    expect(result).toContain("-");
     expect(result).toContain("\x1b[2m");
   });
 
   it("returns dim dash for invalid timestamp", () => {
     const result = formatRelativeTime("not-a-date", fixedNow);
-    expect(result).toContain("—");
+    expect(result).toContain("-");
   });
 
   it("returns 'just now' for timestamps within 1 second", () => {
@@ -918,7 +918,7 @@ describe("formatChannelStatusTable", () => {
 
     const result = formatChannelStatusTable(snapshot, fixedNow);
 
-    expect(result).toContain("—");
+    expect(result).toContain("-");
   });
 
   it("includes separator line between header and rows", () => {
@@ -939,7 +939,7 @@ describe("formatChannelStatusTable", () => {
 
     const result = formatChannelStatusTable(snapshot, fixedNow);
 
-    expect(result).toContain("─");
+    expect(result).toContain("-");
   });
 
   it("uses singular 'channel' for single channel summary", () => {

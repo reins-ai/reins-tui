@@ -268,17 +268,17 @@ const COLOR_RESET = "\x1b[0m";
 export function formatStatusIndicator(state: ChannelHealthStatus["state"]): string {
   switch (state) {
     case "connected":
-      return `${COLOR_GREEN}● connected${COLOR_RESET}`;
+      return `${COLOR_GREEN}* connected${COLOR_RESET}`;
     case "error":
-      return `${COLOR_RED}● error${COLOR_RESET}`;
+      return `${COLOR_RED}* error${COLOR_RESET}`;
     case "disconnected":
-      return `${COLOR_YELLOW}● disconnected${COLOR_RESET}`;
+      return `${COLOR_YELLOW}* disconnected${COLOR_RESET}`;
     case "connecting":
-      return `${COLOR_YELLOW}● connecting${COLOR_RESET}`;
+      return `${COLOR_YELLOW}* connecting${COLOR_RESET}`;
     case "reconnecting":
-      return `${COLOR_YELLOW}● reconnecting${COLOR_RESET}`;
+      return `${COLOR_YELLOW}* reconnecting${COLOR_RESET}`;
     default:
-      return `${COLOR_DIM}● unknown${COLOR_RESET}`;
+      return `${COLOR_DIM}* unknown${COLOR_RESET}`;
   }
 }
 
@@ -288,13 +288,13 @@ export function formatStatusIndicator(state: ChannelHealthStatus["state"]): stri
  */
 export function formatRelativeTime(isoTimestamp: string | undefined, nowMs?: number): string {
   if (!isoTimestamp) {
-    return `${COLOR_DIM}—${COLOR_RESET}`;
+    return `${COLOR_DIM}-${COLOR_RESET}`;
   }
 
   const now = nowMs ?? Date.now();
   const then = new Date(isoTimestamp).getTime();
   if (Number.isNaN(then)) {
-    return `${COLOR_DIM}—${COLOR_RESET}`;
+    return `${COLOR_DIM}-${COLOR_RESET}`;
   }
 
   const diffMs = now - then;
@@ -369,10 +369,10 @@ export function formatChannelStatusTable(snapshot: ChannelStatusSnapshot, nowMs?
   ].join("  ");
 
   const separator = [
-    "─".repeat(colPlatform),
-    "─".repeat(colStatus - 8), // ANSI codes add ~8 chars
-    "─".repeat(colEnabled),
-    "─".repeat(colActivity),
+    "-".repeat(colPlatform),
+    "-".repeat(colStatus - 8), // ANSI codes add ~8 chars
+    "-".repeat(colEnabled),
+    "-".repeat(colActivity),
   ].join("  ");
 
   const rows = channels.map((ch) => {
