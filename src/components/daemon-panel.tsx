@@ -1,11 +1,18 @@
-import { useEffect, useMemo, useReducer } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
 
 import { DaemonProfileStore, type TransportType } from "@reins/core";
 
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "../daemon/client";
+import {
+  addDaemonProfile,
+  switchDaemonProfile,
+  removeDaemonProfile,
+  showDaemonToken,
+  rotateDaemonToken,
+} from "../daemon/actions";
 import { useDaemon } from "../daemon/daemon-context";
 import { useThemeTokens } from "../theme";
-import { Box, Text, useKeyboard } from "../ui";
+import { Box, Input, Text, useKeyboard } from "../ui";
 import { ModalPanel } from "./modal-panel";
 
 // ---------------------------------------------------------------------------
@@ -40,7 +47,15 @@ interface ConnectionInfo {
 // State machine
 // ---------------------------------------------------------------------------
 
-type PanelStep = "ready" | "action-prompt";
+type PanelStep =
+  | "ready"
+  | "adding"
+  | "confirm-remove"
+  | "token-show"
+  | "token-rotate-confirm"
+  | "action-prompt";
+
+type ActiveInput = "name" | "url";
 
 interface PanelState {
   readonly step: PanelStep;
@@ -48,6 +63,17 @@ interface PanelState {
   readonly profiles: readonly DaemonProfileDisplay[];
   readonly connection: ConnectionInfo;
   readonly statusMessage: string | null;
+  // Add form state
+  readonly addName: string;
+  readonly addUrl: string;
+  readonly activeInput: ActiveInput;
+  // Remove confirmation
+  readonly pendingRemoveName: string | null;
+  // Token state
+  readonly tokenValue: string | null;
+  readonly tokenProfile: string | null;
+  // Busy flag for async operations
+  readonly busy: boolean;
 }
 
 type PanelAction =
@@ -59,11 +85,37 @@ type PanelAction =
   | { type: "LOAD_FAILED"; message: string }
   | { type: "NAVIGATE_UP" }
   | { type: "NAVIGATE_DOWN" }
+  // Add flow
+  | { type: "START_ADD" }
+  | { type: "SET_ADD_NAME"; value: string }
+  | { type: "SET_ADD_URL"; value: string }
+  | { type: "FOCUS_URL" }
+  | { type: "SUBMIT_ADD_SUCCESS"; message: string }
+  | { type: "SUBMIT_ADD_ERROR"; message: string }
+  | { type: "CANCEL_ADD" }
+  // Switch (immediate)
+  | { type: "DO_SWITCH_SUCCESS"; message: string }
+  | { type: "DO_SWITCH_ERROR"; message: string }
+  // Remove flow
+  | { type: "START_CONFIRM_REMOVE"; name: string }
+  | { type: "CONFIRM_REMOVE_SUCCESS"; message: string }
+  | { type: "CONFIRM_REMOVE_ERROR"; message: string }
+  | { type: "CANCEL_REMOVE" }
+  // Token flow
+  | { type: "SHOW_TOKEN"; token: string; profile: string }
+  | { type: "SHOW_TOKEN_ERROR"; message: string }
+  | { type: "START_ROTATE_CONFIRM" }
+  | { type: "CONFIRM_ROTATE_SUCCESS"; message: string }
+  | { type: "CONFIRM_ROTATE_ERROR"; message: string }
+  | { type: "CANCEL_TOKEN" }
+  // General
+  | { type: "SET_BUSY"; busy: boolean }
+  | { type: "DISMISS_STATUS" }
+  // Legacy (kept for status message display)
   | { type: "ACTION_ADD" }
   | { type: "ACTION_SWITCH" }
   | { type: "ACTION_REMOVE" }
-  | { type: "ACTION_TOKEN" }
-  | { type: "DISMISS_STATUS" };
+  | { type: "ACTION_TOKEN" };
 
 const INITIAL_STATE: PanelState = {
   step: "ready",
@@ -76,6 +128,13 @@ const INITIAL_STATE: PanelState = {
     authStatus: "unknown",
   },
   statusMessage: null,
+  addName: "",
+  addUrl: "",
+  activeInput: "name",
+  pendingRemoveName: null,
+  tokenValue: null,
+  tokenProfile: null,
+  busy: false,
 };
 
 function panelReducer(state: PanelState, action: PanelAction): PanelState {
@@ -112,12 +171,182 @@ function panelReducer(state: PanelState, action: PanelAction): PanelState {
       };
     }
 
-    case "ACTION_ADD":
+    // --- Add flow ---
+
+    case "START_ADD":
       return {
         ...state,
-        step: "action-prompt",
-        statusMessage: "Use /daemon add <name> <url> to add a profile",
+        step: "adding",
+        addName: "",
+        addUrl: "",
+        activeInput: "name",
+        statusMessage: null,
       };
+
+    case "SET_ADD_NAME":
+      return { ...state, addName: action.value };
+
+    case "SET_ADD_URL":
+      return { ...state, addUrl: action.value };
+
+    case "FOCUS_URL":
+      return { ...state, activeInput: "url" };
+
+    case "SUBMIT_ADD_SUCCESS":
+      return {
+        ...state,
+        step: "ready",
+        addName: "",
+        addUrl: "",
+        activeInput: "name",
+        statusMessage: action.message,
+        busy: false,
+      };
+
+    case "SUBMIT_ADD_ERROR":
+      return {
+        ...state,
+        statusMessage: action.message,
+        busy: false,
+      };
+
+    case "CANCEL_ADD":
+      return {
+        ...state,
+        step: "ready",
+        addName: "",
+        addUrl: "",
+        activeInput: "name",
+        statusMessage: null,
+      };
+
+    // --- Switch (immediate) ---
+
+    case "DO_SWITCH_SUCCESS":
+      return {
+        ...state,
+        step: "ready",
+        statusMessage: action.message,
+        busy: false,
+      };
+
+    case "DO_SWITCH_ERROR":
+      return {
+        ...state,
+        step: "ready",
+        statusMessage: action.message,
+        busy: false,
+      };
+
+    // --- Remove flow ---
+
+    case "START_CONFIRM_REMOVE":
+      return {
+        ...state,
+        step: "confirm-remove",
+        pendingRemoveName: action.name,
+        statusMessage: null,
+      };
+
+    case "CONFIRM_REMOVE_SUCCESS": {
+      const newLength = state.profiles.length - 1;
+      return {
+        ...state,
+        step: "ready",
+        pendingRemoveName: null,
+        statusMessage: action.message,
+        selectedIndex: Math.min(state.selectedIndex, Math.max(0, newLength - 1)),
+        busy: false,
+      };
+    }
+
+    case "CONFIRM_REMOVE_ERROR":
+      return {
+        ...state,
+        step: "ready",
+        pendingRemoveName: null,
+        statusMessage: action.message,
+        busy: false,
+      };
+
+    case "CANCEL_REMOVE":
+      return {
+        ...state,
+        step: "ready",
+        pendingRemoveName: null,
+        statusMessage: null,
+      };
+
+    // --- Token flow ---
+
+    case "SHOW_TOKEN":
+      return {
+        ...state,
+        step: "token-show",
+        tokenValue: action.token,
+        tokenProfile: action.profile,
+        statusMessage: null,
+        busy: false,
+      };
+
+    case "SHOW_TOKEN_ERROR":
+      return {
+        ...state,
+        step: "ready",
+        statusMessage: action.message,
+        busy: false,
+      };
+
+    case "START_ROTATE_CONFIRM":
+      return {
+        ...state,
+        step: "token-rotate-confirm",
+      };
+
+    case "CONFIRM_ROTATE_SUCCESS":
+      return {
+        ...state,
+        step: "ready",
+        tokenValue: null,
+        tokenProfile: null,
+        statusMessage: action.message,
+        busy: false,
+      };
+
+    case "CONFIRM_ROTATE_ERROR":
+      return {
+        ...state,
+        step: "ready",
+        tokenValue: null,
+        tokenProfile: null,
+        statusMessage: action.message,
+        busy: false,
+      };
+
+    case "CANCEL_TOKEN":
+      return {
+        ...state,
+        step: "ready",
+        tokenValue: null,
+        tokenProfile: null,
+        statusMessage: null,
+      };
+
+    // --- General ---
+
+    case "SET_BUSY":
+      return { ...state, busy: action.busy };
+
+    case "DISMISS_STATUS":
+      return {
+        ...state,
+        step: "ready",
+        statusMessage: null,
+      };
+
+    // Legacy actions — kept for backward compat if any external dispatch
+    case "ACTION_ADD":
+      return panelReducer(state, { type: "START_ADD" });
 
     case "ACTION_SWITCH": {
       const profile = state.profiles[state.selectedIndex];
@@ -125,38 +354,21 @@ function panelReducer(state: PanelState, action: PanelAction): PanelState {
       return {
         ...state,
         step: "action-prompt",
-        statusMessage: `Use /daemon switch ${profile.name} to switch`,
+        statusMessage: `Switching to '${profile.name}'...`,
+        busy: true,
       };
     }
 
     case "ACTION_REMOVE": {
       const profile = state.profiles[state.selectedIndex];
       if (!profile) return state;
-      if (profile.isDefault) {
-        return {
-          ...state,
-          step: "action-prompt",
-          statusMessage: "Cannot remove the default profile",
-        };
-      }
-      return {
-        ...state,
-        step: "action-prompt",
-        statusMessage: `Use /daemon remove ${profile.name} to remove`,
-      };
+      return panelReducer(state, { type: "START_CONFIRM_REMOVE", name: profile.name });
     }
 
     case "ACTION_TOKEN":
       return {
         ...state,
-        step: "action-prompt",
-        statusMessage: "Use /daemon token show or /daemon token rotate",
-      };
-
-    case "DISMISS_STATUS":
-      return {
-        ...state,
-        step: "ready",
+        busy: true,
         statusMessage: null,
       };
 
@@ -196,6 +408,15 @@ function getAuthLabel(status: ConnectionInfo["authStatus"]): string {
     default:
       return "unknown";
   }
+}
+
+function extractInputValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value !== null) {
+    if ("plainText" in value && typeof value.plainText === "string") return value.plainText;
+    if ("value" in value && typeof value.value === "string") return value.value;
+  }
+  return "";
 }
 
 // ---------------------------------------------------------------------------
@@ -373,14 +594,145 @@ function ActionBar({ tokens }: { tokens: Record<string, string> }) {
 function StatusBar({
   message,
   tokens,
+  isError,
 }: {
   message: string;
   tokens: Record<string, string>;
+  isError?: boolean;
 }) {
   return (
     <Box style={{ flexDirection: "row", marginTop: 1 }}>
-      <Text content="→ " style={{ color: tokens["accent.primary"] }} />
-      <Text content={message} style={{ color: tokens["text.secondary"] }} />
+      <Text content="→ " style={{ color: isError ? tokens["status.error"] : tokens["accent.primary"] }} />
+      <Text content={message} style={{ color: isError ? tokens["status.error"] : tokens["text.secondary"] }} />
+    </Box>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Inline form sub-components
+// ---------------------------------------------------------------------------
+
+function AddForm({
+  state,
+  tokens,
+  onNameInput,
+  onUrlInput,
+}: {
+  state: PanelState;
+  tokens: Record<string, string>;
+  onNameInput: (value: string) => void;
+  onUrlInput: (value: string) => void;
+}) {
+  return (
+    <Box style={{ flexDirection: "column" }}>
+      <Box style={{ flexDirection: "row", marginBottom: 1 }}>
+        <Text content="Add Profile" style={{ color: tokens["accent.primary"] }} />
+      </Box>
+
+      {/* Name field */}
+      <Box style={{ flexDirection: "row" }}>
+        <Text content="Name: " style={{ color: tokens["text.muted"] }} />
+        <Text
+          content={state.addName || (state.activeInput === "name" ? " " : "")}
+          style={{ color: tokens["text.primary"] }}
+        />
+      </Box>
+      {state.activeInput === "name" ? (
+        <Input
+          focused
+          placeholder="my-daemon"
+          value={state.addName}
+          onInput={(value) => onNameInput(extractInputValue(value))}
+        />
+      ) : null}
+
+      {/* URL field */}
+      <Box style={{ flexDirection: "row", marginTop: state.activeInput === "url" ? 0 : 0 }}>
+        <Text content="URL:  " style={{ color: tokens["text.muted"] }} />
+        <Text
+          content={state.addUrl || (state.activeInput === "url" ? " " : "")}
+          style={{ color: tokens["text.primary"] }}
+        />
+      </Box>
+      {state.activeInput === "url" ? (
+        <Input
+          focused
+          placeholder="http://localhost:7433"
+          value={state.addUrl}
+          onInput={(value) => onUrlInput(extractInputValue(value))}
+        />
+      ) : null}
+
+      {/* Hint */}
+      <Box style={{ marginTop: 1 }}>
+        <Text
+          content={state.activeInput === "name" ? "Enter next field · Esc cancel" : "Enter submit · Esc cancel"}
+          style={{ color: tokens["text.muted"] }}
+        />
+      </Box>
+    </Box>
+  );
+}
+
+function ConfirmRemove({
+  name,
+  tokens,
+}: {
+  name: string;
+  tokens: Record<string, string>;
+}) {
+  return (
+    <Box style={{ flexDirection: "column" }}>
+      <Box style={{ flexDirection: "row" }}>
+        <Text
+          content={`Remove profile '${name}'? `}
+          style={{ color: tokens["text.primary"] }}
+        />
+        <Text content="(y/n)" style={{ color: tokens["text.muted"] }} />
+      </Box>
+    </Box>
+  );
+}
+
+function TokenDisplay({
+  token,
+  profile,
+  step,
+  tokens,
+}: {
+  token: string;
+  profile: string;
+  step: "token-show" | "token-rotate-confirm";
+  tokens: Record<string, string>;
+}) {
+  return (
+    <Box style={{ flexDirection: "column" }}>
+      <Box style={{ flexDirection: "row", marginBottom: 1 }}>
+        <Text content="Token" style={{ color: tokens["accent.primary"] }} />
+      </Box>
+      <Box style={{ flexDirection: "row" }}>
+        <Text content="Profile: " style={{ color: tokens["text.muted"] }} />
+        <Text content={profile} style={{ color: tokens["text.primary"] }} />
+      </Box>
+      <Box style={{ flexDirection: "row" }}>
+        <Text content="Token:   " style={{ color: tokens["text.muted"] }} />
+        <Text content={token} style={{ color: tokens["text.primary"] }} />
+      </Box>
+      {step === "token-show" ? (
+        <Box style={{ marginTop: 1 }}>
+          <Text content="t rotate · Esc close" style={{ color: tokens["text.muted"] }} />
+        </Box>
+      ) : (
+        <Box style={{ flexDirection: "column", marginTop: 1 }}>
+          <Box style={{ flexDirection: "row" }}>
+            <Text
+              content="Rotate token? This cannot be undone. "
+              style={{ color: tokens["status.warning"] }}
+            />
+            <Text content="(y/n)" style={{ color: tokens["text.muted"] }} />
+          </Box>
+        </Box>
+      )}
     </Box>
   );
 }
@@ -395,18 +747,17 @@ export function DaemonPanel({ visible, onClose }: DaemonPanelProps) {
   const [state, dispatch] = useReducer(panelReducer, INITIAL_STATE);
   const profileStore = useMemo(() => new DaemonProfileStore(), []);
 
-  useEffect(() => {
-    if (!visible) {
-      return;
-    }
+  // Track a refresh counter so we can re-load profiles after mutations
+  const refreshCounterRef = useRef(0);
 
-    let cancelled = false;
+  const reloadProfiles = useCallback(() => {
+    refreshCounterRef.current += 1;
+    const currentRefresh = refreshCounterRef.current;
 
     void (async () => {
       const profileResult = await profileStore.list();
-      if (cancelled) {
-        return;
-      }
+      // Only apply if this is still the latest refresh
+      if (currentRefresh !== refreshCounterRef.current) return;
 
       if (!profileResult.ok) {
         dispatch({ type: "LOAD_FAILED", message: profileResult.error.message });
@@ -429,30 +780,167 @@ export function DaemonPanel({ visible, onClose }: DaemonPanelProps) {
         authStatus: connectionStatus === "connected" ? "authenticated" : "unauthenticated",
       };
 
-      dispatch({
-        type: "HYDRATE",
-        profiles,
-        connection,
-      });
+      dispatch({ type: "HYDRATE", profiles, connection });
     })();
+  }, [connectionStatus, profileStore]);
 
-    return () => {
-      cancelled = true;
-    };
-  }, [connectionStatus, profileStore, visible]);
+  useEffect(() => {
+    if (!visible) return;
+    reloadProfiles();
+  }, [connectionStatus, visible, reloadProfiles]);
+
+  // --- Action handlers ---
+
+  const handleAddSubmit = useCallback(async (name: string, url: string) => {
+    dispatch({ type: "SET_BUSY", busy: true });
+    const result = await addDaemonProfile(name.trim(), url.trim());
+    if (result.ok) {
+      dispatch({ type: "SUBMIT_ADD_SUCCESS", message: result.message });
+      reloadProfiles();
+    } else {
+      dispatch({ type: "SUBMIT_ADD_ERROR", message: result.error });
+    }
+  }, [reloadProfiles]);
+
+  const handleSwitch = useCallback(async (name: string) => {
+    dispatch({ type: "SET_BUSY", busy: true });
+    const result = await switchDaemonProfile(name);
+    if (result.ok) {
+      dispatch({ type: "DO_SWITCH_SUCCESS", message: result.message });
+      reloadProfiles();
+    } else {
+      dispatch({ type: "DO_SWITCH_ERROR", message: result.error });
+    }
+  }, [reloadProfiles]);
+
+  const handleRemoveConfirm = useCallback(async (name: string) => {
+    dispatch({ type: "SET_BUSY", busy: true });
+    const result = await removeDaemonProfile(name);
+    if (result.ok) {
+      dispatch({ type: "CONFIRM_REMOVE_SUCCESS", message: result.message });
+      reloadProfiles();
+    } else {
+      dispatch({ type: "CONFIRM_REMOVE_ERROR", message: result.error });
+    }
+  }, [reloadProfiles]);
+
+  const handleTokenShow = useCallback(async () => {
+    dispatch({ type: "SET_BUSY", busy: true });
+    const result = await showDaemonToken();
+    if (result.ok) {
+      // Extract profile name from "Profile: <name>"
+      const profileName = result.message.replace("Profile: ", "");
+      dispatch({ type: "SHOW_TOKEN", token: result.token ?? "(not configured)", profile: profileName });
+    } else {
+      dispatch({ type: "SHOW_TOKEN_ERROR", message: result.error });
+    }
+  }, []);
+
+  const handleTokenRotate = useCallback(async () => {
+    dispatch({ type: "SET_BUSY", busy: true });
+    const result = await rotateDaemonToken();
+    if (result.ok) {
+      dispatch({ type: "CONFIRM_ROTATE_SUCCESS", message: `Token rotated. New: ${result.token ?? ""}` });
+    } else {
+      dispatch({ type: "CONFIRM_ROTATE_ERROR", message: result.error });
+    }
+  }, []);
+
+  // --- Input handlers ---
+
+  const handleNameInput = useCallback((value: string) => {
+    dispatch({ type: "SET_ADD_NAME", value });
+  }, []);
+
+  const handleUrlInput = useCallback((value: string) => {
+    dispatch({ type: "SET_ADD_URL", value });
+  }, []);
+
+  // --- Keyboard handler ---
 
   useKeyboard((event) => {
     if (!visible) return;
+    if (state.busy) return;
 
     const keyName = event.name ?? "";
 
-    // Dismiss status message on any key when showing action prompt
+    // --- Adding step: input is focused, only handle Enter/Escape ---
+    if (state.step === "adding") {
+      if (keyName === "escape" || keyName === "esc") {
+        dispatch({ type: "CANCEL_ADD" });
+        return;
+      }
+      if (keyName === "return" || keyName === "enter") {
+        if (state.activeInput === "name") {
+          if (state.addName.trim().length > 0) {
+            dispatch({ type: "FOCUS_URL" });
+          }
+        } else {
+          // Submit
+          if (state.addName.trim().length > 0 && state.addUrl.trim().length > 0) {
+            void handleAddSubmit(state.addName, state.addUrl);
+          }
+        }
+        return;
+      }
+      // Let Input component handle other keys
+      return;
+    }
+
+    // --- Confirm remove step ---
+    if (state.step === "confirm-remove") {
+      if (keyName === "y" && state.pendingRemoveName) {
+        void handleRemoveConfirm(state.pendingRemoveName);
+        return;
+      }
+      if (keyName === "n" || keyName === "escape" || keyName === "esc") {
+        dispatch({ type: "CANCEL_REMOVE" });
+        return;
+      }
+      return;
+    }
+
+    // --- Token show step ---
+    if (state.step === "token-show") {
+      if (keyName === "t") {
+        dispatch({ type: "START_ROTATE_CONFIRM" });
+        return;
+      }
+      if (keyName === "escape" || keyName === "esc") {
+        dispatch({ type: "CANCEL_TOKEN" });
+        return;
+      }
+      return;
+    }
+
+    // --- Token rotate confirm step ---
+    if (state.step === "token-rotate-confirm") {
+      if (keyName === "y") {
+        void handleTokenRotate();
+        return;
+      }
+      if (keyName === "n" || keyName === "escape" || keyName === "esc") {
+        dispatch({ type: "CANCEL_TOKEN" });
+        return;
+      }
+      return;
+    }
+
+    // --- Action prompt (status message display) ---
     if (state.step === "action-prompt" && state.statusMessage !== null) {
       if (keyName === "escape" || keyName === "esc") {
         dispatch({ type: "DISMISS_STATUS" });
         return;
       }
       dispatch({ type: "DISMISS_STATUS" });
+      return;
+    }
+
+    // --- Ready step ---
+
+    // Escape in ready step closes the panel
+    if (keyName === "escape" || keyName === "esc") {
+      onClose();
       return;
     }
 
@@ -468,43 +956,112 @@ export function DaemonPanel({ visible, onClose }: DaemonPanelProps) {
 
     // Actions
     if (keyName === "a") {
-      dispatch({ type: "ACTION_ADD" });
+      dispatch({ type: "START_ADD" });
       return;
     }
     if (keyName === "s") {
-      dispatch({ type: "ACTION_SWITCH" });
+      const profile = state.profiles[state.selectedIndex];
+      if (!profile) {
+        dispatch({ type: "DISMISS_STATUS" });
+        return;
+      }
+      void handleSwitch(profile.name);
       return;
     }
     if (keyName === "r") {
-      dispatch({ type: "ACTION_REMOVE" });
+      const profile = state.profiles[state.selectedIndex];
+      if (!profile) return;
+      dispatch({ type: "START_CONFIRM_REMOVE", name: profile.name });
       return;
     }
     if (keyName === "t") {
-      dispatch({ type: "ACTION_TOKEN" });
+      void handleTokenShow();
       return;
     }
   });
+
+  // Determine the hint text based on current step
+  const hintText = state.step === "ready"
+    ? "↑↓ navigate  Esc close"
+    : state.step === "adding"
+      ? ""
+      : state.step === "confirm-remove"
+        ? ""
+        : state.step === "token-show" || state.step === "token-rotate-confirm"
+          ? ""
+          : "Esc dismiss";
+
+  // Determine if the status message looks like an error
+  const isStatusError = state.statusMessage !== null && (
+    state.statusMessage.startsWith("Cannot ")
+    || state.statusMessage.startsWith("Unable to ")
+    || state.statusMessage.includes("not found")
+    || state.statusMessage.includes("error")
+    || state.statusMessage.includes("Error")
+  );
 
   return (
     <ModalPanel
       visible={visible}
       title="Daemon"
-      hint="↑↓ navigate  Esc close"
+      hint={hintText}
       width={72}
-      height={20}
-      closeOnEscape
+      height={22}
+      closeOnEscape={false}
       onClose={onClose}
     >
       <Box style={{ flexDirection: "column", flexGrow: 1, minHeight: 0 }}>
         <ConnectionSection connection={state.connection} tokens={tokens} />
-        <ProfileList
-          profiles={state.profiles}
-          selectedIndex={state.selectedIndex}
-          tokens={tokens}
-        />
-        <ActionBar tokens={tokens} />
+
+        {/* Profile list — always visible except during add form */}
+        {state.step !== "adding" && state.step !== "token-show" && state.step !== "token-rotate-confirm" ? (
+          <ProfileList
+            profiles={state.profiles}
+            selectedIndex={state.selectedIndex}
+            tokens={tokens}
+          />
+        ) : null}
+
+        {/* Add form */}
+        {state.step === "adding" ? (
+          <AddForm
+            state={state}
+            tokens={tokens}
+            onNameInput={handleNameInput}
+            onUrlInput={handleUrlInput}
+          />
+        ) : null}
+
+        {/* Confirm remove */}
+        {state.step === "confirm-remove" && state.pendingRemoveName ? (
+          <ConfirmRemove name={state.pendingRemoveName} tokens={tokens} />
+        ) : null}
+
+        {/* Token display */}
+        {(state.step === "token-show" || state.step === "token-rotate-confirm") && state.tokenValue !== null ? (
+          <TokenDisplay
+            token={state.tokenValue}
+            profile={state.tokenProfile ?? "unknown"}
+            step={state.step}
+            tokens={tokens}
+          />
+        ) : null}
+
+        {/* Action bar — only in ready/action-prompt steps */}
+        {state.step === "ready" || state.step === "action-prompt" || state.step === "confirm-remove" ? (
+          <ActionBar tokens={tokens} />
+        ) : null}
+
+        {/* Status messages */}
         {state.statusMessage !== null ? (
-          <StatusBar message={state.statusMessage} tokens={tokens} />
+          <StatusBar message={state.statusMessage} tokens={tokens} isError={isStatusError} />
+        ) : null}
+
+        {/* Busy indicator */}
+        {state.busy ? (
+          <Box style={{ marginTop: 1 }}>
+            <Text content="Working..." style={{ color: tokens["text.muted"] }} />
+          </Box>
         ) : null}
       </Box>
     </ModalPanel>
