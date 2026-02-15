@@ -4,9 +4,16 @@ import {
   OnboardingEngine,
   OnboardingCheckpointService,
   FirstRunDetector,
+  WelcomeStep,
+  DaemonInstallStep,
+  ProviderSetupStep,
+  ModelSelectionStep,
+  WorkspaceStep,
+  PersonalityStep,
   ONBOARDING_STEPS,
   type EngineState,
   type FirstRunStatus,
+  type OnboardingMode,
   type OnboardingStep,
   type OnboardingEvent,
 } from "@reins/core";
@@ -73,6 +80,17 @@ const RESUME_OPTIONS = [
   { label: "Start fresh", action: "restart" },
   { label: "Skip to chat", action: "skip" },
 ] as const;
+
+function createStepHandlers() {
+  return [
+    new WelcomeStep(),
+    new DaemonInstallStep(),
+    new ProviderSetupStep(),
+    new ModelSelectionStep(),
+    new WorkspaceStep(),
+    new PersonalityStep(),
+  ];
+}
 
 function wizardReducer(state: WizardState, action: WizardAction): WizardState {
   switch (action.type) {
@@ -475,6 +493,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
       if (detection.status === "first-run") {
         const engine = new OnboardingEngine({
           checkpoint,
+          steps: createStepHandlers(),
           onEvent: handleEngineEvent,
         });
         engineRef.current = engine;
@@ -513,6 +532,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
 
     const engine = new OnboardingEngine({
       checkpoint,
+      steps: createStepHandlers(),
       onEvent: handleEngineEvent,
     });
     engineRef.current = engine;
@@ -531,7 +551,17 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
     const engine = engineRef.current;
     if (!engine) return;
 
-    const result = await engine.completeCurrentStep();
+    const currentStep = engine.getState().currentStep;
+    const stepData = { ...stepDataRef.current };
+
+    if (currentStep === "welcome") {
+      const selectedMode = stepData.selectedMode;
+      if (selectedMode === "quickstart" || selectedMode === "advanced") {
+        engine.setMode(selectedMode as OnboardingMode);
+      }
+    }
+
+    const result = await engine.completeCurrentStep(stepData);
     if (!result.ok) {
       dispatch({ type: "SET_ERROR", error: result.error.message });
       return;

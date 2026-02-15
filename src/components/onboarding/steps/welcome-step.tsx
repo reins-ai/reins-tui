@@ -100,16 +100,6 @@ export function WelcomeStepView({ tokens, engineState: _engineState, onStepData 
           content="Your name:"
           style={{ color: focusField === "name" ? tokens["text.primary"] : tokens["text.muted"] }}
         />
-        <Box style={{ marginTop: 1, flexDirection: "row" }}>
-          <Text
-            content={focusField === "name" ? "> " : "  "}
-            style={{ color: tokens["accent.primary"] }}
-          />
-          <Text
-            content={nameInput || " "}
-            style={{ color: tokens["text.secondary"] }}
-          />
-        </Box>
         <Input
           focused={focusField === "name"}
           placeholder="User"
