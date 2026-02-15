@@ -25,6 +25,7 @@ describe("slash command registry", () => {
       "remember",
       "memory",
       "daemon",
+      "setup",
     ]);
   });
 
@@ -48,6 +49,7 @@ describe("slash command registry", () => {
       remember: "memory",
       memory: "memory",
       daemon: "system",
+      setup: "system",
     });
   });
 
@@ -195,6 +197,7 @@ describe("getCommandAutocomplete", () => {
       "remember",
       "search-settings",
       "settings",
+      "setup",
       "status",
       "theme",
     ]);

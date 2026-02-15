@@ -56,13 +56,13 @@ export function resolveHeartbeatInterval(status: DaemonConnectionStatus): number
 export function getConnectionLabel(status: DaemonConnectionStatus, daemonMode?: DaemonMode): string {
   switch (status) {
     case "connected":
-      return "Backend";
+      return "Connected";
     case "disconnected":
-      return daemonMode === "mock" ? "⚠ Backend disconnected" : "Backend Offline";
+      return daemonMode === "mock" ? "⚠ Backend disconnected" : "Offline";
     case "connecting":
-      return "Backend Connecting...";
+      return "Connecting...";
     case "reconnecting":
-      return "Backend Reconnecting...";
+      return "Reconnecting...";
   }
 }
 

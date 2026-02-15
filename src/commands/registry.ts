@@ -17,7 +17,8 @@ export type SlashCommandHandlerKey =
   | "REMEMBER"
   | "MEMORY"
   | "MEMORY_SETUP"
-  | "DAEMON";
+  | "DAEMON"
+  | "SETUP";
 
 export interface SlashCommandDefinition {
   readonly name: string;
@@ -168,6 +169,14 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     usage: "/daemon [add|switch|remove|status|token] [options]",
     category: "system",
     handlerKey: "DAEMON",
+  }),
+  Object.freeze({
+    name: "setup",
+    aliases: Object.freeze(["onboarding", "personality"]),
+    description: "Re-run the onboarding setup wizard.",
+    usage: "/setup",
+    category: "system",
+    handlerKey: "SETUP",
   }),
 ]);
 

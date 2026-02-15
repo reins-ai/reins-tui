@@ -250,13 +250,13 @@ function connectionGlyph(status: DaemonConnectionStatus): string {
 function connectionLabel(status: DaemonConnectionStatus): string {
   switch (status) {
     case "connected":
-      return "Backend";
+      return "Connected";
     case "disconnected":
-      return "Backend Offline";
+      return "Offline";
     case "connecting":
-      return "Backend Connecting...";
+      return "Connecting...";
     case "reconnecting":
-      return "Backend Reconnecting...";
+      return "Reconnecting...";
   }
 }
 
@@ -380,39 +380,16 @@ export function deriveStatusSegments(sources: StatusSegmentSources): StatusSegme
       case "connection":
         return buildSegment(id, connGlyph, `${connGlyph} ${connLabel}`, connColor);
       case "model":
-        // Model segment removed - return empty segment that will be filtered out
-        return buildSegment(id, "", "", "text.secondary");
+        return buildSegment(id, "", sources.currentModel, "text.secondary");
       case "environment": {
         const envName = sources.activeEnvironment;
         if (!envName || envName === "default") {
-          return buildSegment(id, "", "", "text.secondary");
+          return buildSegment(id, "◆", "◆ default", "text.secondary");
         }
         return buildSegment(id, "◆", `◆ ${envName}`, "text.secondary");
       }
-      case "lifecycle": {
-        // Show lifecycle segment for warnings/errors or active states
-        const showLifecycle = 
-          sources.connectionStatus !== "connected" || // Show connection issues
-          sources.lifecycleStatus === "error" ||      // Show errors
-          sources.lifecycleStatus === "sending" ||    // Show active states
-          sources.lifecycleStatus === "thinking" ||
-          sources.lifecycleStatus === "streaming" ||
-          sources.compactionActive;                   // Show compaction notice
-        
-        if (!showLifecycle) {
-          return buildSegment(id, "", "", lc.colorToken);
-        }
-        
-        // For connection issues, show connection-specific message
-        if (sources.connectionStatus !== "connected") {
-          const connMsg = sources.connectionStatus === "disconnected" 
-            ? "Cannot reach backend"
-            : `Backend ${sources.connectionStatus}...`;
-          return buildSegment(id, "⚠", `⚠ ${connMsg}`, connectionColorToken(sources.connectionStatus));
-        }
-        
+      case "lifecycle":
         return buildSegment(id, lc.glyph, `${lc.glyph} ${lc.label}`, lc.colorToken);
-      }
       case "hints":
         return buildSegment(id, "", "Ctrl+K palette · Ctrl+M model · Ctrl+1 context", "text.muted");
     }

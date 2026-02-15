@@ -1,4 +1,7 @@
-import { describe, expect, it } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { dispatchCommand, type CommandHandlerContext } from "../../src/commands/handlers";
 import { parseSlashCommand } from "../../src/commands/parser";
@@ -42,7 +45,34 @@ async function runCommand(input: string, context: CommandHandlerContext) {
   return dispatchCommand(parsed.value, context);
 }
 
+const createdDirectories: string[] = [];
+const originalHome = process.env.HOME;
+const originalDataRoot = process.env.REINS_DATA_ROOT;
+
+async function createTempHomeDirectory(): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), "reins-daemon-command-"));
+  createdDirectories.push(directory);
+  return directory;
+}
+
 describe("handleDaemonCommand", () => {
+  beforeEach(async () => {
+    const tempHome = await createTempHomeDirectory();
+    process.env.HOME = tempHome;
+    process.env.REINS_DATA_ROOT = join(tempHome, ".config", "reins");
+  });
+
+  afterEach(async () => {
+    process.env.HOME = originalHome;
+    process.env.REINS_DATA_ROOT = originalDataRoot;
+
+    while (createdDirectories.length > 0) {
+      const directory = createdDirectories.pop();
+      if (!directory) continue;
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
   it("bare /daemon emits OPEN_DAEMON_PANEL signal", async () => {
     const context = createTestContext();
     const result = await runCommand("/daemon", context);
@@ -89,15 +119,66 @@ describe("handleDaemonCommand", () => {
     expect(result.value.responseText).toContain("http://localhost:7433");
   });
 
-  it("/daemon switch remote returns success message", async () => {
+  it("/daemon add uses canonical transport probe for stored profile", async () => {
     const context = createTestContext();
-    const result = await runCommand("/daemon switch remote", context);
+    const result = await runCommand("/daemon add tail https://node.ts.net", context);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
-    expect(result.value.statusMessage).toContain("remote");
-    expect(result.value.responseText).toContain("remote");
+    const statusResult = await runCommand("/daemon status", context);
+    expect(statusResult.ok).toBe(true);
+    if (!statusResult.ok) return;
+
+    expect(statusResult.value.responseText).toContain("Transport: tailscale");
+  });
+
+  it("/daemon switch remote returns success message", async () => {
+    const server = Bun.serve({
+      port: 0,
+      fetch() {
+        return new Response(JSON.stringify({ healthy: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+
+    try {
+      const remoteUrl = `http://127.0.0.1:${server.port}`;
+      const context = createTestContext();
+      const addResult = await runCommand(`/daemon add remote ${remoteUrl}`, context);
+      expect(addResult.ok).toBe(true);
+
+      const result = await runCommand("/daemon switch remote", context);
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      expect(result.value.statusMessage).toContain("remote");
+      expect(result.value.responseText).toContain("remote");
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  it("/daemon switch keeps current default when target is unreachable", async () => {
+    const context = createTestContext();
+    const addLocalResult = await runCommand("/daemon add local http://localhost:7433", context);
+    expect(addLocalResult.ok).toBe(true);
+
+    const addBadResult = await runCommand("/daemon add bad http://127.0.0.1:1", context);
+    expect(addBadResult.ok).toBe(true);
+
+    const switchResult = await runCommand("/daemon switch bad", context);
+    expect(switchResult.ok).toBe(false);
+    if (switchResult.ok) return;
+    expect(switchResult.error.message).toContain("Default profile unchanged");
+
+    const statusResult = await runCommand("/daemon status", context);
+    expect(statusResult.ok).toBe(true);
+    if (!statusResult.ok) return;
+    expect(statusResult.value.responseText).toContain("Address: http://localhost:7433");
   });
 
   it("/daemon switch with missing name returns error", async () => {
@@ -124,6 +205,12 @@ describe("handleDaemonCommand", () => {
 
   it("/daemon remove staging returns success message", async () => {
     const context = createTestContext();
+    const addDefaultResult = await runCommand("/daemon add local http://localhost:7433", context);
+    expect(addDefaultResult.ok).toBe(true);
+
+    const addResult = await runCommand("/daemon add staging http://staging.example:7433", context);
+    expect(addResult.ok).toBe(true);
+
     const result = await runCommand("/daemon remove staging", context);
 
     expect(result.ok).toBe(true);
@@ -136,6 +223,9 @@ describe("handleDaemonCommand", () => {
 
   it("/daemon status returns connection info", async () => {
     const context = createTestContext();
+    const addResult = await runCommand("/daemon add local http://localhost:7433", context);
+    expect(addResult.ok).toBe(true);
+
     const result = await runCommand("/daemon status", context);
 
     expect(result.ok).toBe(true);
@@ -145,40 +235,51 @@ describe("handleDaemonCommand", () => {
     expect(result.value.responseText).toContain("Daemon Status");
     expect(result.value.responseText).toContain("Connection:");
     expect(result.value.responseText).toContain("Transport:");
+    expect(result.value.responseText).toContain("Profiles:");
   });
 
   it("/daemon token show returns masked token info", async () => {
     const context = createTestContext();
+    const addResult = await runCommand("/daemon add local http://localhost:7433", context);
+    expect(addResult.ok).toBe(true);
+
     const result = await runCommand("/daemon token show", context);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
     expect(result.value.statusMessage).toBe("Daemon token");
-    expect(result.value.responseText).toContain("rm_");
-    expect(result.value.responseText).toContain("****");
+    expect(result.value.responseText).toContain("Profile:");
+    expect(result.value.responseText).toContain("Token:");
   });
 
   it("/daemon token with no action defaults to show", async () => {
     const context = createTestContext();
+    const addResult = await runCommand("/daemon add local http://localhost:7433", context);
+    expect(addResult.ok).toBe(true);
+
     const result = await runCommand("/daemon token", context);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
     expect(result.value.statusMessage).toBe("Daemon token");
-    expect(result.value.responseText).toContain("rm_");
+    expect(result.value.responseText).toContain("Token:");
   });
 
   it("/daemon token rotate returns success", async () => {
     const context = createTestContext();
+    const addResult = await runCommand("/daemon add local http://localhost:7433", context);
+    expect(addResult.ok).toBe(true);
+
     const result = await runCommand("/daemon token rotate", context);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
 
     expect(result.value.statusMessage).toBe("Token rotated");
-    expect(result.value.responseText).toContain("rotated successfully");
+    expect(result.value.responseText).toContain("rotated");
+    expect(result.value.responseText).toContain("rm_");
   });
 
   it("unknown subcommand returns error", async () => {

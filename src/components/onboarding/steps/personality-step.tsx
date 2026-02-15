@@ -59,7 +59,7 @@ export function PersonalityStepView({ tokens, engineState: _engineState, onStepD
   // Emit step data on changes
   useEffect(() => {
     onStepData({
-      personalityPreset: selectedOption.preset,
+      preset: selectedOption.preset,
       customPrompt: isCustomSelected ? customPrompt : undefined,
     });
   }, [selectedOption.preset, isCustomSelected, customPrompt, onStepData]);

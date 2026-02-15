@@ -13,6 +13,7 @@ import {
   handleExportConversationCommand,
   handleNewConversationCommand,
 } from "./session";
+import { handleSetupCommand } from "./setup";
 import { handleCompactCommand, handleHelpCommand, handleQuitCommand, handleSettingsCommand, handleStatusCommand } from "./system";
 import { handleThemeCommand } from "./theme";
 import type { CommandError, CommandHandler, CommandHandlerContext, CommandResult } from "./types";
@@ -35,6 +36,7 @@ const HANDLER_MAP: Record<SlashCommandHandlerKey, CommandHandler> = {
   MEMORY: handleMemoryCommand,
   MEMORY_SETUP: handleMemorySetupCommand,
   DAEMON: handleDaemonCommand,
+  SETUP: handleSetupCommand,
 };
 
 export async function dispatchCommand(

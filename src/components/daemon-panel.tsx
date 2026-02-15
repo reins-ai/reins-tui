@@ -1,6 +1,9 @@
-import { useReducer } from "react";
+import { useEffect, useMemo, useReducer } from "react";
+
+import { DaemonProfileStore, type TransportType } from "@reins/core";
 
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "../daemon/client";
+import { useDaemon } from "../daemon/daemon-context";
 import { useThemeTokens } from "../theme";
 import { Box, Text, useKeyboard } from "../ui";
 import { ModalPanel } from "./modal-panel";
@@ -13,14 +16,6 @@ export interface DaemonPanelProps {
   visible: boolean;
   onClose: () => void;
 }
-
-/**
- * Transport security classification.
- * Mirrors @reins/core TransportType — defined locally to avoid
- * depending on an unexported barrel member. Replace with the core
- * import once TransportType is re-exported from @reins/core.
- */
-type TransportType = "localhost" | "tailscale" | "cloudflare" | "direct";
 
 // ---------------------------------------------------------------------------
 // Display types (structured for future DaemonProfileStore wiring)
@@ -42,27 +37,6 @@ interface ConnectionInfo {
 }
 
 // ---------------------------------------------------------------------------
-// Static data (replace with DaemonProfileStore integration later)
-// ---------------------------------------------------------------------------
-
-const MOCK_PROFILES: readonly DaemonProfileDisplay[] = [
-  {
-    name: "local",
-    url: DEFAULT_DAEMON_HTTP_BASE_URL,
-    transport: "localhost",
-    isDefault: true,
-    encrypted: true,
-  },
-];
-
-const MOCK_CONNECTION: ConnectionInfo = {
-  address: DEFAULT_DAEMON_HTTP_BASE_URL,
-  transport: "localhost",
-  latency: "<1ms",
-  authStatus: "authenticated",
-};
-
-// ---------------------------------------------------------------------------
 // State machine
 // ---------------------------------------------------------------------------
 
@@ -77,6 +51,12 @@ interface PanelState {
 }
 
 type PanelAction =
+  | {
+      type: "HYDRATE";
+      profiles: readonly DaemonProfileDisplay[];
+      connection: ConnectionInfo;
+    }
+  | { type: "LOAD_FAILED"; message: string }
   | { type: "NAVIGATE_UP" }
   | { type: "NAVIGATE_DOWN" }
   | { type: "ACTION_ADD" }
@@ -88,13 +68,32 @@ type PanelAction =
 const INITIAL_STATE: PanelState = {
   step: "ready",
   selectedIndex: 0,
-  profiles: MOCK_PROFILES,
-  connection: MOCK_CONNECTION,
+  profiles: [],
+  connection: {
+    address: DEFAULT_DAEMON_HTTP_BASE_URL,
+    transport: "localhost",
+    latency: "n/a",
+    authStatus: "unknown",
+  },
   statusMessage: null,
 };
 
 function panelReducer(state: PanelState, action: PanelAction): PanelState {
   switch (action.type) {
+    case "HYDRATE":
+      return {
+        ...state,
+        profiles: action.profiles,
+        connection: action.connection,
+        selectedIndex: Math.min(state.selectedIndex, Math.max(0, action.profiles.length - 1)),
+      };
+
+    case "LOAD_FAILED":
+      return {
+        ...state,
+        statusMessage: action.message,
+      };
+
     case "NAVIGATE_UP": {
       if (state.profiles.length === 0) return state;
       return {
@@ -392,7 +391,55 @@ function StatusBar({
 
 export function DaemonPanel({ visible, onClose }: DaemonPanelProps) {
   const { tokens } = useThemeTokens();
+  const { connectionStatus } = useDaemon();
   const [state, dispatch] = useReducer(panelReducer, INITIAL_STATE);
+  const profileStore = useMemo(() => new DaemonProfileStore(), []);
+
+  useEffect(() => {
+    if (!visible) {
+      return;
+    }
+
+    let cancelled = false;
+
+    void (async () => {
+      const profileResult = await profileStore.list();
+      if (cancelled) {
+        return;
+      }
+
+      if (!profileResult.ok) {
+        dispatch({ type: "LOAD_FAILED", message: profileResult.error.message });
+        return;
+      }
+
+      const profiles = profileResult.value.map((profile) => ({
+        name: profile.name,
+        url: profile.httpUrl,
+        transport: profile.transportType,
+        isDefault: profile.isDefault,
+        encrypted: isTransportEncrypted(profile.transportType),
+      }));
+
+      const defaultProfile = profiles.find((profile) => profile.isDefault) ?? null;
+      const connection: ConnectionInfo = {
+        address: defaultProfile?.url ?? DEFAULT_DAEMON_HTTP_BASE_URL,
+        transport: defaultProfile?.transport ?? "localhost",
+        latency: connectionStatus === "connected" ? "<1ms" : "n/a",
+        authStatus: connectionStatus === "connected" ? "authenticated" : "unauthenticated",
+      };
+
+      dispatch({
+        type: "HYDRATE",
+        profiles,
+        connection,
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [connectionStatus, profileStore, visible]);
 
   useKeyboard((event) => {
     if (!visible) return;
