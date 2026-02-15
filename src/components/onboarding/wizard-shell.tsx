@@ -15,6 +15,7 @@ import {
   type EngineState,
   type FirstRunStatus,
   type OnboardingMode,
+  type PersonalityConfig,
   type OnboardingStep,
   type OnboardingEvent,
 } from "@reins/core";
@@ -30,10 +31,17 @@ import { STEP_VIEW_MAP } from "./steps";
 export interface OnboardingWizardResult {
   completed: boolean;
   skipped: boolean;
+  userName?: string;
+  personality?: PersonalityConfig;
 }
 
 export interface OnboardingWizardProps {
   onComplete: (result: OnboardingWizardResult) => void;
+  /**
+   * When true, skip first-run detection and start the wizard immediately.
+   * Used when re-running setup via `/setup` after onboarding is already complete.
+   */
+  forceRerun?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -81,6 +89,14 @@ const RESUME_OPTIONS = [
   { label: "Start fresh", action: "restart" },
   { label: "Skip to chat", action: "skip" },
 ] as const;
+
+function isPersonalityPreset(value: unknown): value is PersonalityConfig["preset"] {
+  return value === "balanced"
+    || value === "concise"
+    || value === "technical"
+    || value === "warm"
+    || value === "custom";
+}
 
 function createStepHandlers() {
   return [
@@ -414,7 +430,7 @@ function ErrorView({ tokens, error }: { tokens: Record<string, string>; error: s
 // Main component
 // ---------------------------------------------------------------------------
 
-export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
+export function OnboardingWizard({ onComplete, forceRerun = false }: OnboardingWizardProps) {
   const { tokens } = useThemeTokens();
   const [state, dispatch] = useReducer(wizardReducer, INITIAL_STATE);
 
@@ -445,6 +461,35 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
     void (async () => {
       const checkpoint = new OnboardingCheckpointService();
       checkpointRef.current = checkpoint;
+
+      // When force-rerunning (e.g. via /setup), skip detection entirely:
+      // reset the checkpoint so the engine starts from step 1, then
+      // initialize the engine directly.
+      if (forceRerun) {
+        await checkpoint.reset();
+
+        if (cancelled) return;
+
+        const engine = new OnboardingEngine({
+          checkpoint,
+          steps: createStepHandlers(),
+          onEvent: handleEngineEvent,
+        });
+        engineRef.current = engine;
+
+        const initResult = await engine.initialize();
+        if (cancelled) return;
+
+        if (!initResult.ok) {
+          dispatch({ type: "SET_ERROR", error: initResult.error.message });
+          return;
+        }
+
+        // Even if the engine thinks it's complete (all steps already done),
+        // we still show the wizard so the user can navigate to any step.
+        dispatch({ type: "ENGINE_INITIALIZED", engineState: initResult.value });
+        return;
+      }
 
       const detector = new FirstRunDetector({ checkpoint });
       const detectResult = await detector.detect();
@@ -500,7 +545,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
     return () => {
       cancelled = true;
     };
-  }, [onComplete, handleEngineEvent]);
+  }, [onComplete, handleEngineEvent, forceRerun]);
 
   // Initialize engine after resume prompt selection
   const initializeEngine = useCallback(async (resetFirst: boolean) => {
@@ -560,8 +605,22 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
     dispatch({ type: "ENGINE_STATE_UPDATED", engineState: result.value });
 
     if (result.value.isComplete) {
+      const collectedData = engine.getCollectedData();
+      const userName = typeof collectedData.userName === "string"
+        ? collectedData.userName
+        : undefined;
+      const presetCandidate = collectedData.preset;
+      const personality = isPersonalityPreset(presetCandidate)
+        ? {
+            preset: presetCandidate,
+            customPrompt: typeof collectedData.customPrompt === "string"
+              ? collectedData.customPrompt
+              : undefined,
+          }
+        : undefined;
+
       dispatch({ type: "WIZARD_COMPLETING" });
-      onComplete({ completed: true, skipped: false });
+      onComplete({ completed: true, skipped: false, userName, personality });
     }
   }, [onComplete]);
 

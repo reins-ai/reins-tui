@@ -77,6 +77,7 @@ export type AppAction =
   | { type: "SET_SEARCH_SETTINGS_OPEN"; payload: boolean }
   | { type: "SET_DAEMON_PANEL_OPEN"; payload: boolean }
   | { type: "SET_ONBOARDING_STATUS"; payload: OnboardingStatus }
+  | { type: "SET_ONBOARDING_RERUN" }
   | { type: "SET_ONBOARDING_COMPLETE" }
   | { type: "SET_MODEL"; payload: string }
   | { type: "SET_PROVIDER"; payload: string }
@@ -447,9 +448,11 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         ? { ...state, isDaemonPanelOpen: action.payload }
         : state;
     case "SET_ONBOARDING_STATUS":
-      return { ...state, onboardingStatus: action.payload };
+      return { ...state, onboardingStatus: action.payload, onboardingForceRerun: false };
+    case "SET_ONBOARDING_RERUN":
+      return { ...state, onboardingStatus: "first-run", onboardingForceRerun: true };
     case "SET_ONBOARDING_COMPLETE":
-      return { ...state, onboardingStatus: "complete" };
+      return { ...state, onboardingStatus: "complete", onboardingForceRerun: false };
     case "SET_MODEL":
       return typeof action.payload === "string"
         ? { ...state, currentModel: action.payload }

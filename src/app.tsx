@@ -285,7 +285,11 @@ function AppView({ version, dimensions }: AppViewProps) {
 
   const handleOnboardingComplete = useCallback((result: OnboardingWizardResult) => {
     dispatch({ type: "SET_ONBOARDING_COMPLETE" });
-    void writeUserConfig({ setupComplete: true });
+    void writeUserConfig({
+      setupComplete: true,
+      name: result.userName,
+      personality: result.personality,
+    });
     dispatch({
       type: "SET_STATUS",
       payload: result.skipped ? "Skipped to chat" : "Setup complete",
@@ -1079,7 +1083,12 @@ function AppView({ version, dimensions }: AppViewProps) {
 
   // Onboarding: show wizard for first-run or resume
   if (state.onboardingStatus === "first-run" || state.onboardingStatus === "resume") {
-    return <OnboardingWizard onComplete={handleOnboardingComplete} />;
+    return (
+      <OnboardingWizard
+        onComplete={handleOnboardingComplete}
+        forceRerun={state.onboardingForceRerun}
+      />
+    );
   }
 
   // Normal app render (onboardingStatus === "complete")

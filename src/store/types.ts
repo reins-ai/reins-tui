@@ -140,6 +140,8 @@ export interface AppState {
   isSearchSettingsOpen: boolean;
   isDaemonPanelOpen: boolean;
   onboardingStatus: OnboardingStatus;
+  /** True when onboarding was triggered by /setup rerun, not first-run detection. */
+  onboardingForceRerun: boolean;
   currentModel: string;
   currentProvider: string;
   availableModels: string[];
@@ -168,6 +170,7 @@ export const DEFAULT_STATE: AppState = {
   isSearchSettingsOpen: false,
   isDaemonPanelOpen: false,
   onboardingStatus: "checking",
+  onboardingForceRerun: false,
   currentModel: "default",
   currentProvider: "",
   availableModels: [],
