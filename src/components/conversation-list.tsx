@@ -34,7 +34,7 @@ export function ConversationList({
   }
 
   return (
-    <ScrollBox style={{ flexGrow: 1, flexDirection: "column" }}>
+    <ScrollBox style={{ flexGrow: 1 }} contentOptions={{ flexDirection: "column" }}>
       {conversations.map((conversation) => {
         const isActive = conversation.id === activeConversationId;
         const isSelected = conversation.id === selectedConversationId;

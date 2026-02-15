@@ -116,7 +116,7 @@ export function HelpScreen({ isOpen, startup = null }: HelpScreenProps) {
       width={108}
       height={32}
     >
-      <ScrollBox style={{ flexDirection: "column", flexGrow: 1 }}>
+      <ScrollBox style={{ flexGrow: 1 }} contentOptions={{ flexDirection: "column" }}>
         <Box style={{ flexDirection: "column", marginBottom: 1 }}>
           <LogoAscii variant="standard" size="full" showTagline />
         </Box>

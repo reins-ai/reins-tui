@@ -4,6 +4,7 @@ import {
   OnboardingEngine,
   OnboardingCheckpointService,
   FirstRunDetector,
+  ServiceInstaller,
   WelcomeStep,
   DaemonInstallStep,
   ProviderSetupStep,
@@ -18,7 +19,7 @@ import {
   type OnboardingEvent,
 } from "@reins/core";
 import { useThemeTokens } from "../../theme";
-import { Box, Text, useKeyboard } from "../../ui";
+import { Box, ScrollBox, Text, useKeyboard } from "../../ui";
 import { ProgressBar, STEP_LABELS } from "./progress-bar";
 import { STEP_VIEW_MAP } from "./steps";
 
@@ -84,7 +85,7 @@ const RESUME_OPTIONS = [
 function createStepHandlers() {
   return [
     new WelcomeStep(),
-    new DaemonInstallStep(),
+    new DaemonInstallStep({ serviceInstaller: new ServiceInstaller() }),
     new ProviderSetupStep(),
     new ModelSelectionStep(),
     new WorkspaceStep(),
@@ -171,10 +172,9 @@ interface WizardFrameProps {
   tokens: Record<string, string>;
   engineState: EngineState | null;
   children: React.ReactNode;
-  footer?: React.ReactNode;
 }
 
-function WizardFrame({ title, tokens, engineState, children, footer }: WizardFrameProps) {
+function WizardFrame({ title, tokens, engineState, children }: WizardFrameProps) {
   return (
     <Box
       style={{
@@ -223,32 +223,20 @@ function WizardFrame({ title, tokens, engineState, children, footer }: WizardFra
         </Box>
       ) : null}
 
-      {/* Content area */}
-      <Box
+      {/* Content area — ScrollBox ensures correct child layout */}
+      <ScrollBox
         style={{
-          flexDirection: "column",
           flexGrow: 1,
+        }}
+        contentOptions={{
+          flexDirection: "column",
           paddingLeft: 4,
           paddingRight: 4,
           paddingTop: 2,
         }}
       >
         {children}
-      </Box>
-
-      {/* Footer */}
-      {footer !== undefined ? (
-        <Box
-          style={{
-            paddingLeft: 2,
-            paddingRight: 2,
-            paddingBottom: 1,
-            backgroundColor: tokens["surface.secondary"],
-          }}
-        >
-          {footer}
-        </Box>
-      ) : null}
+      </ScrollBox>
     </Box>
   );
 }
@@ -320,9 +308,10 @@ interface ActiveStepViewProps {
   tokens: Record<string, string>;
   engineState: EngineState;
   onStepData: (data: Record<string, unknown>) => void;
+  onRequestNext: () => void;
 }
 
-function ActiveStepView({ tokens, engineState, onStepData }: ActiveStepViewProps) {
+function ActiveStepView({ tokens, engineState, onStepData, onRequestNext }: ActiveStepViewProps) {
   const currentStep = engineState.currentStep;
   const stepLabel = currentStep !== null
     ? STEP_LABELS[currentStep] ?? currentStep
@@ -330,25 +319,6 @@ function ActiveStepView({ tokens, engineState, onStepData }: ActiveStepViewProps
 
   const stepNumber = engineState.currentStepIndex + 1;
   const totalSteps = engineState.totalSteps;
-
-  const footer = (
-    <Box style={{ flexDirection: "row" }}>
-      <Text
-        content="Enter next"
-        style={{ color: tokens["text.muted"] }}
-      />
-      <Text content="  " />
-      <Text
-        content="Esc back"
-        style={{ color: tokens["text.muted"] }}
-      />
-      <Text content="  " />
-      <Text
-        content="Tab skip"
-        style={{ color: tokens["text.muted"] }}
-      />
-    </Box>
-  );
 
   // Resolve the step view component from the registry
   const StepComponent = currentStep !== null ? STEP_VIEW_MAP[currentStep] : null;
@@ -358,7 +328,6 @@ function ActiveStepView({ tokens, engineState, onStepData }: ActiveStepViewProps
       title="Reins Setup"
       tokens={tokens}
       engineState={engineState}
-      footer={footer}
     >
       <Box style={{ flexDirection: "column" }}>
         <Box style={{ flexDirection: "row" }}>
@@ -377,6 +346,7 @@ function ActiveStepView({ tokens, engineState, onStepData }: ActiveStepViewProps
               tokens={tokens}
               engineState={engineState}
               onStepData={onStepData}
+              onRequestNext={onRequestNext}
             />
           ) : (
             <Box
@@ -588,25 +558,6 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
     dispatch({ type: "ENGINE_STATE_UPDATED", engineState: result.value });
   }, []);
 
-  const handleSkip = useCallback(async () => {
-    const engine = engineRef.current;
-    if (!engine) return;
-
-    const result = await engine.skip();
-    if (!result.ok) {
-      // Step may not be skippable — show error briefly but don't block
-      dispatch({ type: "SET_ERROR", error: result.error.message });
-      return;
-    }
-
-    dispatch({ type: "ENGINE_STATE_UPDATED", engineState: result.value });
-
-    if (result.value.isComplete) {
-      dispatch({ type: "WIZARD_COMPLETING" });
-      onComplete({ completed: true, skipped: false });
-    }
-  }, [onComplete]);
-
   const handleSkipToChat = useCallback(() => {
     onComplete({ completed: false, skipped: true });
   }, [onComplete]);
@@ -665,18 +616,11 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
       return;
     }
 
-    // Active step navigation
+    // Active step navigation — steps handle their own Enter via onRequestNext;
+    // wizard only handles Esc (back) at this level.
     if (state.phase === "active") {
-      if (keyName === "return" || keyName === "enter") {
-        void handleNext();
-        return;
-      }
       if (keyName === "escape" || keyName === "esc") {
         void handleBack();
-        return;
-      }
-      if (keyName === "tab" && event.shift !== true) {
-        void handleSkip();
         return;
       }
     }
@@ -709,6 +653,7 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
           tokens={tokens}
           engineState={state.engineState}
           onStepData={handleStepData}
+          onRequestNext={() => void handleNext()}
         />
       );
 

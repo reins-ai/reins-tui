@@ -221,7 +221,6 @@ export function ConversationPanel({ isFocused, borderColor: _borderColor }: Conv
       <ScrollBox
         style={{
           flexGrow: 1,
-          flexDirection: "column",
           minHeight: 0,
         }}
         focused={isFocused}
@@ -231,6 +230,7 @@ export function ConversationPanel({ isFocused, borderColor: _borderColor }: Conv
         stickyStart="bottom"
         verticalScrollbarOptions={{ visible: false }}
         contentOptions={{
+          flexDirection: "column",
           paddingRight: SCROLLBAR_GUTTER,
           paddingBottom: 1,
         }}

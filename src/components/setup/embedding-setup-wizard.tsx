@@ -221,10 +221,10 @@ function OverlayFrame({ title, hint, tokens, children }: OverlayFrameProps) {
       <Box style={{ flexDirection: "column", flexGrow: 1, minHeight: 0 }}>
         <ScrollBox
           style={{
-            flexDirection: "column",
             flexGrow: 1,
             backgroundColor: tokens["surface.secondary"],
           }}
+          contentOptions={{ flexDirection: "column" }}
         >
           {children}
         </ScrollBox>
