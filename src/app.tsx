@@ -12,6 +12,7 @@ import { DaemonPanel } from "./components/daemon-panel";
 import { DaemonMemoryClient } from "./daemon/memory-client";
 import { HelpScreen } from "./screens";
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "./daemon/client";
+import { getActiveDaemonUrl } from "./daemon/actions";
 import { DaemonProvider, useDaemon } from "./daemon/daemon-context";
 import type { DaemonMessage, DaemonResult, ConversationSummary as DaemonConversationSummary } from "./daemon/contracts";
 import { mapConversationHistory } from "./daemon/ws-transport";
@@ -275,6 +276,15 @@ function AppView({ version, dimensions }: AppViewProps) {
   const conversationManager = useConversations();
   const firstRunState = useFirstRun();
   const [showHelp, setShowHelp] = useState(false);
+  const [resolvedDaemonUrl, setResolvedDaemonUrl] = useState(DEFAULT_DAEMON_HTTP_BASE_URL);
+
+  // Resolve active daemon URL from profile store on mount and after onboarding
+  useEffect(() => {
+    void (async () => {
+      const url = await getActiveDaemonUrl();
+      setResolvedDaemonUrl(url);
+    })();
+  }, [state.onboardingStatus]);
 
   // Sync first-run detection result into app state
   useEffect(() => {
@@ -529,7 +539,7 @@ function AppView({ version, dimensions }: AppViewProps) {
 
   const fetchModels = useCallback(async () => {
     try {
-      const response = await fetch(`${DEFAULT_DAEMON_HTTP_BASE_URL}/api/models`);
+      const response = await fetch(`${resolvedDaemonUrl}/api/models`);
       if (!response.ok) return;
       const data = await response.json() as { models?: { id: string; name: string; provider: string }[] };
       const models = data.models ?? [];
@@ -555,7 +565,7 @@ function AppView({ version, dimensions }: AppViewProps) {
 
       // Also fetch provider auth list to find disconnected providers
       try {
-        const authResponse = await fetch(`${DEFAULT_DAEMON_HTTP_BASE_URL}/api/providers/auth/list`);
+        const authResponse = await fetch(`${resolvedDaemonUrl}/api/providers/auth/list`);
         if (authResponse.ok) {
           const authData = await authResponse.json() as {
             providers?: { provider?: string; providerName?: string; connectionState?: string; configured?: boolean }[];
@@ -588,7 +598,7 @@ function AppView({ version, dimensions }: AppViewProps) {
     } catch {
       // Daemon may not be available yet
     }
-  }, [dispatch]);
+  }, [dispatch, resolvedDaemonUrl]);
 
   // Fetch models on startup
   useEffect(() => {
@@ -711,9 +721,9 @@ function AppView({ version, dimensions }: AppViewProps) {
   const memoryClient = useMemo(
     () =>
       new DaemonMemoryClient({
-        baseUrl: DEFAULT_DAEMON_HTTP_BASE_URL,
+        baseUrl: resolvedDaemonUrl,
       }),
-    [],
+    [resolvedDaemonUrl],
   );
 
   // First-launch embedding setup check

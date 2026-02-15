@@ -48,6 +48,7 @@ export interface Style {
   customBorderChars?: BorderCharacters;
   backgroundColor?: string;
   color?: string;
+  fontWeight?: "normal" | "bold";
   gap?: number;
 }
 

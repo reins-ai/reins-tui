@@ -161,9 +161,10 @@ describe("source-level structure", () => {
     expect(source).toContain("ToolCallAnchor");
   });
 
-  test("conversation-panel renders text model header without symbols", () => {
+  test("conversation-panel renders Reins version header in bold", () => {
     const source = readFileSync(resolve(import.meta.dir, "../../src/components/conversation-panel.tsx"), "utf-8");
-    expect(source).toContain('content="Model"');
+    expect(source).toContain("Reins v${version}");
+    expect(source).toContain('fontWeight: "bold"');
   });
 
   test("conversation-panel avoids flex-end content anchoring in ScrollBox", () => {

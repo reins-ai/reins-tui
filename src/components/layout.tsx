@@ -160,6 +160,7 @@ export function Layout({ version, dimensions, showHelp, connectionStatus, daemon
         style={{ flexGrow: 1, flexDirection: "row" }}
       >
         <ChatScreen
+          version={version}
           panelBorders={panelBorders}
           focusedPanel={state.focusedPanel}
           showActivityPanel={false}

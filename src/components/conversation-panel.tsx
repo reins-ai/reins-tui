@@ -11,7 +11,6 @@ import { Box, ScrollBox, Text } from "../ui";
 import { FramedBlock, SUBTLE_BORDER_CHARS } from "../ui/primitives";
 import { LogoAscii } from "./logo-ascii";
 import { Message } from "./message";
-import { formatModelDisplayName } from "./model-selector";
 import { ToolBlock } from "./tool-inline";
 
 /**
@@ -54,6 +53,7 @@ const SCROLLBAR_GUTTER = 0;
 export interface ConversationPanelProps {
   isFocused: boolean;
   borderColor: string;
+  version: string;
 }
 
 const DISPLAY_TO_LIFECYCLE_STATUS: Record<DisplayToolCall["status"], ToolCallStatus> = {
@@ -191,7 +191,7 @@ function hasOrderedToolBlocks(message: DisplayMessage): boolean {
   return message.contentBlocks.some((block) => block.type === "tool-call" && block.toolCallId !== undefined && toolIds.has(block.toolCallId));
 }
 
-export function ConversationPanel({ isFocused, borderColor: _borderColor }: ConversationPanelProps) {
+export function ConversationPanel({ isFocused, borderColor: _borderColor, version }: ConversationPanelProps) {
   const { messages, isStreaming, lifecycleStatus } = useConversation();
   const { state } = useApp();
   const { tokens, getRoleBorder } = useThemeTokens();
@@ -201,21 +201,14 @@ export function ConversationPanel({ isFocused, borderColor: _borderColor }: Conv
     (message) => message.content.trim().length > 0 || (message.toolCalls && message.toolCalls.length > 0),
   );
 
-  const modelDisplay = state.currentModel !== "default"
-    ? formatModelDisplayName(state.currentModel)
-    : null;
-
   return (
     <Box style={{ flexGrow: 1, minHeight: 0, flexDirection: "column", paddingLeft: 1, paddingRight: 1, paddingTop: 1 }}>
-      {modelDisplay ? (
-        <Box style={{ flexDirection: "row", marginBottom: 1, marginRight: SCROLLBAR_GUTTER }}>
-          <Text content="Model" style={{ color: tokens["text.muted"] }} />
-          <Text
-            content={` ${modelDisplay}`}
-            style={{ color: tokens["text.secondary"] }}
-          />
-        </Box>
-      ) : null}
+      <Box style={{ flexDirection: "row", marginBottom: 1, marginRight: SCROLLBAR_GUTTER }}>
+        <Text
+          content={`Reins v${version}`}
+          style={{ color: tokens["text.primary"], fontWeight: "bold" }}
+        />
+      </Box>
       <ScrollBox
         style={{
           flexGrow: 1,
