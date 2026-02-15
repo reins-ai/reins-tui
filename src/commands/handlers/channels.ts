@@ -1,6 +1,7 @@
+import type { DaemonClient } from "../../daemon/client";
 import { err, ok } from "../../daemon/contracts";
 import { getActiveDaemonUrl } from "../../daemon/actions";
-import type { CommandHandler } from "./types";
+import type { CommandHandler, CommandHandlerContext } from "./types";
 
 const CHANNELS_SUBCOMMANDS = ["add", "remove", "enable", "disable", "status"] as const;
 type ChannelsSubcommand = (typeof CHANNELS_SUBCOMMANDS)[number];
@@ -44,6 +45,63 @@ function isSupportedPlatform(value: string): value is SupportedPlatform {
   return SUPPORTED_PLATFORMS.includes(value as SupportedPlatform);
 }
 
+// ---------------------------------------------------------------------------
+// Daemon URL resolution
+// ---------------------------------------------------------------------------
+
+/**
+ * Check whether a daemon client exposes an httpBaseUrl via its config.
+ *
+ * The DaemonClient interface does not include `config`, but the concrete
+ * LiveDaemonClient class exposes `public readonly config: DaemonClientConfig`.
+ * We use a runtime check to safely access it without coupling to the concrete
+ * class.
+ */
+function getDaemonClientHttpBaseUrl(client: DaemonClient): string | undefined {
+  const candidate = client as { config?: { httpBaseUrl?: string } };
+  const url = candidate.config?.httpBaseUrl;
+  return typeof url === "string" && url.length > 0 ? url : undefined;
+}
+
+/**
+ * Resolve the daemon HTTP base URL for channel commands.
+ *
+ * Priority:
+ *   1. The active daemon client's configured httpBaseUrl (matches the
+ *      connection the rest of the TUI is using).
+ *   2. Fallback to getActiveDaemonUrl() (profile store / default).
+ */
+export async function resolveChannelBaseUrl(
+  context: CommandHandlerContext,
+): Promise<string> {
+  if (context.daemonClient) {
+    const url = getDaemonClientHttpBaseUrl(context.daemonClient);
+    if (url) {
+      return url;
+    }
+  }
+  return getActiveDaemonUrl();
+}
+
+/**
+ * Return an immediate error result if the daemon client is known to be
+ * disconnected, avoiding a slow timeout on an unreachable URL.
+ */
+function checkDaemonConnected(
+  context: CommandHandlerContext,
+): { ok: true } | { ok: false; message: string } {
+  if (context.daemonClient) {
+    const state = context.daemonClient.getConnectionState();
+    if (state.status !== "connected") {
+      return {
+        ok: false,
+        message: "Daemon is disconnected. Reconnect first with /daemon switch or restart the daemon.",
+      };
+    }
+  }
+  return { ok: true };
+}
+
 /**
  * Mask a bot token for safe display. Shows only the first 4 and last 4
  * characters, replacing the middle with asterisks.
@@ -77,14 +135,18 @@ interface DaemonChannelResponse {
  * @param timeoutMs - Request timeout in milliseconds. Defaults to 10 seconds.
  *   Use longer timeouts for operations that involve external API calls
  *   (e.g. channel add validates the bot token against the platform API).
+ * @param baseUrlOverride - When provided, used instead of getActiveDaemonUrl().
+ *   Callers should pass the URL from the active daemon client to avoid
+ *   hitting a stale profile-store URL.
  */
 export async function callDaemonChannelApi(
   endpoint: string,
   body: Record<string, unknown>,
   timeoutMs: number = 10_000,
   fetchFn: typeof fetch = fetch,
+  baseUrlOverride?: string,
 ): Promise<{ ok: true; data: DaemonChannelResponse } | { ok: false; error: string }> {
-  const baseUrl = await getActiveDaemonUrl();
+  const baseUrl = baseUrlOverride ?? await getActiveDaemonUrl();
 
   let response: Response;
   try {
@@ -134,13 +196,17 @@ export async function callDaemonChannelApi(
  * on failure (network error, non-2xx status, or daemon error field).
  *
  * @param timeoutMs - Request timeout in milliseconds. Defaults to 10 seconds.
+ * @param baseUrlOverride - When provided, used instead of getActiveDaemonUrl().
+ *   Callers should pass the URL from the active daemon client to avoid
+ *   hitting a stale profile-store URL.
  */
 export async function callDaemonChannelGet<T>(
   endpoint: string,
   timeoutMs: number = 10_000,
   fetchFn: typeof fetch = fetch,
+  baseUrlOverride?: string,
 ): Promise<{ ok: true; data: T } | { ok: false; error: string }> {
-  const baseUrl = await getActiveDaemonUrl();
+  const baseUrl = baseUrlOverride ?? await getActiveDaemonUrl();
 
   let response: Response;
   try {
@@ -338,7 +404,7 @@ export function formatChannelStatusTable(snapshot: ChannelStatusSnapshot, nowMs?
   ].join("\n");
 }
 
-const handleChannelsAdd: CommandHandler = async (args) => {
+const handleChannelsAdd: CommandHandler = async (args, context) => {
   const platform = args.positional[1]?.trim().toLowerCase();
 
   if (!platform) {
@@ -372,10 +438,19 @@ const handleChannelsAdd: CommandHandler = async (args) => {
     });
   }
 
+  const connCheck = checkDaemonConnected(context);
+  if (!connCheck.ok) {
+    return err({ code: "INVALID_ARGUMENT", message: connCheck.message });
+  }
+
+  const baseUrl = await resolveChannelBaseUrl(context);
+
   const result = await callDaemonChannelApi(
     "/channels/add",
     { platform, token: token.trim() },
     60_000,
+    fetch,
+    baseUrl,
   );
 
   if (!result.ok) {
@@ -402,7 +477,7 @@ const handleChannelsAdd: CommandHandler = async (args) => {
   });
 };
 
-const handleChannelsRemove: CommandHandler = async (args) => {
+const handleChannelsRemove: CommandHandler = async (args, context) => {
   const platform = args.positional[1]?.trim().toLowerCase();
 
   if (!platform) {
@@ -419,10 +494,19 @@ const handleChannelsRemove: CommandHandler = async (args) => {
     });
   }
 
+  const connCheck = checkDaemonConnected(context);
+  if (!connCheck.ok) {
+    return err({ code: "INVALID_ARGUMENT", message: connCheck.message });
+  }
+
+  const baseUrl = await resolveChannelBaseUrl(context);
+
   const result = await callDaemonChannelApi(
     "/channels/remove",
     { channelId: platform },
     15_000,
+    fetch,
+    baseUrl,
   );
 
   if (!result.ok) {
@@ -443,7 +527,7 @@ const handleChannelsRemove: CommandHandler = async (args) => {
   });
 };
 
-const handleChannelsEnable: CommandHandler = async (args) => {
+const handleChannelsEnable: CommandHandler = async (args, context) => {
   const platform = args.positional[1]?.trim().toLowerCase();
 
   if (!platform) {
@@ -460,10 +544,19 @@ const handleChannelsEnable: CommandHandler = async (args) => {
     });
   }
 
+  const connCheck = checkDaemonConnected(context);
+  if (!connCheck.ok) {
+    return err({ code: "INVALID_ARGUMENT", message: connCheck.message });
+  }
+
+  const baseUrl = await resolveChannelBaseUrl(context);
+
   const result = await callDaemonChannelApi(
     "/channels/enable",
     { channelId: platform },
     15_000,
+    fetch,
+    baseUrl,
   );
 
   if (!result.ok) {
@@ -481,7 +574,7 @@ const handleChannelsEnable: CommandHandler = async (args) => {
   });
 };
 
-const handleChannelsDisable: CommandHandler = async (args) => {
+const handleChannelsDisable: CommandHandler = async (args, context) => {
   const platform = args.positional[1]?.trim().toLowerCase();
 
   if (!platform) {
@@ -498,10 +591,19 @@ const handleChannelsDisable: CommandHandler = async (args) => {
     });
   }
 
+  const connCheck = checkDaemonConnected(context);
+  if (!connCheck.ok) {
+    return err({ code: "INVALID_ARGUMENT", message: connCheck.message });
+  }
+
+  const baseUrl = await resolveChannelBaseUrl(context);
+
   const result = await callDaemonChannelApi(
     "/channels/disable",
     { channelId: platform },
     15_000,
+    fetch,
+    baseUrl,
   );
 
   if (!result.ok) {
@@ -522,8 +624,20 @@ const handleChannelsDisable: CommandHandler = async (args) => {
   });
 };
 
-const handleChannelsStatus: CommandHandler = async () => {
-  const result = await callDaemonChannelGet<ChannelStatusSnapshot>("/channels/status");
+const handleChannelsStatus: CommandHandler = async (_args, context) => {
+  const connCheck = checkDaemonConnected(context);
+  if (!connCheck.ok) {
+    return err({ code: "INVALID_ARGUMENT", message: connCheck.message });
+  }
+
+  const baseUrl = await resolveChannelBaseUrl(context);
+
+  const result = await callDaemonChannelGet<ChannelStatusSnapshot>(
+    "/channels/status",
+    10_000,
+    fetch,
+    baseUrl,
+  );
 
   if (!result.ok) {
     return err({

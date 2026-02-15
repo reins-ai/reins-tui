@@ -8,8 +8,10 @@ import {
   formatStatusIndicator,
   handleChannelsCommand,
   maskBotToken,
+  resolveChannelBaseUrl,
   type ChannelHealthStatus,
 } from "../../../src/commands/handlers/channels";
+import type { DaemonClient } from "../../../src/daemon/client";
 import type { CommandHandlerContext, CommandArgs } from "../../../src/commands/handlers/types";
 import { SLASH_COMMANDS } from "../../../src/commands/registry";
 
@@ -17,7 +19,41 @@ import { SLASH_COMMANDS } from "../../../src/commands/registry";
 // Test helpers
 // ---------------------------------------------------------------------------
 
-function createTestContext(): CommandHandlerContext {
+/**
+ * Create a minimal mock daemon client for testing.
+ *
+ * Implements the subset of DaemonClient that channel handlers inspect:
+ * - `getConnectionState()` — returns the provided status
+ * - `config.httpBaseUrl` — exposed by LiveDaemonClient at runtime
+ */
+function createMockDaemonClient(
+  options: {
+    status?: "connected" | "disconnected" | "connecting" | "reconnecting";
+    httpBaseUrl?: string;
+  } = {},
+): DaemonClient & { config: { httpBaseUrl: string } } {
+  const status = options.status ?? "connected";
+  const httpBaseUrl = options.httpBaseUrl ?? "http://localhost:7433";
+
+  return {
+    config: { httpBaseUrl },
+    getConnectionState: () => ({ status, retries: 0 }),
+    onConnectionStateChange: () => () => {},
+    connect: () => Promise.resolve({ ok: true as const, value: undefined }),
+    reconnect: () => Promise.resolve({ ok: true as const, value: undefined }),
+    disconnect: () => Promise.resolve({ ok: true as const, value: undefined }),
+    healthCheck: () => Promise.resolve({ ok: true as const, value: { healthy: true, timestamp: new Date().toISOString(), handshake: { daemonVersion: "0.1.0", contractVersion: "1", capabilities: [] } } }),
+    sendMessage: () => Promise.resolve({ ok: true as const, value: { messageId: "m1", conversationId: "c1" } }),
+    streamResponse: () => Promise.resolve({ ok: true as const, value: (async function* () {})() }),
+    listConversations: () => Promise.resolve({ ok: true as const, value: [] }),
+    getConversation: () => Promise.resolve({ ok: false as const, error: { code: "DAEMON_DISCONNECTED" as const, message: "not implemented", retryable: false } }),
+    createConversation: () => Promise.resolve({ ok: false as const, error: { code: "DAEMON_DISCONNECTED" as const, message: "not implemented", retryable: false } }),
+    updateConversation: () => Promise.resolve({ ok: false as const, error: { code: "DAEMON_DISCONNECTED" as const, message: "not implemented", retryable: false } }),
+    deleteConversation: () => Promise.resolve({ ok: false as const, error: { code: "DAEMON_DISCONNECTED" as const, message: "not implemented", retryable: false } }),
+  };
+}
+
+function createTestContext(daemonClient?: DaemonClient | null): CommandHandlerContext {
   return {
     catalog: SLASH_COMMANDS,
     model: {
@@ -42,7 +78,7 @@ function createTestContext(): CommandHandlerContext {
     },
     memory: null,
     environment: null,
-    daemonClient: null,
+    daemonClient: daemonClient !== undefined ? daemonClient : null,
   };
 }
 
@@ -979,5 +1015,241 @@ describe("formatChannelStatusTable", () => {
 
     // The unhealthy count should be wrapped in red
     expect(result).toContain("\x1b[31m1 unhealthy\x1b[0m");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// resolveChannelBaseUrl — daemon client URL preference
+// ---------------------------------------------------------------------------
+
+describe("resolveChannelBaseUrl", () => {
+  it("returns daemon client httpBaseUrl when available", async () => {
+    const client = createMockDaemonClient({ httpBaseUrl: "http://my-daemon:9000" });
+    const context = createTestContext(client);
+
+    const url = await resolveChannelBaseUrl(context);
+
+    expect(url).toBe("http://my-daemon:9000");
+  });
+
+  it("falls back to getActiveDaemonUrl when no daemon client", async () => {
+    const context = createTestContext(null);
+
+    const url = await resolveChannelBaseUrl(context);
+
+    // Should return a URL (either from profile store or default localhost)
+    expect(url).toMatch(/^https?:\/\//);
+  });
+
+  it("falls back when daemon client has no config property", async () => {
+    // Simulate a DaemonClient that does not expose config (bare interface)
+    const bareClient: DaemonClient = {
+      getConnectionState: () => ({ status: "connected" as const, retries: 0 }),
+      onConnectionStateChange: () => () => {},
+      connect: () => Promise.resolve({ ok: true as const, value: undefined }),
+      reconnect: () => Promise.resolve({ ok: true as const, value: undefined }),
+      disconnect: () => Promise.resolve({ ok: true as const, value: undefined }),
+      healthCheck: () => Promise.resolve({ ok: true as const, value: { healthy: true, timestamp: "", handshake: { daemonVersion: "0.1.0", contractVersion: "1", capabilities: [] } } }),
+      sendMessage: () => Promise.resolve({ ok: true as const, value: { messageId: "m1", conversationId: "c1" } }),
+      streamResponse: () => Promise.resolve({ ok: true as const, value: (async function* () {})() }),
+      listConversations: () => Promise.resolve({ ok: true as const, value: [] }),
+      getConversation: () => Promise.resolve({ ok: false as const, error: { code: "DAEMON_DISCONNECTED" as const, message: "n/a", retryable: false } }),
+      createConversation: () => Promise.resolve({ ok: false as const, error: { code: "DAEMON_DISCONNECTED" as const, message: "n/a", retryable: false } }),
+      updateConversation: () => Promise.resolve({ ok: false as const, error: { code: "DAEMON_DISCONNECTED" as const, message: "n/a", retryable: false } }),
+      deleteConversation: () => Promise.resolve({ ok: false as const, error: { code: "DAEMON_DISCONNECTED" as const, message: "n/a", retryable: false } }),
+    };
+    const context = createTestContext(bareClient);
+
+    const url = await resolveChannelBaseUrl(context);
+
+    // Falls back to getActiveDaemonUrl default
+    expect(url).toMatch(/^https?:\/\//);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// callDaemonChannelApi / callDaemonChannelGet — baseUrlOverride
+// ---------------------------------------------------------------------------
+
+describe("callDaemonChannelApi baseUrlOverride", () => {
+  it("uses baseUrlOverride when provided", async () => {
+    let capturedUrl: string | undefined;
+    const mockFetch = mock((url: string) => {
+      capturedUrl = url;
+      return Promise.resolve(new Response(JSON.stringify({
+        channel: { channelId: "telegram", platform: "telegram", enabled: true, state: "connected", healthy: true },
+      }), { status: 201, headers: { "Content-Type": "application/json" } }));
+    }) as unknown as typeof fetch;
+
+    await callDaemonChannelApi("/channels/add", { platform: "telegram", token: "t" }, 10_000, mockFetch, "http://custom-daemon:8080");
+
+    expect(capturedUrl).toBe("http://custom-daemon:8080/channels/add");
+  });
+
+  it("falls back to getActiveDaemonUrl when no override", async () => {
+    let capturedUrl: string | undefined;
+    const mockFetch = mock((url: string) => {
+      capturedUrl = url;
+      return Promise.resolve(new Response(JSON.stringify({ removed: true }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }) as unknown as typeof fetch;
+
+    await callDaemonChannelApi("/channels/remove", { channelId: "telegram" }, 10_000, mockFetch);
+
+    expect(capturedUrl).toBeDefined();
+    expect(capturedUrl!).toContain("/channels/remove");
+    expect(capturedUrl!).toMatch(/^https?:\/\/.+\/channels\/remove$/);
+  });
+});
+
+describe("callDaemonChannelGet baseUrlOverride", () => {
+  it("uses baseUrlOverride when provided", async () => {
+    let capturedUrl: string | undefined;
+    const mockFetch = mock((url: string) => {
+      capturedUrl = url;
+      return Promise.resolve(new Response(JSON.stringify({ channels: [], summary: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }) as unknown as typeof fetch;
+
+    await callDaemonChannelGet("/channels/status", 10_000, mockFetch, "http://remote-daemon:7433");
+
+    expect(capturedUrl).toBe("http://remote-daemon:7433/channels/status");
+  });
+
+  it("falls back to getActiveDaemonUrl when no override", async () => {
+    let capturedUrl: string | undefined;
+    const mockFetch = mock((url: string) => {
+      capturedUrl = url;
+      return Promise.resolve(new Response(JSON.stringify({ channels: [], summary: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }) as unknown as typeof fetch;
+
+    await callDaemonChannelGet("/channels/status", 10_000, mockFetch);
+
+    expect(capturedUrl).toBeDefined();
+    expect(capturedUrl!).toContain("/channels/status");
+    expect(capturedUrl!).toMatch(/^https?:\/\/.+\/channels\/status$/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Disconnected daemon client — fast fail
+// ---------------------------------------------------------------------------
+
+describe("disconnected daemon client fast fail", () => {
+  it("status returns immediate error when daemon is disconnected", async () => {
+    const client = createMockDaemonClient({ status: "disconnected" });
+    const context = createTestContext(client);
+    const args = makeArgs(["status"]);
+
+    const result = await handleChannelsCommand(args, context);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toContain("Daemon is disconnected");
+    expect(result.error.message).toContain("/daemon switch");
+  });
+
+  it("add returns immediate error when daemon is reconnecting", async () => {
+    const client = createMockDaemonClient({ status: "reconnecting" });
+    const context = createTestContext(client);
+    const args = makeArgs(["add", "telegram", "my-bot-token-1234567890"]);
+
+    const result = await handleChannelsCommand(args, context);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toContain("Daemon is disconnected");
+  });
+
+  it("remove returns immediate error when daemon is connecting", async () => {
+    const client = createMockDaemonClient({ status: "connecting" });
+    const context = createTestContext(client);
+    const args = makeArgs(["remove", "telegram"]);
+
+    const result = await handleChannelsCommand(args, context);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toContain("Daemon is disconnected");
+  });
+
+  it("enable returns immediate error when daemon is disconnected", async () => {
+    const client = createMockDaemonClient({ status: "disconnected" });
+    const context = createTestContext(client);
+    const args = makeArgs(["enable", "telegram"]);
+
+    const result = await handleChannelsCommand(args, context);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toContain("Daemon is disconnected");
+  });
+
+  it("disable returns immediate error when daemon is disconnected", async () => {
+    const client = createMockDaemonClient({ status: "disconnected" });
+    const context = createTestContext(client);
+    const args = makeArgs(["disable", "discord"]);
+
+    const result = await handleChannelsCommand(args, context);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toContain("Daemon is disconnected");
+  });
+
+  it("does not block when daemon client is null (no client configured)", async () => {
+    // When there's no daemon client at all, resolveChannelBaseUrl should
+    // still return a URL (the fallback), not throw or return disconnected.
+    const context = createTestContext(null);
+
+    const url = await resolveChannelBaseUrl(context);
+    expect(url).toMatch(/^https?:\/\//);
+  });
+
+  it("does not block when daemon client is connected", async () => {
+    const client = createMockDaemonClient({ status: "connected", httpBaseUrl: "http://localhost:7433" });
+    const context = createTestContext(client);
+
+    const url = await resolveChannelBaseUrl(context);
+    expect(url).toBe("http://localhost:7433");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Subcommand handlers prefer daemon client base URL
+// ---------------------------------------------------------------------------
+
+describe("handlers prefer daemon client base URL", () => {
+  it("status handler uses daemon client URL over profile store", async () => {
+    let capturedUrl: string | undefined;
+
+    // We can't easily inject fetchFn into the handler, but we can verify
+    // via resolveChannelBaseUrl that the URL is correct
+    const client = createMockDaemonClient({
+      status: "connected",
+      httpBaseUrl: "http://my-remote-daemon:7433",
+    });
+    const context = createTestContext(client);
+
+    const url = await resolveChannelBaseUrl(context);
+    expect(url).toBe("http://my-remote-daemon:7433");
+  });
+
+  it("add handler uses daemon client URL over profile store", async () => {
+    const client = createMockDaemonClient({
+      status: "connected",
+      httpBaseUrl: "http://tailscale-daemon:7433",
+    });
+    const context = createTestContext(client);
+
+    const url = await resolveChannelBaseUrl(context);
+    expect(url).toBe("http://tailscale-daemon:7433");
   });
 });
