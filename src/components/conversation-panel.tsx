@@ -209,11 +209,9 @@ export function ConversationPanel({ isFocused, borderColor: _borderColor }: Conv
     <Box style={{ flexGrow: 1, minHeight: 0, flexDirection: "column", paddingLeft: 1, paddingRight: 1, paddingTop: 1 }}>
       {modelDisplay ? (
         <Box style={{ flexDirection: "row", marginBottom: 1, marginRight: SCROLLBAR_GUTTER }}>
-          <Text style={{ color: tokens["text.muted"] }}>
-            <b>Reins</b>
-          </Text>
+          <Text content="Model" style={{ color: tokens["text.muted"] }} />
           <Text
-            content=" v0.1.0"
+            content={` ${modelDisplay}`}
             style={{ color: tokens["text.secondary"] }}
           />
         </Box>
@@ -221,7 +219,6 @@ export function ConversationPanel({ isFocused, borderColor: _borderColor }: Conv
       <ScrollBox
         style={{
           flexGrow: 1,
-          flexDirection: "column",
           minHeight: 0,
         }}
         focused={isFocused}
@@ -231,6 +228,7 @@ export function ConversationPanel({ isFocused, borderColor: _borderColor }: Conv
         stickyStart="bottom"
         verticalScrollbarOptions={{ visible: false }}
         contentOptions={{
+          flexDirection: "column",
           paddingRight: SCROLLBAR_GUTTER,
           paddingBottom: 1,
         }}

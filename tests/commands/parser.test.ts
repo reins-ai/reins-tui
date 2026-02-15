@@ -20,9 +20,12 @@ describe("slash command registry", () => {
       "export",
       "compact",
       "settings",
+      "search-settings",
       "quit",
       "remember",
       "memory",
+      "daemon",
+      "setup",
     ]);
   });
 
@@ -41,9 +44,12 @@ describe("slash command registry", () => {
       export: "conversation",
       compact: "appearance",
       settings: "system",
+      "search-settings": "system",
       quit: "system",
       remember: "memory",
       memory: "memory",
+      daemon: "system",
+      setup: "system",
     });
   });
 
@@ -180,6 +186,7 @@ describe("getCommandAutocomplete", () => {
       "clear",
       "compact",
       "connect",
+      "daemon",
       "env",
       "export",
       "help",
@@ -188,7 +195,9 @@ describe("getCommandAutocomplete", () => {
       "new",
       "quit",
       "remember",
+      "search-settings",
       "settings",
+      "setup",
       "status",
       "theme",
     ]);

@@ -2,6 +2,7 @@ import { err, type Result } from "../../daemon/contracts";
 import type { ParsedCommand } from "../parser";
 import type { SlashCommandHandlerKey } from "../registry";
 import { handleConnectCommand } from "./connect";
+import { handleDaemonCommand } from "./daemon";
 import { handleEnvironmentCommand } from "./environment";
 import { handleMemoryCommand, handleRememberCommand } from "./memory";
 import { handleMemorySetupCommand } from "./memory-setup";
@@ -12,6 +13,7 @@ import {
   handleExportConversationCommand,
   handleNewConversationCommand,
 } from "./session";
+import { handleSetupCommand } from "./setup";
 import { handleCompactCommand, handleHelpCommand, handleQuitCommand, handleSettingsCommand, handleStatusCommand } from "./system";
 import { handleThemeCommand } from "./theme";
 import type { CommandError, CommandHandler, CommandHandlerContext, CommandResult } from "./types";
@@ -33,6 +35,8 @@ const HANDLER_MAP: Record<SlashCommandHandlerKey, CommandHandler> = {
   REMEMBER: handleRememberCommand,
   MEMORY: handleMemoryCommand,
   MEMORY_SETUP: handleMemorySetupCommand,
+  DAEMON: handleDaemonCommand,
+  SETUP: handleSetupCommand,
 };
 
 export async function dispatchCommand(

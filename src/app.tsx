@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
+import { writeUserConfig } from "@reins/core";
+
 import { CommandPalette, type CommandPaletteDataSources, ErrorBoundary, Layout } from "./components";
 import { ModelSelectorModal, type ProviderModelGroup } from "./components/model-selector";
 import { ConnectFlow, type ConnectResult } from "./components/connect-flow";
 import { EmbeddingSetupWizard, type EmbeddingSetupResult } from "./components/setup/embedding-setup-wizard";
 import { SearchSettingsModal } from "./components/search-settings-modal";
+import { OnboardingWizard, type OnboardingWizardResult } from "./components/onboarding";
+import { DaemonPanel } from "./components/daemon-panel";
 import { DaemonMemoryClient } from "./daemon/memory-client";
 import { HelpScreen } from "./screens";
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "./daemon/client";
@@ -18,13 +22,13 @@ import type { StreamToolCall, TurnContentBlock } from "./state/streaming-state";
 import { loadModelPreferences, saveModelPreferences } from "./state/model-persistence";
 import { loadPinPreferences, savePinPreferences } from "./state/pin-persistence";
 import { toPinPreferences, applyPinPreferences, DEFAULT_PANEL_STATE } from "./state/layout-mode";
-import { useConversations, useFocus } from "./hooks";
+import { useConversations, useFocus, useFirstRun } from "./hooks";
 import type { PaletteAction } from "./palette/fuzzy-index";
 import type { ConversationLifecycleStatus } from "./state/status-machine";
 import { AppContext, DEFAULT_STATE, appReducer, useApp, createHydrationState, historyPayloadNormalizer } from "./store";
 import type { DisplayContentBlock, DisplayMessage, DisplayToolCall } from "./store";
 import { ThemeProvider, useThemeTokens } from "./theme";
-import { type KeyEvent, type TerminalDimensions, useKeyboard, useRenderer, useTerminalDimensions } from "./ui";
+import { Box, Text, type KeyEvent, type TerminalDimensions, useKeyboard, useRenderer, useTerminalDimensions } from "./ui";
 
 export interface AppProps {
   version: string;
@@ -269,7 +273,34 @@ function AppView({ version, dimensions }: AppViewProps) {
   const { client: daemonClient, connectionStatus, isConnected, mode: daemonMode } = useDaemon();
   const focus = useFocus();
   const conversationManager = useConversations();
+  const firstRunState = useFirstRun();
   const [showHelp, setShowHelp] = useState(false);
+
+  // Sync first-run detection result into app state
+  useEffect(() => {
+    if (firstRunState.status !== "checking") {
+      dispatch({ type: "SET_ONBOARDING_STATUS", payload: firstRunState.status });
+    }
+  }, [firstRunState.status, dispatch]);
+
+  const handleOnboardingComplete = useCallback((result: OnboardingWizardResult) => {
+    dispatch({ type: "SET_ONBOARDING_COMPLETE" });
+    void writeUserConfig({
+      setupComplete: true,
+      name: result.userName,
+      personality: result.personality,
+    });
+    dispatch({
+      type: "SET_STATUS",
+      payload: result.skipped ? "Skipped to chat" : "Setup complete",
+    });
+  }, [dispatch]);
+
+  const closeDaemonPanel = useCallback(() => {
+    dispatch({ type: "SET_DAEMON_PANEL_OPEN", payload: false });
+    dispatch({ type: "SET_STATUS", payload: "Ready" });
+  }, [dispatch]);
+
   const [startupContent, setStartupContent] = useState<StartupContent | null>(null);
   const renderer = useRenderer();
   const isExitingRef = useRef(false);
@@ -831,6 +862,10 @@ function AppView({ version, dimensions }: AppViewProps) {
         dispatch({ type: "SET_EMBEDDING_SETUP_OPEN", payload: true });
         dispatch({ type: "SET_STATUS", payload: "Embedding setup" });
         break;
+      case "daemon":
+        dispatch({ type: "SET_DAEMON_PANEL_OPEN", payload: true });
+        dispatch({ type: "SET_STATUS", payload: "Daemon panel" });
+        break;
       case "quit":
         exitApp();
         break;
@@ -938,7 +973,7 @@ function AppView({ version, dimensions }: AppViewProps) {
       return;
     }
 
-    if (state.isConnectFlowOpen || state.isModelSelectorOpen || state.isSearchSettingsOpen) {
+    if (state.isConnectFlowOpen || state.isModelSelectorOpen || state.isSearchSettingsOpen || state.isDaemonPanelOpen) {
       return;
     }
 
@@ -1027,6 +1062,36 @@ function AppView({ version, dimensions }: AppViewProps) {
     }
   });
 
+  // Onboarding: show loading screen while detection runs
+  if (state.onboardingStatus === "checking") {
+    return (
+      <Box
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "100%",
+          height: "100%",
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
+        <Text content="Loading..." />
+      </Box>
+    );
+  }
+
+  // Onboarding: show wizard for first-run or resume
+  if (state.onboardingStatus === "first-run" || state.onboardingStatus === "resume") {
+    return (
+      <OnboardingWizard
+        onComplete={handleOnboardingComplete}
+        forceRerun={state.onboardingForceRerun}
+      />
+    );
+  }
+
+  // Normal app render (onboardingStatus === "complete")
   return (
     <>
       <Layout
@@ -1070,6 +1135,10 @@ function AppView({ version, dimensions }: AppViewProps) {
           onCancel={handleEmbeddingSetupCancel}
         />
       ) : null}
+      <DaemonPanel
+        visible={state.isDaemonPanelOpen}
+        onClose={closeDaemonPanel}
+      />
     </>
   );
 }

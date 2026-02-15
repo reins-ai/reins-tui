@@ -17,7 +17,7 @@ import type {
   DaemonHistoryPayloadNormalizer,
   DaemonRawHistoryMessage,
 } from "../daemon/contracts";
-import type { AppState, DisplayContentBlock, DisplayMessage, DisplayToolCall, DisplayToolCallStatus, FocusedPanel } from "./types";
+import type { AppState, DisplayContentBlock, DisplayMessage, DisplayToolCall, DisplayToolCallStatus, FocusedPanel, OnboardingStatus } from "./types";
 import { DEFAULT_STATE } from "./types";
 import { applyHydratedHistoryChunk } from "./history-hydration";
 
@@ -75,6 +75,10 @@ export type AppAction =
   | { type: "SET_EMBEDDING_SETUP_OPEN"; payload: boolean }
   | { type: "SET_MODEL_SELECTOR_OPEN"; payload: boolean }
   | { type: "SET_SEARCH_SETTINGS_OPEN"; payload: boolean }
+  | { type: "SET_DAEMON_PANEL_OPEN"; payload: boolean }
+  | { type: "SET_ONBOARDING_STATUS"; payload: OnboardingStatus }
+  | { type: "SET_ONBOARDING_RERUN" }
+  | { type: "SET_ONBOARDING_COMPLETE" }
   | { type: "SET_MODEL"; payload: string }
   | { type: "SET_PROVIDER"; payload: string }
   | { type: "SET_AVAILABLE_MODELS"; payload: string[] }
@@ -439,6 +443,16 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return typeof action.payload === "boolean"
         ? { ...state, isSearchSettingsOpen: action.payload }
         : state;
+    case "SET_DAEMON_PANEL_OPEN":
+      return typeof action.payload === "boolean"
+        ? { ...state, isDaemonPanelOpen: action.payload }
+        : state;
+    case "SET_ONBOARDING_STATUS":
+      return { ...state, onboardingStatus: action.payload, onboardingForceRerun: false };
+    case "SET_ONBOARDING_RERUN":
+      return { ...state, onboardingStatus: "first-run", onboardingForceRerun: true };
+    case "SET_ONBOARDING_COMPLETE":
+      return { ...state, onboardingStatus: "complete", onboardingForceRerun: false };
     case "SET_MODEL":
       return typeof action.payload === "string"
         ? { ...state, currentModel: action.payload }
@@ -700,7 +714,7 @@ export function useApp(): AppContextValue {
 }
 
 export { DEFAULT_STATE };
-export type { AppState, DisplayContentBlock, DisplayMessage, DisplayToolCall, DisplayToolCallStatus, FocusedPanel };
+export type { AppState, DisplayContentBlock, DisplayMessage, DisplayToolCall, DisplayToolCallStatus, FocusedPanel, OnboardingStatus };
 export type { LayoutMode, PanelId, PanelState } from "../state/layout-mode";
 export { getLayoutVisibility, getLayoutModeLabel } from "../state/layout-mode";
 export {

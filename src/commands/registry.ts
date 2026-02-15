@@ -16,7 +16,9 @@ export type SlashCommandHandlerKey =
   | "QUIT_TUI"
   | "REMEMBER"
   | "MEMORY"
-  | "MEMORY_SETUP";
+  | "MEMORY_SETUP"
+  | "DAEMON"
+  | "SETUP";
 
 export interface SlashCommandDefinition {
   readonly name: string;
@@ -159,6 +161,22 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     usage: "/memory <list|show|search> [options]",
     category: "memory",
     handlerKey: "MEMORY",
+  }),
+  Object.freeze({
+    name: "daemon",
+    aliases: Object.freeze(["d"]),
+    description: "Manage daemon connections and profiles.",
+    usage: "/daemon [add|switch|remove|status|token] [options]",
+    category: "system",
+    handlerKey: "DAEMON",
+  }),
+  Object.freeze({
+    name: "setup",
+    aliases: Object.freeze(["onboarding", "personality"]),
+    description: "Re-run the onboarding setup wizard.",
+    usage: "/setup",
+    category: "system",
+    handlerKey: "SETUP",
   }),
 ]);
 

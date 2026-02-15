@@ -266,6 +266,12 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
       if (signal.type === "OPEN_SEARCH_SETTINGS") {
         dispatch({ type: "SET_SEARCH_SETTINGS_OPEN", payload: true });
       }
+      if (signal.type === "OPEN_DAEMON_PANEL") {
+        dispatch({ type: "SET_DAEMON_PANEL_OPEN", payload: true });
+      }
+      if (signal.type === "RELAUNCH_ONBOARDING") {
+        dispatch({ type: "SET_ONBOARDING_RERUN" });
+      }
       if (signal.type === "ENVIRONMENT_SWITCHED" && signal.payload) {
         dispatch({ type: "SET_ENVIRONMENT", payload: signal.payload });
       }
