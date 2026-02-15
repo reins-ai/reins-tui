@@ -190,24 +190,26 @@ describe("handleChannelsCommand", () => {
   });
 
   describe("add subcommand", () => {
-    it("returns stub response for telegram", async () => {
+    it("requires bot token for telegram", async () => {
       const context = createTestContext();
       const result = await runCommand("/channels add telegram", context);
 
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
 
-      expect(result.value.statusMessage).toContain("telegram");
+      expect(result.error.code).toBe("INVALID_ARGUMENT");
+      expect(result.error.message).toContain("Missing bot token");
     });
 
-    it("returns stub response for discord", async () => {
+    it("requires bot token for discord", async () => {
       const context = createTestContext();
       const result = await runCommand("/channels add discord", context);
 
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
 
-      expect(result.value.statusMessage).toContain("discord");
+      expect(result.error.code).toBe("INVALID_ARGUMENT");
+      expect(result.error.message).toContain("Missing bot token");
     });
 
     it("returns error when platform is missing", async () => {
@@ -237,24 +239,15 @@ describe("handleChannelsCommand", () => {
       const context = createTestContext();
       const result = await runCommand("/channels add TELEGRAM", context);
 
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
+      // Should get "missing token" error, not "unsupported platform"
+      expect(result.ok).toBe(false);
+      if (result.ok) return;
 
-      expect(result.value.statusMessage).toContain("telegram");
+      expect(result.error.message).toContain("Missing bot token");
     });
   });
 
   describe("remove subcommand", () => {
-    it("returns stub response for telegram", async () => {
-      const context = createTestContext();
-      const result = await runCommand("/channels remove telegram", context);
-
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-
-      expect(result.value.statusMessage).toContain("telegram");
-    });
-
     it("returns error when platform is missing", async () => {
       const context = createTestContext();
       const result = await runCommand("/channels remove", context);
@@ -279,26 +272,6 @@ describe("handleChannelsCommand", () => {
   });
 
   describe("enable subcommand", () => {
-    it("returns stub response for telegram", async () => {
-      const context = createTestContext();
-      const result = await runCommand("/channels enable telegram", context);
-
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-
-      expect(result.value.statusMessage).toContain("telegram");
-    });
-
-    it("returns stub response for discord", async () => {
-      const context = createTestContext();
-      const result = await runCommand("/channels enable discord", context);
-
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-
-      expect(result.value.statusMessage).toContain("discord");
-    });
-
     it("returns error when platform is missing", async () => {
       const context = createTestContext();
       const result = await runCommand("/channels enable", context);
@@ -323,26 +296,6 @@ describe("handleChannelsCommand", () => {
   });
 
   describe("disable subcommand", () => {
-    it("returns stub response for telegram", async () => {
-      const context = createTestContext();
-      const result = await runCommand("/channels disable telegram", context);
-
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-
-      expect(result.value.statusMessage).toContain("telegram");
-    });
-
-    it("returns stub response for discord", async () => {
-      const context = createTestContext();
-      const result = await runCommand("/channels disable discord", context);
-
-      expect(result.ok).toBe(true);
-      if (!result.ok) return;
-
-      expect(result.value.statusMessage).toContain("discord");
-    });
-
     it("returns error when platform is missing", async () => {
       const context = createTestContext();
       const result = await runCommand("/channels disable", context);
