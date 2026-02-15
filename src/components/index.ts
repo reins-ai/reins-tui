@@ -1,4 +1,5 @@
 // TUI Components — reusable building blocks consumed by screens and layout.
+export * from "./channel-token-prompt";
 export * from "./command-palette";
 export * from "./connect-flow";
 export * from "./conversation-list";

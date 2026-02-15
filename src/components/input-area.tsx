@@ -279,6 +279,9 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
       if (signal.type === "OPEN_DAEMON_PANEL") {
         dispatch({ type: "SET_DAEMON_PANEL_OPEN", payload: true });
       }
+      if (signal.type === "PROMPT_CHANNEL_TOKEN" && signal.payload) {
+        dispatch({ type: "SET_CHANNEL_TOKEN_PROMPT", payload: { open: true, platform: signal.payload } });
+      }
       if (signal.type === "RELAUNCH_ONBOARDING") {
         dispatch({ type: "SET_ONBOARDING_RERUN" });
       }

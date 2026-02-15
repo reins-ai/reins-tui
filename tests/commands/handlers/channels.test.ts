@@ -6,6 +6,7 @@ import {
   formatChannelStatusTable,
   formatRelativeTime,
   formatStatusIndicator,
+  handleChannelsAddWithToken,
   handleChannelsCommand,
   maskBotToken,
   resolveChannelBaseUrl,
@@ -280,26 +281,33 @@ describe("handleChannelsAdd", () => {
     expect(result.error.message).toContain("slack");
   });
 
-  it("returns error when token is missing", async () => {
+  it("prompts for token interactively when token is missing", async () => {
     const context = createTestContext();
     const args = makeArgs(["add", "telegram"]);
     const result = await handleChannelsCommand(args, context);
 
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.code).toBe("INVALID_ARGUMENT");
-    expect(result.error.message).toContain("Missing bot token");
-    expect(result.error.message).toContain("BotFather");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.statusMessage).toContain("Enter");
+    expect(result.value.statusMessage).toContain("Telegram");
+    expect(result.value.responseText).toContain("BotFather");
+    expect(result.value.signals).toBeDefined();
+    expect(result.value.signals).toHaveLength(1);
+    expect(result.value.signals![0].type).toBe("PROMPT_CHANNEL_TOKEN");
+    expect(result.value.signals![0].payload).toBe("telegram");
   });
 
-  it("returns discord-specific help when token missing for discord", async () => {
+  it("prompts with discord-specific help when token missing for discord", async () => {
     const context = createTestContext();
     const args = makeArgs(["add", "discord"]);
     const result = await handleChannelsCommand(args, context);
 
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.message).toContain("discord.com/developers");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.responseText).toContain("discord.com/developers");
+    expect(result.value.signals).toBeDefined();
+    expect(result.value.signals![0].type).toBe("PROMPT_CHANNEL_TOKEN");
+    expect(result.value.signals![0].payload).toBe("discord");
   });
 
   it("is case-insensitive for platform name", async () => {
@@ -307,20 +315,23 @@ describe("handleChannelsAdd", () => {
     const args = makeArgs(["add", "TELEGRAM"]);
     const result = await handleChannelsCommand(args, context);
 
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    // Should get "missing token" error, not "unsupported platform"
-    expect(result.error.message).toContain("Missing bot token");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Should get prompt signal, not "unsupported platform" error
+    expect(result.value.signals).toBeDefined();
+    expect(result.value.signals![0].type).toBe("PROMPT_CHANNEL_TOKEN");
+    expect(result.value.signals![0].payload).toBe("telegram");
   });
 
-  it("returns error when token is empty string", async () => {
+  it("prompts for token when token is empty string", async () => {
     const context = createTestContext();
     const args = makeArgs(["add", "telegram", "   "]);
     const result = await handleChannelsCommand(args, context);
 
-    expect(result.ok).toBe(false);
-    if (result.ok) return;
-    expect(result.error.message).toContain("Missing bot token");
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.signals).toBeDefined();
+    expect(result.value.signals![0].type).toBe("PROMPT_CHANNEL_TOKEN");
   });
 });
 
@@ -423,7 +434,7 @@ describe("handleChannelsCommand routing", () => {
     expect(result.value.statusMessage).toBe("Channels");
     expect(result.value.responseText).toContain("Channel Management");
     expect(result.value.responseText).toContain("/channels add");
-    expect(result.value.responseText).toContain("<token>");
+    expect(result.value.responseText).toContain("[token]");
     expect(result.value.responseText).toContain("/channels remove");
     expect(result.value.responseText).toContain("/channels enable");
     expect(result.value.responseText).toContain("/channels disable");
@@ -705,7 +716,6 @@ describe("formatStatusIndicator", () => {
     const result = formatStatusIndicator("connected");
     expect(result).toContain("\x1b[32m");
     expect(result).toContain("connected");
-    expect(result).toContain("*");
     expect(result).toContain("\x1b[0m");
   });
 
@@ -713,14 +723,12 @@ describe("formatStatusIndicator", () => {
     const result = formatStatusIndicator("error");
     expect(result).toContain("\x1b[31m");
     expect(result).toContain("error");
-    expect(result).toContain("*");
   });
 
   it("returns yellow indicator for disconnected state", () => {
     const result = formatStatusIndicator("disconnected");
     expect(result).toContain("\x1b[33m");
     expect(result).toContain("disconnected");
-    expect(result).toContain("*");
   });
 
   it("returns yellow indicator for connecting state", () => {
@@ -745,8 +753,7 @@ describe("formatRelativeTime", () => {
 
   it("returns dim dash for undefined timestamp", () => {
     const result = formatRelativeTime(undefined, fixedNow);
-    expect(result).toContain("-");
-    expect(result).toContain("\x1b[2m");
+    expect(result).toBe("-");
   });
 
   it("returns dim dash for invalid timestamp", () => {
@@ -1251,5 +1258,117 @@ describe("handlers prefer daemon client base URL", () => {
 
     const url = await resolveChannelBaseUrl(context);
     expect(url).toBe("http://tailscale-daemon:7433");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleChannelsAddWithToken — direct token submission
+// ---------------------------------------------------------------------------
+
+describe("handleChannelsAddWithToken", () => {
+  it("calls daemon API and returns success on valid token", async () => {
+    const mockFetch = createMockFetch(201, {
+      channel: { channelId: "telegram", platform: "telegram", enabled: true, state: "connected", healthy: true },
+    });
+    const client = createMockDaemonClient({ status: "connected" });
+    const context = createTestContext(client);
+
+    const result = await handleChannelsAddWithToken("telegram", "123456:ABC-DEF", context, mockFetch);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.statusMessage).toContain("Telegram");
+    expect(result.value.statusMessage).toContain("added");
+    expect(result.value.responseText).toContain("configured successfully");
+    expect(result.value.responseText).toContain("connected");
+  });
+
+  it("returns masked token in success response", async () => {
+    const mockFetch = createMockFetch(201, {
+      channel: { channelId: "telegram", platform: "telegram", enabled: true, state: "connected", healthy: true },
+    });
+    const client = createMockDaemonClient({ status: "connected" });
+    const context = createTestContext(client);
+
+    const result = await handleChannelsAddWithToken("telegram", "1234567890:ABCdefGHIjklMNO", context, mockFetch);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    // Token should be masked — not showing full token
+    expect(result.value.responseText).not.toContain("1234567890:ABCdefGHIjklMNO");
+    expect(result.value.responseText).toContain("1234");
+  });
+
+  it("returns error when daemon API fails", async () => {
+    const mockFetch = createMockFetch(400, { error: "Invalid bot token" });
+    const client = createMockDaemonClient({ status: "connected" });
+    const context = createTestContext(client);
+
+    const result = await handleChannelsAddWithToken("telegram", "bad-token", context, mockFetch);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toContain("Failed to add telegram");
+    expect(result.error.message).toContain("Invalid bot token");
+  });
+
+  it("returns error when daemon is disconnected", async () => {
+    const mockFetch = createMockFetch(201, {});
+    const client = createMockDaemonClient({ status: "disconnected" });
+    const context = createTestContext(client);
+
+    const result = await handleChannelsAddWithToken("telegram", "some-token-1234567890", context, mockFetch);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toContain("Daemon is disconnected");
+  });
+
+  it("works for discord platform", async () => {
+    const mockFetch = createMockFetch(201, {
+      channel: { channelId: "discord", platform: "discord", enabled: true, state: "connecting", healthy: false },
+    });
+    const client = createMockDaemonClient({ status: "connected" });
+    const context = createTestContext(client);
+
+    const result = await handleChannelsAddWithToken("discord", "MTIz.abc.xyz-1234567890", context, mockFetch);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.statusMessage).toContain("Discord");
+    expect(result.value.responseText).toContain("connecting");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// handleChannelsAdd — argument-based path still works
+// ---------------------------------------------------------------------------
+
+describe("handleChannelsAdd argument path", () => {
+  it("accepts token as positional argument without prompting", async () => {
+    // Use a disconnected daemon so the handler fails fast (no network timeout)
+    const client = createMockDaemonClient({ status: "disconnected" });
+    const context = createTestContext(client);
+
+    const args = makeArgs(["add", "telegram", "1234567890:ABCdefGHIjklMNO"]);
+    const result = await handleChannelsCommand(args, context);
+
+    // Should fail with daemon disconnected error, NOT emit a prompt signal
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toContain("Daemon is disconnected");
+  });
+
+  it("accepts token via --token flag without prompting", async () => {
+    // Use a disconnected daemon so the handler fails fast (no network timeout)
+    const client = createMockDaemonClient({ status: "disconnected" });
+    const context = createTestContext(client);
+    const args = makeArgs(["add", "telegram"], { token: "1234567890:ABCdefGHIjklMNO" });
+    const result = await handleChannelsCommand(args, context);
+
+    // Should fail with daemon disconnected error, NOT emit a prompt signal
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.message).toContain("Daemon is disconnected");
   });
 });

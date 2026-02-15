@@ -268,17 +268,17 @@ const COLOR_RESET = "\x1b[0m";
 export function formatStatusIndicator(state: ChannelHealthStatus["state"]): string {
   switch (state) {
     case "connected":
-      return `${COLOR_GREEN}* connected${COLOR_RESET}`;
+      return `${COLOR_GREEN}connected${COLOR_RESET}`;
     case "error":
-      return `${COLOR_RED}* error${COLOR_RESET}`;
+      return `${COLOR_RED}error${COLOR_RESET}`;
     case "disconnected":
-      return `${COLOR_YELLOW}* disconnected${COLOR_RESET}`;
+      return `${COLOR_YELLOW}disconnected${COLOR_RESET}`;
     case "connecting":
-      return `${COLOR_YELLOW}* connecting${COLOR_RESET}`;
+      return `${COLOR_YELLOW}connecting${COLOR_RESET}`;
     case "reconnecting":
-      return `${COLOR_YELLOW}* reconnecting${COLOR_RESET}`;
+      return `${COLOR_YELLOW}reconnecting${COLOR_RESET}`;
     default:
-      return `${COLOR_DIM}* unknown${COLOR_RESET}`;
+      return `${COLOR_DIM}unknown${COLOR_RESET}`;
   }
 }
 
@@ -288,13 +288,13 @@ export function formatStatusIndicator(state: ChannelHealthStatus["state"]): stri
  */
 export function formatRelativeTime(isoTimestamp: string | undefined, nowMs?: number): string {
   if (!isoTimestamp) {
-    return `${COLOR_DIM}-${COLOR_RESET}`;
+    return "-";
   }
 
   const now = nowMs ?? Date.now();
   const then = new Date(isoTimestamp).getTime();
   if (Number.isNaN(then)) {
-    return `${COLOR_DIM}-${COLOR_RESET}`;
+    return "-";
   }
 
   const diffMs = now - then;
@@ -383,16 +383,15 @@ export function formatChannelStatusTable(snapshot: ChannelStatusSnapshot, nowMs?
     return `${platform}  ${status}  ${enabled}  ${activity}`;
   });
 
-  const summaryLine = [
-    "",
-    `${COLOR_DIM}${summary.total} channel${summary.total === 1 ? "" : "s"}`,
+  const summaryParts = [
+    `${summary.total} channel${summary.total === 1 ? "" : "s"}`,
     `${summary.enabled} enabled`,
     `${summary.healthy} healthy`,
     summary.unhealthy > 0
-      ? `${COLOR_RED}${summary.unhealthy} unhealthy${COLOR_RESET}${COLOR_DIM}`
+      ? `${COLOR_RED}${summary.unhealthy} unhealthy${COLOR_RESET}`
       : `${summary.unhealthy} unhealthy`,
-    `${COLOR_RESET}`,
-  ].join(" · ");
+  ];
+  const summaryLine = summaryParts.join(" | ");
 
   return [
     "**Channel Status**",
@@ -423,21 +422,33 @@ const handleChannelsAdd: CommandHandler = async (args, context) => {
 
   const token = (typeof args.flags.token === "string" ? args.flags.token : args.positional[2]) ?? "";
   if (token.trim().length === 0) {
-    return err({
-      code: "INVALID_ARGUMENT",
-      message: [
-        `Missing bot token. Usage: /channels add ${platform} <bot-token>`,
+    // No token provided — prompt interactively via signal
+    return ok({
+      statusMessage: `Enter ${capitalize(platform)} bot token`,
+      responseText: [
+        `**Add ${capitalize(platform)} Channel**`,
         "",
-        "You can also use: /channels add " + platform + " --token=<bot-token>",
-        "",
-        `To get a bot token:`,
         platform === "telegram"
-          ? "  1. Message @BotFather on Telegram\n  2. Use /newbot to create a bot\n  3. Copy the bot token"
-          : "  1. Go to https://discord.com/developers/applications\n  2. Create a new application and add a bot\n  3. Copy the bot token",
+          ? "To get a bot token:\n  1. Message @BotFather on Telegram\n  2. Use /newbot to create a bot\n  3. Copy the bot token"
+          : "To get a bot token:\n  1. Go to https://discord.com/developers/applications\n  2. Create a new application and add a bot\n  3. Copy the bot token",
       ].join("\n"),
+      signals: [{ type: "PROMPT_CHANNEL_TOKEN", payload: platform }],
     });
   }
 
+  return handleChannelsAddWithToken(platform, token.trim(), context);
+};
+
+/**
+ * Add a channel with a known token. Shared by the argument-based path and
+ * the interactive token prompt flow.
+ */
+export async function handleChannelsAddWithToken(
+  platform: SupportedPlatform,
+  token: string,
+  context: CommandHandlerContext,
+  fetchFn: typeof fetch = fetch,
+): Promise<ReturnType<CommandHandler>> {
   const connCheck = checkDaemonConnected(context);
   if (!connCheck.ok) {
     return err({ code: "INVALID_ARGUMENT", message: connCheck.message });
@@ -447,9 +458,9 @@ const handleChannelsAdd: CommandHandler = async (args, context) => {
 
   const result = await callDaemonChannelApi(
     "/channels/add",
-    { platform, token: token.trim() },
+    { platform, token },
     60_000,
-    fetch,
+    fetchFn,
     baseUrl,
   );
 
@@ -460,7 +471,7 @@ const handleChannelsAdd: CommandHandler = async (args, context) => {
     });
   }
 
-  const masked = maskBotToken(token.trim());
+  const masked = maskBotToken(token);
   const state = result.data.channel?.state ?? "unknown";
 
   return ok({
@@ -475,7 +486,7 @@ const handleChannelsAdd: CommandHandler = async (args, context) => {
       `Use \`/channels disable ${platform}\` to pause the channel.`,
     ].join("\n"),
   });
-};
+}
 
 const handleChannelsRemove: CommandHandler = async (args, context) => {
   const platform = args.positional[1]?.trim().toLowerCase();
@@ -668,7 +679,7 @@ export const handleChannelsCommand: CommandHandler = (args, context) => {
       responseText: [
         "**Channel Management Commands:**",
         "",
-        "  /channels add <platform> <token>     Add a new chat channel",
+        "  /channels add <platform> [token]      Add a new chat channel",
         "  /channels remove <platform>          Remove a configured channel",
         "  /channels enable <platform>          Enable a channel",
         "  /channels disable <platform>         Disable a channel",

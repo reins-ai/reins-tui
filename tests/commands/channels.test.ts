@@ -190,26 +190,28 @@ describe("handleChannelsCommand", () => {
   });
 
   describe("add subcommand", () => {
-    it("requires bot token for telegram", async () => {
+    it("prompts for bot token when not provided for telegram", async () => {
       const context = createTestContext();
       const result = await runCommand("/channels add telegram", context);
 
-      expect(result.ok).toBe(false);
-      if (result.ok) return;
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
 
-      expect(result.error.code).toBe("INVALID_ARGUMENT");
-      expect(result.error.message).toContain("Missing bot token");
+      expect(result.value.signals).toBeDefined();
+      expect(result.value.signals![0].type).toBe("PROMPT_CHANNEL_TOKEN");
+      expect(result.value.signals![0].payload).toBe("telegram");
     });
 
-    it("requires bot token for discord", async () => {
+    it("prompts for bot token when not provided for discord", async () => {
       const context = createTestContext();
       const result = await runCommand("/channels add discord", context);
 
-      expect(result.ok).toBe(false);
-      if (result.ok) return;
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
 
-      expect(result.error.code).toBe("INVALID_ARGUMENT");
-      expect(result.error.message).toContain("Missing bot token");
+      expect(result.value.signals).toBeDefined();
+      expect(result.value.signals![0].type).toBe("PROMPT_CHANNEL_TOKEN");
+      expect(result.value.signals![0].payload).toBe("discord");
     });
 
     it("returns error when platform is missing", async () => {
@@ -239,11 +241,13 @@ describe("handleChannelsCommand", () => {
       const context = createTestContext();
       const result = await runCommand("/channels add TELEGRAM", context);
 
-      // Should get "missing token" error, not "unsupported platform"
-      expect(result.ok).toBe(false);
-      if (result.ok) return;
+      // Should get prompt signal, not "unsupported platform" error
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
 
-      expect(result.error.message).toContain("Missing bot token");
+      expect(result.value.signals).toBeDefined();
+      expect(result.value.signals![0].type).toBe("PROMPT_CHANNEL_TOKEN");
+      expect(result.value.signals![0].payload).toBe("telegram");
     });
   });
 

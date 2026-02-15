@@ -139,6 +139,8 @@ export interface AppState {
   isModelSelectorOpen: boolean;
   isSearchSettingsOpen: boolean;
   isDaemonPanelOpen: boolean;
+  isChannelTokenPromptOpen: boolean;
+  channelTokenPromptPlatform: string | null;
   onboardingStatus: OnboardingStatus;
   /** True when onboarding was triggered by /setup rerun, not first-run detection. */
   onboardingForceRerun: boolean;
@@ -169,6 +171,8 @@ export const DEFAULT_STATE: AppState = {
   isModelSelectorOpen: false,
   isSearchSettingsOpen: false,
   isDaemonPanelOpen: false,
+  isChannelTokenPromptOpen: false,
+  channelTokenPromptPlatform: null,
   onboardingStatus: "checking",
   onboardingForceRerun: false,
   currentModel: "default",
