@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
+import { writeUserConfig } from "@reins/core";
+
 import { CommandPalette, type CommandPaletteDataSources, ErrorBoundary, Layout } from "./components";
 import { ModelSelectorModal, type ProviderModelGroup } from "./components/model-selector";
 import { ConnectFlow, type ConnectResult } from "./components/connect-flow";
@@ -283,6 +285,7 @@ function AppView({ version, dimensions }: AppViewProps) {
 
   const handleOnboardingComplete = useCallback((result: OnboardingWizardResult) => {
     dispatch({ type: "SET_ONBOARDING_COMPLETE" });
+    void writeUserConfig({ setupComplete: true });
     dispatch({
       type: "SET_STATUS",
       payload: result.skipped ? "Skipped to chat" : "Setup complete",

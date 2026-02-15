@@ -462,7 +462,7 @@ export function CommandPalette({ isOpen, sources, onClose, onExecute }: CommandP
         {totalResults === 0 ? (
           <EmptyState query={query} tokens={tokens} />
         ) : (
-          <ScrollBox style={{ flexGrow: 1 }} contentOptions={{ flexDirection: "column" }}>
+          <ScrollBox style={{ flexGrow: 1 }} contentOptions={{ flexDirection: "column" }} scrollbarOptions={{ visible: false }}>
             {categoryGroups.map((group) => (
               <Box key={group.category} style={{ flexDirection: "column" }}>
                 <CategoryHeader label={group.label} glyph={group.glyph} tokens={tokens} />

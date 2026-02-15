@@ -25,7 +25,7 @@ const DEFAULT_MODELS: ModelEntry[] = [
 // Component
 // ---------------------------------------------------------------------------
 
-export function ModelSelectionStepView({ tokens, engineState, onStepData }: StepViewProps) {
+export function ModelSelectionStepView({ tokens, engineState, onStepData, onRequestNext }: StepViewProps) {
   const isQuickstart = engineState.mode === "quickstart";
 
   // In quickstart mode, auto-select the recommended model
@@ -56,6 +56,11 @@ export function ModelSelectionStepView({ tokens, engineState, onStepData }: Step
       setSelectedIndex((prev) =>
         (prev + 1) % DEFAULT_MODELS.length,
       );
+      return;
+    }
+
+    if (keyName === "return" || keyName === "enter") {
+      onRequestNext();
     }
   });
 
@@ -127,7 +132,7 @@ export function ModelSelectionStepView({ tokens, engineState, onStepData }: Step
       {/* Hint */}
       <Box style={{ marginTop: 1 }}>
         <Text
-          content="Up/Down select . Enter continue . Tab skip"
+          content="Up/Down select  ·  Enter continue  ·  Esc back"
           style={{ color: tokens["text.muted"] }}
         />
       </Box>

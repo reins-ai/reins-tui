@@ -30,7 +30,7 @@ function extractInputValue(value: unknown): string {
 // Component
 // ---------------------------------------------------------------------------
 
-export function WorkspaceStepView({ tokens, engineState: _engineState, onStepData }: StepViewProps) {
+export function WorkspaceStepView({ tokens, engineState: _engineState, onStepData, onRequestNext }: StepViewProps) {
   const defaultPath = getDefaultWorkspacePath();
   const [pathInput, setPathInput] = useState(defaultPath);
   const [isEditing, setIsEditing] = useState(false);
@@ -56,12 +56,18 @@ export function WorkspaceStepView({ tokens, engineState: _engineState, onStepDat
       return;
     }
 
-    // Escape exits edit mode
+    // Escape exits edit mode (if editing; otherwise handled by wizard shell)
     if (keyName === "escape" || keyName === "esc") {
       if (isEditing) {
         setIsEditing(false);
         return;
       }
+    }
+
+    // Enter continues (when not editing)
+    if ((keyName === "return" || keyName === "enter") && !isEditing) {
+      onRequestNext();
+      return;
     }
 
     // 'r' resets to default
@@ -127,8 +133,8 @@ export function WorkspaceStepView({ tokens, engineState: _engineState, onStepDat
         <Text
           content={
             isEditing
-              ? "Type to edit . Esc done editing . Enter continue"
-              : "e edit path . r reset to default . Enter continue . Tab skip"
+              ? "Type to edit  ·  Esc done editing"
+              : "e edit path  ·  r reset to default  ·  Enter continue  ·  Esc back"
           }
           style={{ color: tokens["text.muted"] }}
         />

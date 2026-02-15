@@ -228,11 +228,21 @@ function WizardFrame({ title, tokens, engineState, children }: WizardFrameProps)
         style={{
           flexGrow: 1,
         }}
+        viewportOptions={{
+          paddingRight: 1,
+        }}
         contentOptions={{
           flexDirection: "column",
           paddingLeft: 4,
-          paddingRight: 4,
+          paddingRight: 3,
           paddingTop: 2,
+        }}
+        verticalScrollbarOptions={{
+          paddingLeft: 1,
+          trackOptions: {
+            backgroundColor: tokens["surface.secondary"],
+            foregroundColor: tokens["border.subtle"],
+          },
         }}
       >
         {children}
@@ -295,7 +305,7 @@ function ResumePromptView({ tokens, resumeStep, selectedIndex }: ResumePromptVie
         </Box>
         <Box style={{ marginTop: 2 }}>
           <Text
-            content="Up/Down select . Enter confirm"
+            content="Up/Down select · Enter confirm"
             style={{ color: tokens["text.muted"] }}
           />
         </Box>
@@ -476,6 +486,11 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
           return;
         }
 
+        if (initResult.value.isComplete) {
+          onComplete({ completed: true, skipped: false });
+          return;
+        }
+
         dispatch({ type: "ENGINE_INITIALIZED", engineState: initResult.value });
       }
 
@@ -513,8 +528,13 @@ export function OnboardingWizard({ onComplete }: OnboardingWizardProps) {
       return;
     }
 
+    if (initResult.value.isComplete) {
+      onComplete({ completed: true, skipped: false });
+      return;
+    }
+
     dispatch({ type: "ENGINE_INITIALIZED", engineState: initResult.value });
-  }, [handleEngineEvent]);
+  }, [handleEngineEvent, onComplete]);
 
   // Handle engine navigation
   const handleNext = useCallback(async () => {

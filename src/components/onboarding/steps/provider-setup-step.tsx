@@ -24,7 +24,7 @@ const PROVIDERS: ProviderEntry[] = [
 // Component
 // ---------------------------------------------------------------------------
 
-export function ProviderSetupStepView({ tokens, engineState: _engineState, onStepData }: StepViewProps) {
+export function ProviderSetupStepView({ tokens, engineState: _engineState, onStepData, onRequestNext }: StepViewProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [configuredProviders, setConfiguredProviders] = useState<Set<string>>(new Set());
 
@@ -50,6 +50,11 @@ export function ProviderSetupStepView({ tokens, engineState: _engineState, onSte
       setSelectedIndex((prev) =>
         (prev + 1) % PROVIDERS.length,
       );
+      return;
+    }
+
+    if (keyName === "return" || keyName === "enter") {
+      onRequestNext();
       return;
     }
 
@@ -135,7 +140,7 @@ export function ProviderSetupStepView({ tokens, engineState: _engineState, onSte
       {/* Hint */}
       <Box style={{ marginTop: 1 }}>
         <Text
-          content="Up/Down select . Space toggle . Enter continue . Tab skip"
+          content="Up/Down select  ·  Space toggle  ·  Enter continue  ·  Esc back"
           style={{ color: tokens["text.muted"] }}
         />
       </Box>

@@ -225,6 +225,7 @@ function OverlayFrame({ title, hint, tokens, children }: OverlayFrameProps) {
             backgroundColor: tokens["surface.secondary"],
           }}
           contentOptions={{ flexDirection: "column" }}
+          scrollbarOptions={{ visible: false }}
         >
           {children}
         </ScrollBox>
@@ -262,7 +263,7 @@ function AlreadyConfiguredStep({
   return (
     <OverlayFrame
       title="Memory Setup"
-      hint="Enter reconfigure . Esc close"
+      hint="Enter reconfigure · Esc close"
       tokens={tokens}
     >
       <Box style={{ flexDirection: "column" }}>
@@ -301,7 +302,7 @@ function ProviderSelectStep({
   return (
     <OverlayFrame
       title="Memory Setup - Embedding Provider"
-      hint="Up/Down select . Enter confirm . Esc cancel"
+      hint="Up/Down select · Enter confirm · Esc cancel"
       tokens={tokens}
     >
       <Box style={{ flexDirection: "column" }}>
@@ -361,7 +362,7 @@ function ModelEntryStep({
   return (
     <OverlayFrame
       title={`Memory Setup - ${providerLabel} Model`}
-      hint="Enter confirm . Esc back"
+      hint="Enter confirm · Esc back"
       tokens={tokens}
     >
       <Box style={{ flexDirection: "column" }}>
@@ -451,7 +452,7 @@ function ErrorStep({
   tokens: Record<string, string>;
 }) {
   return (
-    <OverlayFrame title="Memory Setup" hint="Esc back . Enter retry" tokens={tokens}>
+    <OverlayFrame title="Memory Setup" hint="Esc back · Enter retry" tokens={tokens}>
       <Box style={{ flexDirection: "column" }}>
         <Box style={{ flexDirection: "row" }}>
           <Text content="x " style={{ color: tokens["status.error"] }} />

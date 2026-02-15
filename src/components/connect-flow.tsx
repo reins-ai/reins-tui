@@ -466,6 +466,7 @@ function OverlayFrame({ title, hint, tokens, children }: OverlayFrameProps) {
             backgroundColor: tokens["surface.secondary"],
           }}
           contentOptions={{ flexDirection: "column" }}
+          scrollbarOptions={{ visible: false }}
         >
           {children}
         </ScrollBox>

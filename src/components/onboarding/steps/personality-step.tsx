@@ -48,7 +48,7 @@ const PRESET_OPTIONS: PresetOption[] = [
 // Component
 // ---------------------------------------------------------------------------
 
-export function PersonalityStepView({ tokens, engineState: _engineState, onStepData }: StepViewProps) {
+export function PersonalityStepView({ tokens, engineState: _engineState, onStepData, onRequestNext }: StepViewProps) {
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [customPrompt, setCustomPrompt] = useState("");
   const [isEditingCustom, setIsEditingCustom] = useState(false);
@@ -92,10 +92,14 @@ export function PersonalityStepView({ tokens, engineState: _engineState, onStepD
       return;
     }
 
-    // Enter on custom option toggles edit mode
+    // Enter: edit custom text if selected, otherwise advance
     if (keyName === "return" || keyName === "enter") {
       if (isCustomSelected && !isEditingCustom) {
         setIsEditingCustom(true);
+        return;
+      }
+      if (!isEditingCustom) {
+        onRequestNext();
       }
     }
   });
@@ -192,10 +196,10 @@ export function PersonalityStepView({ tokens, engineState: _engineState, onStepD
         <Text
           content={
             isEditingCustom
-              ? "Type your modifier . Esc done editing"
+              ? "Type your modifier  ·  Esc done editing"
               : isCustomSelected
-                ? "Up/Down select . Enter edit custom text . Tab skip"
-                : "Up/Down select . Enter continue . Tab skip"
+                ? "Up/Down select  ·  Enter edit custom text  ·  Esc back"
+                : "Up/Down select  ·  Enter continue  ·  Esc back"
           }
           style={{ color: tokens["text.muted"] }}
         />

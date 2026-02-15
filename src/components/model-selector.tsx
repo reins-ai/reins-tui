@@ -250,7 +250,7 @@ export function ModelSelectorModal({
             />
           </Box>
         ) : (
-          <ScrollBox style={{ flexGrow: 1 }} contentOptions={{ flexDirection: "column" }}>
+          <ScrollBox style={{ flexGrow: 1 }} contentOptions={{ flexDirection: "column" }} scrollbarOptions={{ visible: false }}>
             {items.map((item, index) => {
               if (item.type === "provider-header") {
                 const statusIcon = item.disabled ? "○" : "●";

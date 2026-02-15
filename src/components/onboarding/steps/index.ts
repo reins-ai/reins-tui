@@ -15,6 +15,8 @@ export interface StepViewProps {
   tokens: Record<string, string>;
   engineState: EngineState;
   onStepData: (data: Record<string, unknown>) => void;
+  /** Call this when the step wants the wizard to advance to the next page. */
+  onRequestNext: () => void;
 }
 
 // ---------------------------------------------------------------------------
