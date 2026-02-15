@@ -104,7 +104,7 @@ describe("callDaemonChannelApi", () => {
       channel: { channelId: "telegram", platform: "telegram", enabled: true, state: "connected", healthy: true },
     });
 
-    const result = await callDaemonChannelApi("/channels/add", { platform: "telegram", token: "test-token" }, mockFetch);
+    const result = await callDaemonChannelApi("/channels/add", { platform: "telegram", token: "test-token" }, 10_000, mockFetch);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -115,7 +115,7 @@ describe("callDaemonChannelApi", () => {
   it("returns error message from daemon error response", async () => {
     const mockFetch = createMockFetch(400, { error: "token is required" });
 
-    const result = await callDaemonChannelApi("/channels/add", { platform: "telegram" }, mockFetch);
+    const result = await callDaemonChannelApi("/channels/add", { platform: "telegram" }, 10_000, mockFetch);
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -125,7 +125,7 @@ describe("callDaemonChannelApi", () => {
   it("returns error for 404 responses", async () => {
     const mockFetch = createMockFetch(404, { error: "Channel not found: slack" });
 
-    const result = await callDaemonChannelApi("/channels/remove", { channelId: "slack" }, mockFetch);
+    const result = await callDaemonChannelApi("/channels/remove", { channelId: "slack" }, 10_000, mockFetch);
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -135,18 +135,42 @@ describe("callDaemonChannelApi", () => {
   it("handles network errors gracefully", async () => {
     const mockFetch = mock(() => Promise.reject(new TypeError("fetch failed"))) as unknown as typeof fetch;
 
-    const result = await callDaemonChannelApi("/channels/add", { platform: "telegram", token: "t" }, mockFetch);
+    const result = await callDaemonChannelApi("/channels/add", { platform: "telegram", token: "t" }, 10_000, mockFetch);
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toContain("Unable to reach daemon");
   });
 
-  it("handles timeout errors", async () => {
+  it("handles AbortError timeout errors", async () => {
     const timeoutError = new DOMException("The operation was aborted", "AbortError");
     const mockFetch = mock(() => Promise.reject(timeoutError)) as unknown as typeof fetch;
 
-    const result = await callDaemonChannelApi("/channels/add", { platform: "telegram", token: "t" }, mockFetch);
+    const result = await callDaemonChannelApi("/channels/add", { platform: "telegram", token: "t" }, 10_000, mockFetch);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain("timed out");
+    expect(result.error).toContain("/channels status");
+  });
+
+  it("handles TimeoutError errors", async () => {
+    const timeoutError = new DOMException("signal timed out", "TimeoutError");
+    const mockFetch = mock(() => Promise.reject(timeoutError)) as unknown as typeof fetch;
+
+    const result = await callDaemonChannelApi("/channels/add", { platform: "telegram", token: "t" }, 10_000, mockFetch);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain("timed out");
+    expect(result.error).toContain("/channels status");
+  });
+
+  it("handles errors with 'timed out' in message", async () => {
+    const timedOutError = new Error("The operation timed out");
+    const mockFetch = mock(() => Promise.reject(timedOutError)) as unknown as typeof fetch;
+
+    const result = await callDaemonChannelApi("/channels/add", { platform: "telegram", token: "t" }, 10_000, mockFetch);
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -158,7 +182,7 @@ describe("callDaemonChannelApi", () => {
       Promise.resolve(new Response("Internal Server Error", { status: 500 })),
     ) as unknown as typeof fetch;
 
-    const result = await callDaemonChannelApi("/channels/add", { platform: "telegram", token: "t" }, mockFetch);
+    const result = await callDaemonChannelApi("/channels/add", { platform: "telegram", token: "t" }, 10_000, mockFetch);
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -168,11 +192,27 @@ describe("callDaemonChannelApi", () => {
   it("falls back to HTTP status when no error field in response", async () => {
     const mockFetch = createMockFetch(500, { message: "something broke" });
 
-    const result = await callDaemonChannelApi("/channels/add", { platform: "telegram", token: "t" }, mockFetch);
+    const result = await callDaemonChannelApi("/channels/add", { platform: "telegram", token: "t" }, 10_000, mockFetch);
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toContain("500");
+  });
+
+  it("passes custom timeout to fetch signal", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const mockFetch = mock((_url: string, init: RequestInit) => {
+      capturedSignal = init.signal as AbortSignal;
+      return Promise.resolve(new Response(JSON.stringify({
+        channel: { channelId: "telegram", platform: "telegram", enabled: true, state: "connected", healthy: true },
+      }), { status: 201, headers: { "Content-Type": "application/json" } }));
+    }) as unknown as typeof fetch;
+
+    await callDaemonChannelApi("/channels/add", { platform: "telegram", token: "t" }, 60_000, mockFetch);
+
+    expect(capturedSignal).toBeDefined();
+    // The signal should not be aborted immediately (60s timeout)
+    expect(capturedSignal!.aborted).toBe(false);
   });
 });
 
@@ -407,7 +447,7 @@ describe("callDaemonChannelApi request format", () => {
       }), { status: 201, headers: { "Content-Type": "application/json" } }));
     }) as unknown as typeof fetch;
 
-    await callDaemonChannelApi("/channels/add", { platform: "telegram", token: "my-token" }, mockFetch);
+    await callDaemonChannelApi("/channels/add", { platform: "telegram", token: "my-token" }, 10_000, mockFetch);
 
     expect(capturedBody).toBeDefined();
     const parsed = JSON.parse(capturedBody!);
@@ -425,7 +465,7 @@ describe("callDaemonChannelApi request format", () => {
       }));
     }) as unknown as typeof fetch;
 
-    await callDaemonChannelApi("/channels/remove", { channelId: "discord" }, mockFetch);
+    await callDaemonChannelApi("/channels/remove", { channelId: "discord" }, 10_000, mockFetch);
 
     expect(capturedBody).toBeDefined();
     const parsed = JSON.parse(capturedBody!);
@@ -441,7 +481,7 @@ describe("callDaemonChannelApi request format", () => {
       }), { status: 200, headers: { "Content-Type": "application/json" } }));
     }) as unknown as typeof fetch;
 
-    await callDaemonChannelApi("/channels/enable", { channelId: "telegram" }, mockFetch);
+    await callDaemonChannelApi("/channels/enable", { channelId: "telegram" }, 10_000, mockFetch);
 
     expect(capturedBody).toBeDefined();
     const parsed = JSON.parse(capturedBody!);
@@ -457,7 +497,7 @@ describe("callDaemonChannelApi request format", () => {
       }), { status: 200, headers: { "Content-Type": "application/json" } }));
     }) as unknown as typeof fetch;
 
-    await callDaemonChannelApi("/channels/disable", { channelId: "discord" }, mockFetch);
+    await callDaemonChannelApi("/channels/disable", { channelId: "discord" }, 10_000, mockFetch);
 
     expect(capturedBody).toBeDefined();
     const parsed = JSON.parse(capturedBody!);
@@ -474,7 +514,7 @@ describe("callDaemonChannelApi request format", () => {
       }));
     }) as unknown as typeof fetch;
 
-    await callDaemonChannelApi("/channels/remove", { channelId: "telegram" }, mockFetch);
+    await callDaemonChannelApi("/channels/remove", { channelId: "telegram" }, 10_000, mockFetch);
 
     expect(capturedMethod).toBe("POST");
   });
@@ -489,7 +529,7 @@ describe("callDaemonChannelApi request format", () => {
       }));
     }) as unknown as typeof fetch;
 
-    await callDaemonChannelApi("/channels/remove", { channelId: "telegram" }, mockFetch);
+    await callDaemonChannelApi("/channels/remove", { channelId: "telegram" }, 10_000, mockFetch);
 
     expect(capturedHeaders?.["Content-Type"]).toBe("application/json");
   });
@@ -504,7 +544,7 @@ describe("callDaemonChannelApi request format", () => {
       }));
     }) as unknown as typeof fetch;
 
-    await callDaemonChannelApi("/channels/remove", { channelId: "telegram" }, mockFetch);
+    await callDaemonChannelApi("/channels/remove", { channelId: "telegram" }, 10_000, mockFetch);
 
     expect(capturedUrl).toBeDefined();
     expect(capturedUrl!).toContain("/channels/remove");
@@ -525,7 +565,7 @@ describe("callDaemonChannelGet", () => {
     };
     const mockFetch = createMockFetch(200, body);
 
-    const result = await callDaemonChannelGet<typeof body>("/channels/status", mockFetch);
+    const result = await callDaemonChannelGet<typeof body>("/channels/status", 10_000, mockFetch);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
@@ -543,7 +583,7 @@ describe("callDaemonChannelGet", () => {
       }));
     }) as unknown as typeof fetch;
 
-    await callDaemonChannelGet("/channels/status", mockFetch);
+    await callDaemonChannelGet("/channels/status", 10_000, mockFetch);
 
     expect(capturedMethod).toBe("GET");
   });
@@ -551,18 +591,30 @@ describe("callDaemonChannelGet", () => {
   it("returns error on network failure", async () => {
     const mockFetch = mock(() => Promise.reject(new TypeError("fetch failed"))) as unknown as typeof fetch;
 
-    const result = await callDaemonChannelGet("/channels/status", mockFetch);
+    const result = await callDaemonChannelGet("/channels/status", 10_000, mockFetch);
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toContain("Unable to reach daemon");
   });
 
-  it("returns error on timeout", async () => {
+  it("returns error on AbortError timeout", async () => {
     const timeoutError = new DOMException("The operation was aborted", "AbortError");
     const mockFetch = mock(() => Promise.reject(timeoutError)) as unknown as typeof fetch;
 
-    const result = await callDaemonChannelGet("/channels/status", mockFetch);
+    const result = await callDaemonChannelGet("/channels/status", 10_000, mockFetch);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain("timed out");
+    expect(result.error).toContain("/channels status");
+  });
+
+  it("returns error on TimeoutError", async () => {
+    const timeoutError = new DOMException("signal timed out", "TimeoutError");
+    const mockFetch = mock(() => Promise.reject(timeoutError)) as unknown as typeof fetch;
+
+    const result = await callDaemonChannelGet("/channels/status", 10_000, mockFetch);
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -574,7 +626,7 @@ describe("callDaemonChannelGet", () => {
       Promise.resolve(new Response("Internal Server Error", { status: 500 })),
     ) as unknown as typeof fetch;
 
-    const result = await callDaemonChannelGet("/channels/status", mockFetch);
+    const result = await callDaemonChannelGet("/channels/status", 10_000, mockFetch);
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -584,11 +636,27 @@ describe("callDaemonChannelGet", () => {
   it("returns error field from non-ok response", async () => {
     const mockFetch = createMockFetch(500, { error: "service unavailable" });
 
-    const result = await callDaemonChannelGet("/channels/status", mockFetch);
+    const result = await callDaemonChannelGet("/channels/status", 10_000, mockFetch);
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.error).toBe("service unavailable");
+  });
+
+  it("passes custom timeout to fetch signal", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const mockFetch = mock((_url: string, init: RequestInit) => {
+      capturedSignal = init.signal as AbortSignal;
+      return Promise.resolve(new Response(JSON.stringify({ channels: [], summary: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }) as unknown as typeof fetch;
+
+    await callDaemonChannelGet("/channels/status", 5_000, mockFetch);
+
+    expect(capturedSignal).toBeDefined();
+    expect(capturedSignal!.aborted).toBe(false);
   });
 });
 

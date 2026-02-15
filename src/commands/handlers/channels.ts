@@ -73,10 +73,15 @@ interface DaemonChannelResponse {
  *
  * Returns the parsed JSON response on success, or an error message string
  * on failure (network error, non-2xx status, or daemon error field).
+ *
+ * @param timeoutMs - Request timeout in milliseconds. Defaults to 10 seconds.
+ *   Use longer timeouts for operations that involve external API calls
+ *   (e.g. channel add validates the bot token against the platform API).
  */
 export async function callDaemonChannelApi(
   endpoint: string,
   body: Record<string, unknown>,
+  timeoutMs: number = 10_000,
   fetchFn: typeof fetch = fetch,
 ): Promise<{ ok: true; data: DaemonChannelResponse } | { ok: false; error: string }> {
   const baseUrl = await getActiveDaemonUrl();
@@ -87,11 +92,19 @@ export async function callDaemonChannelApi(
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      return { ok: false, error: "Request timed out. Is the daemon running?" };
+    if (
+      error instanceof Error &&
+      (error.name === "TimeoutError" ||
+        error.name === "AbortError" ||
+        error.message.includes("timed out"))
+    ) {
+      return {
+        ok: false,
+        error: "Daemon request timed out. Channel connection may take longer than expected. Try: /channels status",
+      };
     }
     if (error instanceof TypeError && (error.message.includes("fetch") || error.message.includes("connect"))) {
       return { ok: false, error: "Unable to reach daemon. Is it running on the configured address?" };
@@ -119,9 +132,12 @@ export async function callDaemonChannelApi(
  *
  * Returns the parsed JSON response on success, or an error message string
  * on failure (network error, non-2xx status, or daemon error field).
+ *
+ * @param timeoutMs - Request timeout in milliseconds. Defaults to 10 seconds.
  */
 export async function callDaemonChannelGet<T>(
   endpoint: string,
+  timeoutMs: number = 10_000,
   fetchFn: typeof fetch = fetch,
 ): Promise<{ ok: true; data: T } | { ok: false; error: string }> {
   const baseUrl = await getActiveDaemonUrl();
@@ -130,11 +146,19 @@ export async function callDaemonChannelGet<T>(
   try {
     response = await fetchFn(`${baseUrl}${endpoint}`, {
       method: "GET",
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
-    if (error instanceof DOMException && error.name === "AbortError") {
-      return { ok: false, error: "Request timed out. Is the daemon running?" };
+    if (
+      error instanceof Error &&
+      (error.name === "TimeoutError" ||
+        error.name === "AbortError" ||
+        error.message.includes("timed out"))
+    ) {
+      return {
+        ok: false,
+        error: "Daemon request timed out. Channel connection may take longer than expected. Try: /channels status",
+      };
     }
     if (error instanceof TypeError && (error.message.includes("fetch") || error.message.includes("connect"))) {
       return { ok: false, error: "Unable to reach daemon. Is it running on the configured address?" };
@@ -348,10 +372,11 @@ const handleChannelsAdd: CommandHandler = async (args) => {
     });
   }
 
-  const result = await callDaemonChannelApi("/channels/add", {
-    platform,
-    token: token.trim(),
-  });
+  const result = await callDaemonChannelApi(
+    "/channels/add",
+    { platform, token: token.trim() },
+    60_000,
+  );
 
   if (!result.ok) {
     return err({
@@ -394,9 +419,11 @@ const handleChannelsRemove: CommandHandler = async (args) => {
     });
   }
 
-  const result = await callDaemonChannelApi("/channels/remove", {
-    channelId: platform,
-  });
+  const result = await callDaemonChannelApi(
+    "/channels/remove",
+    { channelId: platform },
+    15_000,
+  );
 
   if (!result.ok) {
     return err({
@@ -433,9 +460,11 @@ const handleChannelsEnable: CommandHandler = async (args) => {
     });
   }
 
-  const result = await callDaemonChannelApi("/channels/enable", {
-    channelId: platform,
-  });
+  const result = await callDaemonChannelApi(
+    "/channels/enable",
+    { channelId: platform },
+    15_000,
+  );
 
   if (!result.ok) {
     return err({
@@ -469,9 +498,11 @@ const handleChannelsDisable: CommandHandler = async (args) => {
     });
   }
 
-  const result = await callDaemonChannelApi("/channels/disable", {
-    channelId: platform,
-  });
+  const result = await callDaemonChannelApi(
+    "/channels/disable",
+    { channelId: platform },
+    15_000,
+  );
 
   if (!result.ok) {
     return err({
