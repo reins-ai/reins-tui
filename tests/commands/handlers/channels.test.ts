@@ -2,8 +2,13 @@ import { describe, expect, it, mock } from "bun:test";
 
 import {
   callDaemonChannelApi,
+  callDaemonChannelGet,
+  formatChannelStatusTable,
+  formatRelativeTime,
+  formatStatusIndicator,
   handleChannelsCommand,
   maskBotToken,
+  type ChannelHealthStatus,
 } from "../../../src/commands/handlers/channels";
 import type { CommandHandlerContext, CommandArgs } from "../../../src/commands/handlers/types";
 import { SLASH_COMMANDS } from "../../../src/commands/registry";
@@ -332,7 +337,7 @@ describe("handleChannelsDisable", () => {
 // ---------------------------------------------------------------------------
 
 describe("handleChannelsCommand routing", () => {
-  it("bare /channels shows help with updated usage", async () => {
+  it("bare /channels shows help with examples", async () => {
     const context = createTestContext();
     const args = makeArgs([]);
     const result = await handleChannelsCommand(args, context);
@@ -351,6 +356,30 @@ describe("handleChannelsCommand routing", () => {
     expect(result.value.responseText).toContain("discord");
   });
 
+  it("bare /channels help includes examples section", async () => {
+    const context = createTestContext();
+    const args = makeArgs([]);
+    const result = await handleChannelsCommand(args, context);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.responseText).toContain("Examples:");
+    expect(result.value.responseText).toContain("/channels add telegram 123456789:ABC...");
+    expect(result.value.responseText).toContain("/channels status");
+    expect(result.value.responseText).toContain("/channels disable telegram");
+  });
+
+  it("bare /channels help includes alias", async () => {
+    const context = createTestContext();
+    const args = makeArgs([]);
+    const result = await handleChannelsCommand(args, context);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.value.responseText).toContain("Alias:");
+    expect(result.value.responseText).toContain("/ch");
+  });
+
   it("unknown subcommand returns error", async () => {
     const context = createTestContext();
     const args = makeArgs(["foobar"]);
@@ -361,16 +390,6 @@ describe("handleChannelsCommand routing", () => {
     expect(result.error.code).toBe("INVALID_ARGUMENT");
     expect(result.error.message).toContain("Unknown subcommand");
     expect(result.error.message).toContain("foobar");
-  });
-
-  it("status subcommand returns stub", async () => {
-    const context = createTestContext();
-    const args = makeArgs(["status"]);
-    const result = await handleChannelsCommand(args, context);
-
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.value.statusMessage).toBe("Channel status");
   });
 });
 
@@ -491,5 +510,406 @@ describe("callDaemonChannelApi request format", () => {
     expect(capturedUrl!).toContain("/channels/remove");
     // URL should start with http:// and end with the endpoint
     expect(capturedUrl!).toMatch(/^https?:\/\/.+\/channels\/remove$/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// callDaemonChannelGet
+// ---------------------------------------------------------------------------
+
+describe("callDaemonChannelGet", () => {
+  it("returns parsed data on successful GET response", async () => {
+    const body = {
+      channels: [{ channelId: "telegram", platform: "telegram", enabled: true, state: "connected" }],
+      summary: { total: 1, enabled: 1, healthy: 1, unhealthy: 0 },
+    };
+    const mockFetch = createMockFetch(200, body);
+
+    const result = await callDaemonChannelGet<typeof body>("/channels/status", mockFetch);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.data.channels).toHaveLength(1);
+    expect(result.data.summary.total).toBe(1);
+  });
+
+  it("uses GET method", async () => {
+    let capturedMethod: string | undefined;
+    const mockFetch = mock((_url: string, init: RequestInit) => {
+      capturedMethod = init.method;
+      return Promise.resolve(new Response(JSON.stringify({ channels: [], summary: {} }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    }) as unknown as typeof fetch;
+
+    await callDaemonChannelGet("/channels/status", mockFetch);
+
+    expect(capturedMethod).toBe("GET");
+  });
+
+  it("returns error on network failure", async () => {
+    const mockFetch = mock(() => Promise.reject(new TypeError("fetch failed"))) as unknown as typeof fetch;
+
+    const result = await callDaemonChannelGet("/channels/status", mockFetch);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain("Unable to reach daemon");
+  });
+
+  it("returns error on timeout", async () => {
+    const timeoutError = new DOMException("The operation was aborted", "AbortError");
+    const mockFetch = mock(() => Promise.reject(timeoutError)) as unknown as typeof fetch;
+
+    const result = await callDaemonChannelGet("/channels/status", mockFetch);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain("timed out");
+  });
+
+  it("returns error on non-JSON response", async () => {
+    const mockFetch = mock(() =>
+      Promise.resolve(new Response("Internal Server Error", { status: 500 })),
+    ) as unknown as typeof fetch;
+
+    const result = await callDaemonChannelGet("/channels/status", mockFetch);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain("invalid response");
+  });
+
+  it("returns error field from non-ok response", async () => {
+    const mockFetch = createMockFetch(500, { error: "service unavailable" });
+
+    const result = await callDaemonChannelGet("/channels/status", mockFetch);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toBe("service unavailable");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatStatusIndicator
+// ---------------------------------------------------------------------------
+
+describe("formatStatusIndicator", () => {
+  it("returns green indicator for connected state", () => {
+    const result = formatStatusIndicator("connected");
+    expect(result).toContain("\x1b[32m");
+    expect(result).toContain("connected");
+    expect(result).toContain("●");
+    expect(result).toContain("\x1b[0m");
+  });
+
+  it("returns red indicator for error state", () => {
+    const result = formatStatusIndicator("error");
+    expect(result).toContain("\x1b[31m");
+    expect(result).toContain("error");
+    expect(result).toContain("●");
+  });
+
+  it("returns yellow indicator for disconnected state", () => {
+    const result = formatStatusIndicator("disconnected");
+    expect(result).toContain("\x1b[33m");
+    expect(result).toContain("disconnected");
+    expect(result).toContain("●");
+  });
+
+  it("returns yellow indicator for connecting state", () => {
+    const result = formatStatusIndicator("connecting");
+    expect(result).toContain("\x1b[33m");
+    expect(result).toContain("connecting");
+  });
+
+  it("returns yellow indicator for reconnecting state", () => {
+    const result = formatStatusIndicator("reconnecting");
+    expect(result).toContain("\x1b[33m");
+    expect(result).toContain("reconnecting");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatRelativeTime
+// ---------------------------------------------------------------------------
+
+describe("formatRelativeTime", () => {
+  const fixedNow = new Date("2026-02-15T12:00:00Z").getTime();
+
+  it("returns dim dash for undefined timestamp", () => {
+    const result = formatRelativeTime(undefined, fixedNow);
+    expect(result).toContain("—");
+    expect(result).toContain("\x1b[2m");
+  });
+
+  it("returns dim dash for invalid timestamp", () => {
+    const result = formatRelativeTime("not-a-date", fixedNow);
+    expect(result).toContain("—");
+  });
+
+  it("returns 'just now' for timestamps within 1 second", () => {
+    const result = formatRelativeTime("2026-02-15T12:00:00Z", fixedNow);
+    expect(result).toBe("just now");
+  });
+
+  it("returns seconds ago for recent timestamps", () => {
+    const result = formatRelativeTime("2026-02-15T11:59:30Z", fixedNow);
+    expect(result).toBe("30s ago");
+  });
+
+  it("returns minutes ago for timestamps within an hour", () => {
+    const result = formatRelativeTime("2026-02-15T11:45:00Z", fixedNow);
+    expect(result).toBe("15m ago");
+  });
+
+  it("returns hours ago for timestamps within a day", () => {
+    const result = formatRelativeTime("2026-02-15T09:00:00Z", fixedNow);
+    expect(result).toBe("3h ago");
+  });
+
+  it("returns days ago for older timestamps", () => {
+    const result = formatRelativeTime("2026-02-13T12:00:00Z", fixedNow);
+    expect(result).toBe("2d ago");
+  });
+
+  it("returns 'just now' for future timestamps", () => {
+    const result = formatRelativeTime("2026-02-15T13:00:00Z", fixedNow);
+    expect(result).toBe("just now");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formatChannelStatusTable
+// ---------------------------------------------------------------------------
+
+describe("formatChannelStatusTable", () => {
+  const fixedNow = new Date("2026-02-15T12:00:00Z").getTime();
+
+  it("shows empty state message when no channels configured", () => {
+    const snapshot = {
+      channels: [],
+      summary: { total: 0, enabled: 0, healthy: 0, unhealthy: 0 },
+    };
+
+    const result = formatChannelStatusTable(snapshot, fixedNow);
+
+    expect(result).toContain("No channels configured");
+    expect(result).toContain("/channels add telegram");
+    expect(result).toContain("/channels add discord");
+    expect(result).toContain("Supported platforms");
+  });
+
+  it("shows a single connected channel", () => {
+    const snapshot = {
+      channels: [
+        {
+          channelId: "telegram",
+          platform: "telegram",
+          enabled: true,
+          state: "connected" as const,
+          uptimeMs: 60_000,
+          healthy: true,
+          lastMessageAt: "2026-02-15T11:55:00Z",
+          checkedAt: "2026-02-15T12:00:00Z",
+        },
+      ],
+      summary: { total: 1, enabled: 1, healthy: 1, unhealthy: 0 },
+    };
+
+    const result = formatChannelStatusTable(snapshot, fixedNow);
+
+    expect(result).toContain("Channel Status");
+    expect(result).toContain("Platform");
+    expect(result).toContain("Status");
+    expect(result).toContain("Enabled");
+    expect(result).toContain("Last Activity");
+    expect(result).toContain("Telegram");
+    expect(result).toContain("connected");
+    expect(result).toContain("Yes");
+    expect(result).toContain("5m ago");
+    expect(result).toContain("1 channel");
+    expect(result).toContain("1 healthy");
+  });
+
+  it("shows multiple channels with different states", () => {
+    const snapshot = {
+      channels: [
+        {
+          channelId: "telegram",
+          platform: "telegram",
+          enabled: true,
+          state: "connected" as const,
+          uptimeMs: 3_600_000,
+          healthy: true,
+          lastMessageAt: "2026-02-15T11:30:00Z",
+          checkedAt: "2026-02-15T12:00:00Z",
+        },
+        {
+          channelId: "discord",
+          platform: "discord",
+          enabled: true,
+          state: "error" as const,
+          uptimeMs: 0,
+          healthy: false,
+          lastError: "Invalid token",
+          checkedAt: "2026-02-15T12:00:00Z",
+        },
+      ],
+      summary: { total: 2, enabled: 2, healthy: 1, unhealthy: 1 },
+    };
+
+    const result = formatChannelStatusTable(snapshot, fixedNow);
+
+    expect(result).toContain("Telegram");
+    expect(result).toContain("Discord");
+    expect(result).toContain("2 channels");
+    expect(result).toContain("1 healthy");
+    expect(result).toContain("1 unhealthy");
+    // Green for connected
+    expect(result).toContain("\x1b[32m");
+    // Red for error
+    expect(result).toContain("\x1b[31m");
+  });
+
+  it("shows disabled channel with No in enabled column", () => {
+    const snapshot = {
+      channels: [
+        {
+          channelId: "telegram",
+          platform: "telegram",
+          enabled: false,
+          state: "disconnected" as const,
+          uptimeMs: 0,
+          healthy: false,
+          checkedAt: "2026-02-15T12:00:00Z",
+        },
+      ],
+      summary: { total: 1, enabled: 0, healthy: 0, unhealthy: 0 },
+    };
+
+    const result = formatChannelStatusTable(snapshot, fixedNow);
+
+    expect(result).toContain("No");
+    expect(result).toContain("disconnected");
+  });
+
+  it("shows dash for channels with no last activity", () => {
+    const snapshot = {
+      channels: [
+        {
+          channelId: "discord",
+          platform: "discord",
+          enabled: true,
+          state: "connecting" as const,
+          uptimeMs: 0,
+          healthy: false,
+          checkedAt: "2026-02-15T12:00:00Z",
+        },
+      ],
+      summary: { total: 1, enabled: 1, healthy: 0, unhealthy: 1 },
+    };
+
+    const result = formatChannelStatusTable(snapshot, fixedNow);
+
+    expect(result).toContain("—");
+  });
+
+  it("includes separator line between header and rows", () => {
+    const snapshot = {
+      channels: [
+        {
+          channelId: "telegram",
+          platform: "telegram",
+          enabled: true,
+          state: "connected" as const,
+          uptimeMs: 1000,
+          healthy: true,
+          checkedAt: "2026-02-15T12:00:00Z",
+        },
+      ],
+      summary: { total: 1, enabled: 1, healthy: 1, unhealthy: 0 },
+    };
+
+    const result = formatChannelStatusTable(snapshot, fixedNow);
+
+    expect(result).toContain("─");
+  });
+
+  it("uses singular 'channel' for single channel summary", () => {
+    const snapshot = {
+      channels: [
+        {
+          channelId: "telegram",
+          platform: "telegram",
+          enabled: true,
+          state: "connected" as const,
+          uptimeMs: 1000,
+          healthy: true,
+          checkedAt: "2026-02-15T12:00:00Z",
+        },
+      ],
+      summary: { total: 1, enabled: 1, healthy: 1, unhealthy: 0 },
+    };
+
+    const result = formatChannelStatusTable(snapshot, fixedNow);
+
+    expect(result).toContain("1 channel");
+    expect(result).not.toContain("1 channels");
+  });
+
+  it("uses plural 'channels' for multiple channels summary", () => {
+    const snapshot = {
+      channels: [
+        {
+          channelId: "telegram",
+          platform: "telegram",
+          enabled: true,
+          state: "connected" as const,
+          uptimeMs: 1000,
+          healthy: true,
+          checkedAt: "2026-02-15T12:00:00Z",
+        },
+        {
+          channelId: "discord",
+          platform: "discord",
+          enabled: true,
+          state: "connected" as const,
+          uptimeMs: 1000,
+          healthy: true,
+          checkedAt: "2026-02-15T12:00:00Z",
+        },
+      ],
+      summary: { total: 2, enabled: 2, healthy: 2, unhealthy: 0 },
+    };
+
+    const result = formatChannelStatusTable(snapshot, fixedNow);
+
+    expect(result).toContain("2 channels");
+  });
+
+  it("highlights unhealthy count in red when present", () => {
+    const snapshot = {
+      channels: [
+        {
+          channelId: "telegram",
+          platform: "telegram",
+          enabled: true,
+          state: "error" as const,
+          uptimeMs: 0,
+          healthy: false,
+          lastError: "Connection refused",
+          checkedAt: "2026-02-15T12:00:00Z",
+        },
+      ],
+      summary: { total: 1, enabled: 1, healthy: 0, unhealthy: 1 },
+    };
+
+    const result = formatChannelStatusTable(snapshot, fixedNow);
+
+    // The unhealthy count should be wrapped in red
+    expect(result).toContain("\x1b[31m1 unhealthy\x1b[0m");
   });
 });
