@@ -10,6 +10,7 @@ import { InputArea } from "../components/input-area";
 import type { PanelBorderColors } from "../components/layout";
 
 export interface ChatScreenProps {
+  version: string;
   panelBorders: PanelBorderColors;
   focusedPanel: string;
   showActivityPanel: boolean;
@@ -19,6 +20,7 @@ export interface ChatScreenProps {
 }
 
 export function ChatScreen({
+  version,
   panelBorders,
   focusedPanel,
   showActivityPanel,
@@ -39,6 +41,7 @@ export function ChatScreen({
           <ConversationPanel
             isFocused={focusedPanel === "conversation"}
             borderColor={panelBorders.conversation}
+            version={version}
           />
         </ZoneShell>
 

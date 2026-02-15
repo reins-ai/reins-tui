@@ -221,6 +221,44 @@ describe("handleDaemonCommand", () => {
     expect(result.value.responseText).toContain("staging");
   });
 
+  it("/daemon remove default profile promotes a fallback profile", async () => {
+    const server = Bun.serve({
+      port: 0,
+      fetch() {
+        return new Response(JSON.stringify({ healthy: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      },
+    });
+
+    try {
+      const remoteUrl = `http://127.0.0.1:${server.port}`;
+      const context = createTestContext();
+
+      const addLocalResult = await runCommand("/daemon add local http://localhost:7433", context);
+      expect(addLocalResult.ok).toBe(true);
+
+      const addRemoteResult = await runCommand(`/daemon add remote ${remoteUrl}`, context);
+      expect(addRemoteResult.ok).toBe(true);
+
+      const switchRemoteResult = await runCommand("/daemon switch remote", context);
+      expect(switchRemoteResult.ok).toBe(true);
+
+      const removeDefaultResult = await runCommand("/daemon remove remote", context);
+      expect(removeDefaultResult.ok).toBe(true);
+
+      const statusResult = await runCommand("/daemon status", context);
+      expect(statusResult.ok).toBe(true);
+      if (!statusResult.ok) return;
+
+      expect(statusResult.value.responseText).toContain("Address: http://localhost:7433");
+      expect(statusResult.value.responseText).toContain("Profiles: local*");
+    } finally {
+      server.stop(true);
+    }
+  });
+
   it("/daemon status returns connection info", async () => {
     const context = createTestContext();
     const addResult = await runCommand("/daemon add local http://localhost:7433", context);

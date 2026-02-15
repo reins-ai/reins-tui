@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ServiceInstaller, type ServiceDefinition } from "@reins/core";
-import { Box, Text, useKeyboard } from "../../../ui";
+import { Box, Input, Text, useKeyboard } from "../../../ui";
+import { addDaemonProfile, isDaemonReachable } from "../../../daemon/actions";
 import type { StepViewProps } from "./index";
 
 // ---------------------------------------------------------------------------
@@ -13,7 +14,8 @@ type DaemonStatus =
   | "connected"
   | "starting"
   | "not-available"
-  | "error";
+  | "error"
+  | "configure-remote";
 
 type ServiceState = "running" | "stopped" | "not-installed" | "unknown";
 
@@ -100,6 +102,38 @@ async function detectDaemon(installer: ServiceInstaller): Promise<DetectionResul
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function extractInputValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value !== null) {
+    if ("plainText" in value && typeof value.plainText === "string") return value.plainText;
+    if ("value" in value && typeof value.value === "string") return value.value;
+  }
+  return "";
+}
+
+function normalizeUrl(raw: string): string {
+  let url = raw.trim();
+  // Prepend http:// if no scheme present
+  if (url.length > 0 && !url.startsWith("http://") && !url.startsWith("https://")) {
+    url = `http://${url}`;
+  }
+  // Remove trailing slash
+  return url.replace(/\/+$/, "");
+}
+
+function isValidUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "http:" || parsed.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -108,6 +142,14 @@ export function DaemonInstallStepView({ tokens, engineState: _engineState, onSte
   const [detail, setDetail] = useState<string | null>(null);
   const [serviceInfo, setServiceInfo] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
+
+  // Remote endpoint state
+  const [remoteUrl, setRemoteUrl] = useState("");
+  const [remoteError, setRemoteError] = useState<string | null>(null);
+  const [remoteChecking, setRemoteChecking] = useState(false);
+
+  // Track the status before entering configure-remote so we can go back
+  const previousStatusRef = useRef<DaemonStatus>("not-available");
 
   useEffect(() => {
     let cancelled = false;
@@ -213,8 +255,55 @@ export function DaemonInstallStepView({ tokens, engineState: _engineState, onSte
     };
   }, [retryCount, onStepData]);
 
+  // --- Remote endpoint submission ---
+  const handleRemoteSubmit = async () => {
+    const normalized = normalizeUrl(remoteUrl);
+    if (!normalized || !isValidUrl(normalized)) {
+      setRemoteError("Invalid URL. Use format: http://host:port or https://host:port");
+      return;
+    }
+
+    setRemoteChecking(true);
+    setRemoteError(null);
+
+    const reachable = await isDaemonReachable(normalized);
+    setRemoteChecking(false);
+
+    if (!reachable) {
+      setRemoteError(`Could not reach daemon at ${normalized}`);
+      return;
+    }
+
+    // Save as a daemon profile and mark as default
+    const addResult = await addDaemonProfile("remote", normalized);
+    if (!addResult.ok) {
+      // Profile may already exist — that's fine, proceed anyway
+    }
+
+    onStepData({ daemonStatus: "remote", endpointUrl: normalized, installed: false });
+    onRequestNext();
+  };
+
   useKeyboard((event) => {
     const keyName = event.name ?? "";
+
+    // --- Configure remote step ---
+    if (status === "configure-remote") {
+      if (keyName === "escape" || keyName === "esc") {
+        setStatus(previousStatusRef.current);
+        setRemoteUrl("");
+        setRemoteError(null);
+        return;
+      }
+      if (keyName === "return" || keyName === "enter") {
+        if (!remoteChecking) {
+          void handleRemoteSubmit();
+        }
+        return;
+      }
+      // Let Input component handle other keys
+      return;
+    }
 
     if (keyName === "return" || keyName === "enter") {
       if (status === "connected") {
@@ -236,6 +325,16 @@ export function DaemonInstallStepView({ tokens, engineState: _engineState, onSte
         return;
       }
     }
+
+    if (keyName === "c") {
+      if (status === "not-available" || status === "error") {
+        previousStatusRef.current = status;
+        setStatus("configure-remote");
+        setRemoteUrl("");
+        setRemoteError(null);
+        return;
+      }
+    }
   });
 
   // Hint text
@@ -244,8 +343,10 @@ export function DaemonInstallStepView({ tokens, engineState: _engineState, onSte
     hintText = "Please wait...  Esc back";
   } else if (status === "connected") {
     hintText = "Enter continue  ·  Esc back";
+  } else if (status === "configure-remote") {
+    hintText = remoteChecking ? "Checking..."  : "Enter connect  ·  Esc back";
   } else {
-    hintText = "Enter continue  ·  Tab retry  ·  Esc back";
+    hintText = "Enter skip  ·  c remote endpoint  ·  Tab retry  ·  Esc back";
   }
 
   return (
@@ -320,9 +421,58 @@ export function DaemonInstallStepView({ tokens, engineState: _engineState, onSte
             ) : null}
             <Box style={{ marginTop: 1, paddingLeft: 2 }}>
               <Text
-                content="You can continue setup and start the daemon later."
+                content="You can continue setup, start the daemon later, or configure a remote endpoint."
                 style={{ color: tokens["text.secondary"] }}
               />
+            </Box>
+          </Box>
+        ) : null}
+
+        {/* Configure remote endpoint form */}
+        {status === "configure-remote" ? (
+          <Box style={{ flexDirection: "column" }}>
+            <Box>
+              <Text
+                content="Configure Remote Daemon"
+                style={{ color: tokens["accent.primary"] }}
+              />
+            </Box>
+            <Box style={{ marginTop: 1, paddingLeft: 2, flexDirection: "column" }}>
+              <Box>
+                <Text
+                  content="Enter the URL of a running Reins daemon:"
+                  style={{ color: tokens["text.secondary"] }}
+                />
+              </Box>
+              <Box style={{ marginTop: 1, flexDirection: "row" }}>
+                <Text content="URL: " style={{ color: tokens["text.muted"] }} />
+                <Text
+                  content={remoteUrl || " "}
+                  style={{ color: tokens["text.primary"] }}
+                />
+              </Box>
+              <Input
+                focused
+                placeholder="http://192.168.1.100:7433"
+                value={remoteUrl}
+                onInput={(value) => setRemoteUrl(extractInputValue(value))}
+              />
+              {remoteError !== null ? (
+                <Box style={{ marginTop: 1 }}>
+                  <Text
+                    content={`x ${remoteError}`}
+                    style={{ color: tokens["status.error"] }}
+                  />
+                </Box>
+              ) : null}
+              {remoteChecking ? (
+                <Box style={{ marginTop: 1 }}>
+                  <Text
+                    content="* Checking endpoint..."
+                    style={{ color: tokens["text.secondary"] }}
+                  />
+                </Box>
+              ) : null}
             </Box>
           </Box>
         ) : null}

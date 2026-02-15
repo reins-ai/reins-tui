@@ -1,12 +1,15 @@
-import {
-  DaemonProfileStore,
-  DaemonTokenManager,
-  TransportProbe,
-  createKeychainProvider,
-} from "@reins/core";
-import { join } from "node:path";
+import { TransportProbe } from "@reins/core";
 
 import { err, ok } from "../../daemon/contracts";
+import {
+  addDaemonProfile,
+  switchDaemonProfile,
+  removeDaemonProfile,
+  showDaemonToken,
+  rotateDaemonToken,
+  getProfileStore,
+  maskToken,
+} from "../../daemon/actions";
 import type { CommandHandler } from "./types";
 
 const DAEMON_SUBCOMMANDS = ["add", "switch", "remove", "status", "token"] as const;
@@ -14,69 +17,6 @@ type DaemonSubcommand = (typeof DAEMON_SUBCOMMANDS)[number];
 
 function isDaemonSubcommand(value: string): value is DaemonSubcommand {
   return DAEMON_SUBCOMMANDS.includes(value as DaemonSubcommand);
-}
-
-function getProfileStore(): DaemonProfileStore {
-  const dataRoot = process.env.REINS_DATA_ROOT;
-  return new DaemonProfileStore(
-    typeof dataRoot === "string" && dataRoot.length > 0 ? { dataRoot } : undefined,
-  );
-}
-
-function getTokenManager(): DaemonTokenManager {
-  const dataRoot = process.env.REINS_DATA_ROOT;
-  const keychain = createKeychainProvider(
-    typeof dataRoot === "string" && dataRoot.length > 0
-      ? { fallbackOptions: { filePath: join(dataRoot, "machine-secret.enc") } }
-      : undefined,
-  );
-  return new DaemonTokenManager({ keychain });
-}
-
-async function detectTransportType(httpUrl: string): Promise<"localhost" | "tailscale" | "cloudflare" | "direct"> {
-  const probe = new TransportProbe();
-  const detection = await probe.detect(httpUrl);
-  if (!detection.ok) {
-    return "direct";
-  }
-
-  return detection.value.type;
-}
-
-function toHealthUrl(httpUrl: string): string {
-  const parsed = new URL(httpUrl);
-  const base = parsed.toString().endsWith("/") ? parsed.toString() : `${parsed.toString()}/`;
-  return new URL("health", base).toString();
-}
-
-async function isDaemonReachable(httpUrl: string): Promise<boolean> {
-  try {
-    const response = await fetch(toHealthUrl(httpUrl), {
-      method: "GET",
-      signal: AbortSignal.timeout(1500),
-    });
-    return response.status < 500;
-  } catch {
-    return false;
-  }
-}
-
-function toWsUrl(httpUrl: string): string {
-  try {
-    const url = new URL(httpUrl);
-    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    return url.toString().replace(/\/$/, "");
-  } catch {
-    return httpUrl.replace(/^http/i, "ws");
-  }
-}
-
-function maskToken(token: string): string {
-  if (token.length <= 10) {
-    return "rm_****";
-  }
-
-  return `${token.slice(0, 6)}...${token.slice(-4)}`;
 }
 
 const handleDaemonAdd: CommandHandler = async (args) => {
@@ -90,25 +30,14 @@ const handleDaemonAdd: CommandHandler = async (args) => {
     });
   }
 
-  const profileStore = getProfileStore();
-  const transportType = await detectTransportType(url);
-  const addResult = await profileStore.add({
-    name,
-    httpUrl: url,
-    wsUrl: toWsUrl(url),
-    transportType,
-    isDefault: false,
-  });
-  if (!addResult.ok) {
-    return err({
-      code: "INVALID_ARGUMENT",
-      message: addResult.error.message,
-    });
+  const result = await addDaemonProfile(name, url);
+  if (!result.ok) {
+    return err({ code: "INVALID_ARGUMENT", message: result.error });
   }
 
   return ok({
-    statusMessage: `Daemon profile '${addResult.value.name}' created`,
-    responseText: `Added daemon profile '${addResult.value.name}' at ${addResult.value.httpUrl}. Use /daemon switch ${addResult.value.name} to connect.`,
+    statusMessage: `Daemon profile '${name}' created`,
+    responseText: `Added daemon profile '${name}' at ${url}. Use /daemon switch ${name} to connect.`,
   });
 };
 
@@ -122,44 +51,16 @@ const handleDaemonSwitch: CommandHandler = async (args) => {
     });
   }
 
-  const profileStore = getProfileStore();
-  const profileResult = await profileStore.get(name);
-  if (!profileResult.ok) {
-    return err({
-      code: "UNKNOWN_HANDLER",
-      message: profileResult.error.message,
-    });
-  }
-
-  if (profileResult.value === null) {
-    return err({
-      code: "NOT_FOUND",
-      message: `Profile '${name}' not found.`,
-    });
-  }
-
-  const reachable = await isDaemonReachable(profileResult.value.httpUrl);
-  if (!reachable) {
-    return err({
-      code: "INVALID_ARGUMENT",
-      message: `Unable to reach daemon '${name}' at ${profileResult.value.httpUrl}. Default profile unchanged.`,
-    });
-  }
-
-  const setDefaultResult = await profileStore.setDefault(name);
-  if (!setDefaultResult.ok) {
-    return err({
-      code: "NOT_FOUND",
-      message: setDefaultResult.error.message,
-    });
-  }
-
-  const touchResult = await profileStore.touchLastConnected(name);
-  if (!touchResult.ok) {
-    return err({
-      code: "UNKNOWN_HANDLER",
-      message: touchResult.error.message,
-    });
+  const result = await switchDaemonProfile(name);
+  if (!result.ok) {
+    // Detect specific error types from the message
+    if (result.error.includes("not found")) {
+      return err({ code: "NOT_FOUND", message: result.error });
+    }
+    if (result.error.includes("Unable to reach")) {
+      return err({ code: "INVALID_ARGUMENT", message: result.error });
+    }
+    return err({ code: "UNKNOWN_HANDLER", message: result.error });
   }
 
   return ok({
@@ -178,35 +79,15 @@ const handleDaemonRemove: CommandHandler = async (args) => {
     });
   }
 
-  const profileStore = getProfileStore();
-  const existingResult = await profileStore.get(name);
-  if (!existingResult.ok) {
-    return err({
-      code: "UNKNOWN_HANDLER",
-      message: existingResult.error.message,
-    });
-  }
-
-  if (existingResult.value === null) {
-    return err({
-      code: "NOT_FOUND",
-      message: `Profile '${name}' not found.`,
-    });
-  }
-
-  if (existingResult.value.isDefault) {
-    return err({
-      code: "INVALID_ARGUMENT",
-      message: "Cannot remove the default profile. Switch to another profile first.",
-    });
-  }
-
-  const removeResult = await profileStore.remove(name);
-  if (!removeResult.ok) {
-    return err({
-      code: "UNKNOWN_HANDLER",
-      message: removeResult.error.message,
-    });
+  const result = await removeDaemonProfile(name);
+  if (!result.ok) {
+    if (result.error.includes("not found")) {
+      return err({ code: "NOT_FOUND", message: result.error });
+    }
+    if (result.error.includes("Cannot remove")) {
+      return err({ code: "INVALID_ARGUMENT", message: result.error });
+    }
+    return err({ code: "UNKNOWN_HANDLER", message: result.error });
   }
 
   return ok({
@@ -253,70 +134,32 @@ const handleDaemonStatus: CommandHandler = async (_args, context) => {
 };
 
 const handleDaemonTokenShow: CommandHandler = async () => {
-  const profileStore = getProfileStore();
-  const defaultProfileResult = await profileStore.getDefault();
-  if (!defaultProfileResult.ok) {
-    return err({
-      code: "UNKNOWN_HANDLER",
-      message: defaultProfileResult.error.message,
-    });
+  const result = await showDaemonToken();
+  if (!result.ok) {
+    if (result.error.includes("No default")) {
+      return err({ code: "NOT_FOUND", message: result.error });
+    }
+    return err({ code: "UNKNOWN_HANDLER", message: result.error });
   }
-
-  if (defaultProfileResult.value === null) {
-    return err({
-      code: "NOT_FOUND",
-      message: "No default daemon profile configured.",
-    });
-  }
-
-  const tokenManager = getTokenManager();
-  const tokenResult = await tokenManager.getToken(defaultProfileResult.value.name);
-  if (!tokenResult.ok) {
-    return err({
-      code: "UNKNOWN_HANDLER",
-      message: tokenResult.error.message,
-    });
-  }
-
-  const tokenText = tokenResult.value === null
-    ? "(not configured)"
-    : maskToken(tokenResult.value);
 
   return ok({
     statusMessage: "Daemon token",
-    responseText: `Profile: ${defaultProfileResult.value.name}\nToken: ${tokenText}`,
+    responseText: `${result.message}\nToken: ${result.token ?? "(not configured)"}`,
   });
 };
 
 const handleDaemonTokenRotate: CommandHandler = async () => {
-  const profileStore = getProfileStore();
-  const defaultProfileResult = await profileStore.getDefault();
-  if (!defaultProfileResult.ok) {
-    return err({
-      code: "UNKNOWN_HANDLER",
-      message: defaultProfileResult.error.message,
-    });
-  }
-
-  if (defaultProfileResult.value === null) {
-    return err({
-      code: "NOT_FOUND",
-      message: "No default daemon profile configured.",
-    });
-  }
-
-  const tokenManager = getTokenManager();
-  const rotateResult = await tokenManager.rotateToken(defaultProfileResult.value.name);
-  if (!rotateResult.ok) {
-    return err({
-      code: "UNKNOWN_HANDLER",
-      message: rotateResult.error.message,
-    });
+  const result = await rotateDaemonToken();
+  if (!result.ok) {
+    if (result.error.includes("No default")) {
+      return err({ code: "NOT_FOUND", message: result.error });
+    }
+    return err({ code: "UNKNOWN_HANDLER", message: result.error });
   }
 
   return ok({
     statusMessage: "Token rotated",
-    responseText: `Daemon auth token rotated for '${defaultProfileResult.value.name}'. New token: ${maskToken(rotateResult.value)}`,
+    responseText: `Daemon auth token rotated for '${result.message.replace("Token rotated for '", "").replace("'", "")}'. New token: ${result.token ?? ""}`,
   });
 };
 
@@ -368,3 +211,6 @@ export const handleDaemonCommand: CommandHandler = (args, context) => {
 
   return subcommandHandlers[subcommand](args, context);
 };
+
+// Re-export maskToken for any consumers that were importing from here
+export { maskToken };

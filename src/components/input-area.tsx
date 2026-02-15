@@ -4,6 +4,7 @@ import { dispatchCommand, type CommandResult } from "../commands/handlers";
 import { parseSlashCommand } from "../commands/parser";
 import { SLASH_COMMANDS } from "../commands/registry";
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "../daemon/client";
+import { getActiveDaemonUrl } from "../daemon/actions";
 import { useDaemon } from "../daemon/daemon-context";
 import { createEnvironmentClient } from "../daemon/environment-client";
 import { createMemoryClient } from "../daemon/memory-client";
@@ -203,15 +204,24 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
   const [input, setInput] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [compactMode, setCompactMode] = useState(false);
+  const [daemonUrl, setDaemonUrl] = useState(DEFAULT_DAEMON_HTTP_BASE_URL);
+
+  // Resolve active daemon URL from profile store
+  useEffect(() => {
+    void (async () => {
+      const url = await getActiveDaemonUrl();
+      setDaemonUrl(url);
+    })();
+  }, [isConnected]);
 
   const memoryClient = useMemo(
-    () => createMemoryClient(isConnected, DEFAULT_DAEMON_HTTP_BASE_URL),
-    [isConnected],
+    () => createMemoryClient(isConnected, daemonUrl),
+    [isConnected, daemonUrl],
   );
 
   const environmentClient = useMemo(
-    () => createEnvironmentClient(isConnected, DEFAULT_DAEMON_HTTP_BASE_URL),
-    [isConnected],
+    () => createEnvironmentClient(isConnected, daemonUrl),
+    [isConnected, daemonUrl],
   );
 
   useEffect(() => {
