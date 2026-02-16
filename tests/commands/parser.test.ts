@@ -28,6 +28,7 @@ describe("slash command registry", () => {
       "channels",
       "setup",
       "thinking",
+      "integrations",
     ]);
   });
 
@@ -54,6 +55,7 @@ describe("slash command registry", () => {
       channels: "system",
       setup: "system",
       thinking: "appearance",
+      integrations: "system",
     });
   });
 
@@ -195,6 +197,7 @@ describe("getCommandAutocomplete", () => {
       "env",
       "export",
       "help",
+      "integrations",
       "memory",
       "model",
       "new",

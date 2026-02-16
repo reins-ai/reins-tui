@@ -32,6 +32,18 @@ import {
   truncateContextValue,
   type ConnectionHealth,
 } from "../../src/components/sidebar";
+import {
+  getStatusGlyph,
+  getStatusColorToken,
+  getStatusLabel,
+  findIntegration,
+  filterIntegrations,
+  getAvailableActions,
+  getActionLabel,
+  type IntegrationStatus,
+  type IntegrationSummary,
+  type IntegrationActionName,
+} from "../../src/components/integration-panel";
 
 // ---------------------------------------------------------------------------
 // Mock tokens for testing
@@ -441,6 +453,410 @@ describe("Sidebar context panel", () => {
         expect(getContextConnectionLabel(health).length).toBeGreaterThan(0);
         expect(getContextConnectionColor(health)).toBeDefined();
       }
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// IntegrationPanel — status indicators and helpers
+// ---------------------------------------------------------------------------
+
+describe("IntegrationPanel", () => {
+  const ALL_STATUSES: IntegrationStatus[] = [
+    "connected",
+    "error",
+    "auth_expired",
+    "suspended",
+    "disconnected",
+  ];
+
+  describe("getStatusGlyph", () => {
+    test("returns filled circle for connected", () => {
+      expect(getStatusGlyph("connected")).toBe("●");
+    });
+
+    test("returns filled circle for error", () => {
+      expect(getStatusGlyph("error")).toBe("●");
+    });
+
+    test("returns triangle for auth_expired", () => {
+      expect(getStatusGlyph("auth_expired")).toBe("▲");
+    });
+
+    test("returns empty circle for suspended", () => {
+      expect(getStatusGlyph("suspended")).toBe("○");
+    });
+
+    test("returns empty circle for disconnected", () => {
+      expect(getStatusGlyph("disconnected")).toBe("○");
+    });
+
+    test("all statuses return a non-empty glyph", () => {
+      for (const status of ALL_STATUSES) {
+        expect(getStatusGlyph(status).length).toBeGreaterThan(0);
+      }
+    });
+  });
+
+  describe("getStatusColorToken", () => {
+    test("returns success token for connected", () => {
+      expect(getStatusColorToken("connected")).toBe("status.success");
+    });
+
+    test("returns error token for error", () => {
+      expect(getStatusColorToken("error")).toBe("status.error");
+    });
+
+    test("returns warning token for auth_expired", () => {
+      expect(getStatusColorToken("auth_expired")).toBe("status.warning");
+    });
+
+    test("returns muted token for suspended", () => {
+      expect(getStatusColorToken("suspended")).toBe("text.muted");
+    });
+
+    test("returns muted token for disconnected", () => {
+      expect(getStatusColorToken("disconnected")).toBe("text.muted");
+    });
+
+    test("all statuses return a non-empty token name", () => {
+      for (const status of ALL_STATUSES) {
+        expect(getStatusColorToken(status).length).toBeGreaterThan(0);
+      }
+    });
+  });
+
+  describe("getStatusLabel", () => {
+    test("returns Connected for connected", () => {
+      expect(getStatusLabel("connected")).toBe("Connected");
+    });
+
+    test("returns Error for error", () => {
+      expect(getStatusLabel("error")).toBe("Error");
+    });
+
+    test("returns Auth Expired for auth_expired", () => {
+      expect(getStatusLabel("auth_expired")).toBe("Auth Expired");
+    });
+
+    test("returns Suspended for suspended", () => {
+      expect(getStatusLabel("suspended")).toBe("Suspended");
+    });
+
+    test("returns Not Connected for disconnected", () => {
+      expect(getStatusLabel("disconnected")).toBe("Not Connected");
+    });
+
+    test("all statuses return a non-empty label", () => {
+      for (const status of ALL_STATUSES) {
+        expect(getStatusLabel(status).length).toBeGreaterThan(0);
+      }
+    });
+  });
+
+  describe("findIntegration", () => {
+    const connected: IntegrationSummary[] = [
+      {
+        id: "obsidian",
+        name: "Obsidian",
+        status: "connected",
+        version: "1.0.0",
+        description: "Notes",
+        category: "productivity",
+        operations: [{ name: "search", description: "Search notes" }],
+      },
+      {
+        id: "google-calendar",
+        name: "Google Calendar",
+        status: "auth_expired",
+        version: "1.0.0",
+        description: "Calendar",
+        category: "communication",
+        operations: [],
+      },
+    ];
+
+    const available: IntegrationSummary[] = [
+      {
+        id: "slack",
+        name: "Slack",
+        status: "disconnected",
+        version: "1.0.0",
+        description: "Chat",
+        category: "communication",
+        operations: [],
+      },
+    ];
+
+    test("finds integration in connected list", () => {
+      const result = findIntegration(connected, available, "obsidian");
+      expect(result).not.toBeNull();
+      expect(result!.name).toBe("Obsidian");
+    });
+
+    test("finds integration in available list", () => {
+      const result = findIntegration(connected, available, "slack");
+      expect(result).not.toBeNull();
+      expect(result!.name).toBe("Slack");
+    });
+
+    test("returns null for unknown id", () => {
+      const result = findIntegration(connected, available, "unknown");
+      expect(result).toBeNull();
+    });
+
+    test("returns null for null id", () => {
+      const result = findIntegration(connected, available, null);
+      expect(result).toBeNull();
+    });
+
+    test("prefers connected over available when id exists in both", () => {
+      const duplicateAvailable: IntegrationSummary[] = [
+        {
+          id: "obsidian",
+          name: "Obsidian (Available)",
+          status: "disconnected",
+          version: "2.0.0",
+          description: "Duplicate",
+          category: "productivity",
+          operations: [],
+        },
+      ];
+      const result = findIntegration(connected, duplicateAvailable, "obsidian");
+      expect(result).not.toBeNull();
+      expect(result!.name).toBe("Obsidian");
+      expect(result!.version).toBe("1.0.0");
+    });
+
+    test("returns null for empty lists", () => {
+      const result = findIntegration([], [], "obsidian");
+      expect(result).toBeNull();
+    });
+  });
+
+  describe("status indicator color mapping", () => {
+    test("connected maps to green (success)", () => {
+      const token = getStatusColorToken("connected");
+      expect(MOCK_TOKENS[token]).toBe(MOCK_TOKENS["status.success"]);
+    });
+
+    test("error maps to red (error)", () => {
+      const token = getStatusColorToken("error");
+      expect(MOCK_TOKENS[token]).toBe(MOCK_TOKENS["status.error"]);
+    });
+
+    test("auth_expired maps to yellow (warning)", () => {
+      const token = getStatusColorToken("auth_expired");
+      expect(MOCK_TOKENS[token]).toBe(MOCK_TOKENS["status.warning"]);
+    });
+
+    test("suspended maps to gray (muted)", () => {
+      const token = getStatusColorToken("suspended");
+      expect(MOCK_TOKENS[token]).toBe(MOCK_TOKENS["text.muted"]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // filterIntegrations — search filtering
+  // -------------------------------------------------------------------------
+
+  describe("filterIntegrations", () => {
+    const integrations: IntegrationSummary[] = [
+      {
+        id: "obsidian",
+        name: "Obsidian",
+        status: "connected",
+        version: "1.0.0",
+        description: "Local Markdown vault for notes and knowledge management.",
+        category: "productivity",
+        operations: [{ name: "search-notes", description: "Search notes" }],
+      },
+      {
+        id: "google-calendar",
+        name: "Google Calendar",
+        status: "auth_expired",
+        version: "1.0.0",
+        description: "Calendar scheduling with OAuth2 authentication.",
+        category: "communication",
+        operations: [],
+      },
+      {
+        id: "linear",
+        name: "Linear",
+        status: "error",
+        version: "1.0.0",
+        description: "Issue tracking and task management.",
+        category: "media",
+        operations: [],
+      },
+      {
+        id: "slack",
+        name: "Slack",
+        status: "disconnected",
+        version: "1.0.0",
+        description: "Team messaging and collaboration.",
+        category: "communication",
+        operations: [],
+      },
+    ];
+
+    test("returns all integrations when query is empty", () => {
+      expect(filterIntegrations(integrations, "")).toEqual(integrations);
+    });
+
+    test("returns all integrations when query is whitespace", () => {
+      expect(filterIntegrations(integrations, "   ")).toEqual(integrations);
+    });
+
+    test("filters by name (case-insensitive)", () => {
+      const result = filterIntegrations(integrations, "calendar");
+      expect(result.length).toBe(1);
+      expect(result[0].id).toBe("google-calendar");
+    });
+
+    test("filters by name with mixed case", () => {
+      const result = filterIntegrations(integrations, "OBSIDIAN");
+      expect(result.length).toBe(1);
+      expect(result[0].id).toBe("obsidian");
+    });
+
+    test("filters by id", () => {
+      const result = filterIntegrations(integrations, "linear");
+      expect(result.length).toBe(1);
+      expect(result[0].id).toBe("linear");
+    });
+
+    test("filters by description content", () => {
+      const result = filterIntegrations(integrations, "markdown");
+      expect(result.length).toBe(1);
+      expect(result[0].id).toBe("obsidian");
+    });
+
+    test("filters by partial match", () => {
+      const result = filterIntegrations(integrations, "calendar");
+      expect(result.length).toBe(1);
+      expect(result[0].id).toBe("google-calendar");
+    });
+
+    test("returns multiple matches", () => {
+      // Google Calendar and Slack both have communication-oriented metadata.
+      // "a" matches all four names.
+      const result = filterIntegrations(integrations, "a");
+      expect(result.length).toBeGreaterThanOrEqual(2);
+    });
+
+    test("returns empty array when no matches", () => {
+      const result = filterIntegrations(integrations, "nonexistent");
+      expect(result.length).toBe(0);
+    });
+
+    test("handles empty integration list", () => {
+      const result = filterIntegrations([], "test");
+      expect(result.length).toBe(0);
+    });
+
+    test("matches across name and description", () => {
+      // "issue" appears in Linear's description.
+      const result = filterIntegrations(integrations, "issue");
+      expect(result.length).toBe(1);
+      expect(result[0].id).toBe("linear");
+    });
+
+    test("trims query whitespace before matching", () => {
+      const result = filterIntegrations(integrations, "  calendar  ");
+      expect(result.length).toBe(1);
+      expect(result[0].id).toBe("google-calendar");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getAvailableActions — action mapping per status
+  // -------------------------------------------------------------------------
+
+  describe("getAvailableActions", () => {
+    test("connected status offers disable and disconnect", () => {
+      const actions = getAvailableActions("connected");
+      expect(actions).toContain("disable");
+      expect(actions).toContain("disconnect");
+    });
+
+    test("disconnected status offers enable and connect", () => {
+      const actions = getAvailableActions("disconnected");
+      expect(actions).toContain("enable");
+      expect(actions).toContain("connect");
+    });
+
+    test("auth_expired status offers reconnect and disconnect", () => {
+      const actions = getAvailableActions("auth_expired");
+      expect(actions).toContain("reconnect");
+      expect(actions).toContain("disconnect");
+    });
+
+    test("suspended status offers resume and disconnect", () => {
+      const actions = getAvailableActions("suspended");
+      expect(actions).toContain("resume");
+      expect(actions).toContain("disconnect");
+    });
+
+    test("error status offers retry and disconnect", () => {
+      const actions = getAvailableActions("error");
+      expect(actions).toContain("retry");
+      expect(actions).toContain("disconnect");
+    });
+
+    test("all statuses return at least one action", () => {
+      for (const status of ALL_STATUSES) {
+        expect(getAvailableActions(status).length).toBeGreaterThan(0);
+      }
+    });
+
+    test("disconnect is available for every non-disconnected status", () => {
+      const nonDisconnected: IntegrationStatus[] = [
+        "connected",
+        "error",
+        "auth_expired",
+        "suspended",
+      ];
+      for (const status of nonDisconnected) {
+        expect(getAvailableActions(status)).toContain("disconnect");
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getActionLabel — human-readable action labels
+  // -------------------------------------------------------------------------
+
+  describe("getActionLabel", () => {
+    const allActions: IntegrationActionName[] = [
+      "enable",
+      "disable",
+      "connect",
+      "disconnect",
+      "reconnect",
+      "resume",
+      "retry",
+    ];
+
+    test("all actions return a non-empty label", () => {
+      for (const action of allActions) {
+        expect(getActionLabel(action).length).toBeGreaterThan(0);
+      }
+    });
+
+    test("labels are capitalized", () => {
+      for (const action of allActions) {
+        const label = getActionLabel(action);
+        expect(label[0]).toBe(label[0].toUpperCase());
+      }
+    });
+
+    test("enable returns Enable", () => {
+      expect(getActionLabel("enable")).toBe("Enable");
+    });
+
+    test("disconnect returns Disconnect", () => {
+      expect(getActionLabel("disconnect")).toBe("Disconnect");
     });
   });
 });

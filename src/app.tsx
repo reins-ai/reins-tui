@@ -11,6 +11,7 @@ import { OnboardingWizard, type OnboardingWizardResult } from "./components/onbo
 import { ChannelTokenPrompt } from "./components/channel-token-prompt";
 import { callDaemonChannelApi, maskBotToken } from "./commands/handlers/channels";
 import { DaemonPanel } from "./components/daemon-panel";
+import { IntegrationPanel } from "./components/integration-panel";
 import { DaemonMemoryClient } from "./daemon/memory-client";
 import { HelpScreen } from "./screens";
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "./daemon/client";
@@ -248,6 +249,10 @@ function isToggleModelSelectorEvent(event: KeyEvent): boolean {
   return event.ctrl === true && (event.name === "m" || event.sequence === "\x0d" || event.sequence === "m");
 }
 
+function isToggleIntegrationPanelEvent(event: KeyEvent): boolean {
+  return event.ctrl === true && (event.name === "i" || event.sequence === "\x09" || event.sequence === "i");
+}
+
 function resolveDirectPanelFocus(event: KeyEvent) {
   if (event.ctrl !== true) {
     return null;
@@ -315,6 +320,11 @@ function AppView({ version, dimensions }: AppViewProps) {
 
   const closeDaemonPanel = useCallback(() => {
     dispatch({ type: "SET_DAEMON_PANEL_OPEN", payload: false });
+    dispatch({ type: "SET_STATUS", payload: "Ready" });
+  }, [dispatch]);
+
+  const closeIntegrationPanel = useCallback(() => {
+    dispatch({ type: "SET_INTEGRATION_PANEL_OPEN", payload: false });
     dispatch({ type: "SET_STATUS", payload: "Ready" });
   }, [dispatch]);
 
@@ -970,6 +980,10 @@ function AppView({ version, dimensions }: AppViewProps) {
         dispatch({ type: "SET_DAEMON_PANEL_OPEN", payload: true });
         dispatch({ type: "SET_STATUS", payload: "Daemon panel" });
         break;
+      case "integrations":
+        dispatch({ type: "SET_INTEGRATION_PANEL_OPEN", payload: true });
+        dispatch({ type: "SET_STATUS", payload: "Integrations" });
+        break;
       case "thinking":
         dispatch({ type: "TOGGLE_THINKING_VISIBILITY" });
         dispatch({
@@ -1037,6 +1051,10 @@ function AppView({ version, dimensions }: AppViewProps) {
         }
         break;
       }
+      case "open-integrations":
+        dispatch({ type: "SET_INTEGRATION_PANEL_OPEN", payload: true });
+        dispatch({ type: "SET_STATUS", payload: "Integrations" });
+        break;
       default:
         dispatch({ type: "SET_STATUS", payload: `Action: ${actionKey}` });
     }
@@ -1087,7 +1105,13 @@ function AppView({ version, dimensions }: AppViewProps) {
       return;
     }
 
-    if (state.isConnectFlowOpen || state.isModelSelectorOpen || state.isSearchSettingsOpen || state.isDaemonPanelOpen || state.isChannelTokenPromptOpen) {
+    if (isToggleIntegrationPanelEvent(event)) {
+      dispatch({ type: "SET_INTEGRATION_PANEL_OPEN", payload: !state.isIntegrationPanelOpen });
+      dispatch({ type: "SET_STATUS", payload: state.isIntegrationPanelOpen ? "Ready" : "Integrations" });
+      return;
+    }
+
+    if (state.isConnectFlowOpen || state.isModelSelectorOpen || state.isSearchSettingsOpen || state.isDaemonPanelOpen || state.isIntegrationPanelOpen || state.isChannelTokenPromptOpen) {
       return;
     }
 
@@ -1260,6 +1284,10 @@ function AppView({ version, dimensions }: AppViewProps) {
       <DaemonPanel
         visible={state.isDaemonPanelOpen}
         onClose={closeDaemonPanel}
+      />
+      <IntegrationPanel
+        visible={state.isIntegrationPanelOpen}
+        onClose={closeIntegrationPanel}
       />
       {state.isChannelTokenPromptOpen && state.channelTokenPromptPlatform ? (
         <ChannelTokenPrompt
