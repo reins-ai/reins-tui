@@ -983,8 +983,9 @@ describe("deriveStatusSegments", () => {
   test("hints segment contains keyboard shortcuts", () => {
     const segments = deriveStatusSegments(makeDefaultSources());
     const hints = segments.find((s) => s.id === "hints")!;
-    expect(hints.content).toContain("Ctrl+K");
-    expect(hints.content).toContain("Ctrl+M");
+    expect(hints.content).toContain("Ctrl+T thinking");
+    expect(hints.content).toContain("Ctrl+M model");
+    expect(hints.content).toContain("Ctrl+1 context");
   });
 
   test("each segment has correct priority from constant", () => {
@@ -1347,8 +1348,9 @@ describe("buildGroupText", () => {
     const { right } = groupSegments(result.visibleSegments);
     const text = buildGroupText(right);
 
-    expect(text).toContain("Ctrl+K");
-    expect(text).toContain("Ctrl+M");
+    expect(text).toContain("Ctrl+T thinking");
+    expect(text).toContain("Ctrl+M model");
+    expect(text).toContain("Ctrl+1 context");
   });
 });
 
@@ -1461,10 +1463,10 @@ describe("polished status bar content requirements", () => {
     expect(ctrlMatches!.length).toBeGreaterThanOrEqual(2);
   });
 
-  test("hints contain Ctrl+K palette shortcut", () => {
+  test("hints contain Ctrl+T thinking shortcut", () => {
     const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
     const hints = result.visibleSegments.find((s) => s.id === "hints");
-    expect(hints!.content).toContain("Ctrl+K");
+    expect(hints!.content).toContain("Ctrl+T thinking");
   });
 
   test("hints contain Ctrl+M model shortcut", () => {

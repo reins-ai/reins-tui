@@ -719,11 +719,11 @@ describe("cross-component spacing coherence at band boundaries", () => {
 });
 
 describe("shortcut hint parity", () => {
-  test("status bar hints include Ctrl+K palette shortcut", () => {
+  test("status bar hints include Ctrl+T thinking shortcut", () => {
     const result = resolveStatusSegmentSet(makeSegmentSources({ terminalWidth: 200 }));
     const hints = result.visibleSegments.find((s) => s.id === "hints");
     expect(hints).toBeDefined();
-    expect(hints!.content).toContain("Ctrl+K");
+    expect(hints!.content).toContain("Ctrl+T thinking");
   });
 
   test("status bar hints include Ctrl+M model shortcut", () => {
