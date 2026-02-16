@@ -67,6 +67,9 @@ interface PanelState {
   readonly actionFeedback: string | null;
   readonly actionFeedbackType: FeedbackType | null;
   readonly selectedActionIndex: number;
+  // Search state
+  readonly searchMode: boolean;
+  readonly searchQuery: string;
 }
 
 type PanelAction =
@@ -76,8 +79,8 @@ type PanelAction =
       available: readonly IntegrationSummary[];
     }
   | { type: "LOAD_FAILED"; message: string }
-  | { type: "NAVIGATE_UP" }
-  | { type: "NAVIGATE_DOWN" }
+  | { type: "NAVIGATE_UP"; listLength?: number }
+  | { type: "NAVIGATE_DOWN"; listLength?: number }
   | { type: "SWITCH_SECTION" }
   | { type: "SELECT_CURRENT" }
   | { type: "SET_BUSY"; busy: boolean }
@@ -90,7 +93,11 @@ type PanelAction =
   | { type: "START_CONFIRM_DISCONNECT" }
   | { type: "CANCEL_CONFIRM" }
   | { type: "NAVIGATE_ACTION_LEFT" }
-  | { type: "NAVIGATE_ACTION_RIGHT" };
+  | { type: "NAVIGATE_ACTION_RIGHT" }
+  // Search flow
+  | { type: "ENTER_SEARCH" }
+  | { type: "EXIT_SEARCH" }
+  | { type: "SET_SEARCH_QUERY"; query: string };
 
 const INITIAL_STATE: PanelState = {
   connected: [],
@@ -105,18 +112,14 @@ const INITIAL_STATE: PanelState = {
   actionFeedback: null,
   actionFeedbackType: null,
   selectedActionIndex: 0,
+  searchMode: false,
+  searchQuery: "",
 };
 
 function getActiveList(state: PanelState): readonly IntegrationSummary[] {
   return state.focusSection === "connected" || state.focusSection === "detail"
     ? state.connected
     : state.available;
-}
-
-function getActiveIndex(state: PanelState): number {
-  return state.focusSection === "connected" || state.focusSection === "detail"
-    ? state.connectedIndex
-    : state.availableIndex;
 }
 
 function panelReducer(state: PanelState, action: PanelAction): PanelState {
@@ -139,49 +142,48 @@ function panelReducer(state: PanelState, action: PanelAction): PanelState {
 
     case "NAVIGATE_UP": {
       const list = getActiveList(state);
-      if (list.length === 0) return state;
+      const len = action.listLength ?? list.length;
+      if (len === 0) return state;
 
       if (state.focusSection === "connected" || state.focusSection === "detail") {
         const nextIndex = state.connectedIndex <= 0
-          ? list.length - 1
+          ? len - 1
           : state.connectedIndex - 1;
         return {
           ...state,
           connectedIndex: nextIndex,
-          selectedId: list[nextIndex]?.id ?? null,
+          // selectedId is resolved by the component from the filtered list
           focusSection: "connected",
         };
       }
 
       const nextIndex = state.availableIndex <= 0
-        ? list.length - 1
+        ? len - 1
         : state.availableIndex - 1;
       return {
         ...state,
         availableIndex: nextIndex,
-        selectedId: list[nextIndex]?.id ?? null,
       };
     }
 
     case "NAVIGATE_DOWN": {
       const list = getActiveList(state);
-      if (list.length === 0) return state;
+      const len = action.listLength ?? list.length;
+      if (len === 0) return state;
 
       if (state.focusSection === "connected" || state.focusSection === "detail") {
-        const nextIndex = (state.connectedIndex + 1) % list.length;
+        const nextIndex = (state.connectedIndex + 1) % len;
         return {
           ...state,
           connectedIndex: nextIndex,
-          selectedId: list[nextIndex]?.id ?? null,
           focusSection: "connected",
         };
       }
 
-      const nextIndex = (state.availableIndex + 1) % list.length;
+      const nextIndex = (state.availableIndex + 1) % len;
       return {
         ...state,
         availableIndex: nextIndex,
-        selectedId: list[nextIndex]?.id ?? null,
       };
     }
 
@@ -204,13 +206,10 @@ function panelReducer(state: PanelState, action: PanelAction): PanelState {
     }
 
     case "SELECT_CURRENT": {
-      const list = getActiveList(state);
-      const index = getActiveIndex(state);
-      const item = list[index];
-      if (!item) return state;
+      // Switch to detail view — the component derives the selected integration
+      // from the current index and (possibly filtered) list.
       return {
         ...state,
-        selectedId: item.id,
         focusSection: "detail",
       };
     }
@@ -283,6 +282,32 @@ function panelReducer(state: PanelState, action: PanelAction): PanelState {
         selectedActionIndex: state.selectedActionIndex + 1,
       };
 
+    // --- Search flow ---
+
+    case "ENTER_SEARCH":
+      return {
+        ...state,
+        searchMode: true,
+        searchQuery: "",
+      };
+
+    case "EXIT_SEARCH":
+      return {
+        ...state,
+        searchMode: false,
+        searchQuery: "",
+        connectedIndex: 0,
+        availableIndex: 0,
+      };
+
+    case "SET_SEARCH_QUERY":
+      return {
+        ...state,
+        searchQuery: action.query,
+        connectedIndex: 0,
+        availableIndex: 0,
+      };
+
     default:
       return state;
   }
@@ -347,6 +372,29 @@ export function findIntegration(
     connected.find((i) => i.id === id)
     ?? available.find((i) => i.id === id)
     ?? null
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Search helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Filters integrations by a search query, matching against name, id, and
+ * description (case-insensitive). Returns the full list when query is empty.
+ */
+export function filterIntegrations(
+  integrations: readonly IntegrationSummary[],
+  query: string,
+): readonly IntegrationSummary[] {
+  const trimmed = query.trim().toLowerCase();
+  if (trimmed.length === 0) return integrations;
+
+  return integrations.filter(
+    (item) =>
+      item.name.toLowerCase().includes(trimmed) ||
+      item.id.toLowerCase().includes(trimmed) ||
+      item.description.toLowerCase().includes(trimmed),
   );
 }
 
@@ -677,12 +725,17 @@ function DetailPane({
   );
 }
 
-function ActionBar({ tokens }: { tokens: Record<string, string> }) {
-  const actions = [
-    { key: "Tab", label: "Section" },
-    { key: "j/k", label: "Navigate" },
-    { key: "Enter", label: "Select" },
-  ];
+function ActionBar({ searchMode, tokens }: { searchMode: boolean; tokens: Record<string, string> }) {
+  const actions = searchMode
+    ? [
+        { key: "Esc", label: "Cancel" },
+      ]
+    : [
+        { key: "Tab", label: "Section" },
+        { key: "j/k", label: "Navigate" },
+        { key: "Enter", label: "Select" },
+        { key: "/", label: "Search" },
+      ];
 
   return (
     <Box style={{ flexDirection: "row" }}>
@@ -903,12 +956,20 @@ export function IntegrationPanel({ visible, onClose }: IntegrationPanelProps) {
     }
   }, [state.actionFeedback, state.actionFeedbackType]);
 
-  // Resolve the selected integration for action dispatch
-  const selectedIntegration = findIntegration(
-    state.connected,
-    state.available,
-    state.selectedId,
-  );
+  // Compute filtered lists for search
+  const filteredConnected = filterIntegrations(state.connected, state.searchQuery);
+  const filteredAvailable = filterIntegrations(state.available, state.searchQuery);
+
+  // Resolve the selected integration from filtered lists and current index.
+  // Always derive from the visible (filtered) items so search works correctly.
+  const selectedIntegration = (() => {
+    if (state.focusSection === "connected" || state.focusSection === "detail") {
+      const idx = Math.min(state.connectedIndex, Math.max(0, filteredConnected.length - 1));
+      return filteredConnected[idx] ?? null;
+    }
+    const idx = Math.min(state.availableIndex, Math.max(0, filteredAvailable.length - 1));
+    return filteredAvailable[idx] ?? null;
+  })();
 
   // Trigger an action on the selected integration via daemon API
   const triggerAction = useCallback(
@@ -934,6 +995,37 @@ export function IntegrationPanel({ visible, onClose }: IntegrationPanelProps) {
     if (!visible) return;
 
     const keyName = event.name ?? "";
+    const sequence = event.sequence ?? "";
+
+    // --- Search mode input handling ---
+    if (state.searchMode) {
+      if (keyName === "escape" || keyName === "esc") {
+        dispatch({ type: "EXIT_SEARCH" });
+        return;
+      }
+      if (keyName === "return" || keyName === "enter") {
+        // Exit search mode but keep the filter active — user can navigate results
+        dispatch({ type: "EXIT_SEARCH" });
+        return;
+      }
+      if (keyName === "backspace" || keyName === "delete") {
+        dispatch({
+          type: "SET_SEARCH_QUERY",
+          query: state.searchQuery.slice(0, -1),
+        });
+        return;
+      }
+      // Accept printable characters (single char, no ctrl/meta)
+      if (sequence.length === 1 && !event.ctrl && !event.meta) {
+        dispatch({
+          type: "SET_SEARCH_QUERY",
+          query: state.searchQuery + sequence,
+        });
+        return;
+      }
+      // Ignore all other keys in search mode
+      return;
+    }
 
     // --- Confirm disconnect step ---
     if (state.actionStep === "confirm-disconnect") {
@@ -950,6 +1042,12 @@ export function IntegrationPanel({ visible, onClose }: IntegrationPanelProps) {
 
     // Block all input during action-in-progress
     if (state.busy) return;
+
+    // / activates search mode (not in detail view to avoid conflict with action keys)
+    if (keyName === "/" || sequence === "/") {
+      dispatch({ type: "ENTER_SEARCH" });
+      return;
+    }
 
     // Escape closes the panel (or clears error feedback first)
     if (keyName === "escape" || keyName === "esc") {
@@ -968,13 +1066,19 @@ export function IntegrationPanel({ visible, onClose }: IntegrationPanelProps) {
       return;
     }
 
-    // j/k or Up/Down for navigation
+    // j/k or Up/Down for navigation — pass filtered list length for search-aware bounds
     if (keyName === "up" || keyName === "k") {
-      dispatch({ type: "NAVIGATE_UP" });
+      const activeLen = (state.focusSection === "connected" || state.focusSection === "detail")
+        ? filteredConnected.length
+        : filteredAvailable.length;
+      dispatch({ type: "NAVIGATE_UP", listLength: activeLen });
       return;
     }
     if (keyName === "down" || keyName === "j") {
-      dispatch({ type: "NAVIGATE_DOWN" });
+      const activeLen = (state.focusSection === "connected" || state.focusSection === "detail")
+        ? filteredConnected.length
+        : filteredAvailable.length;
+      dispatch({ type: "NAVIGATE_DOWN", listLength: activeLen });
       return;
     }
 
@@ -1038,14 +1142,18 @@ export function IntegrationPanel({ visible, onClose }: IntegrationPanelProps) {
         return;
       }
     }
-  }, [visible, state.busy, state.actionStep, state.focusSection, state.selectedActionIndex, state.actionFeedback, state.actionFeedbackType, selectedIntegration, onClose, triggerAction]));
+  }, [visible, state.busy, state.actionStep, state.focusSection, state.selectedActionIndex, state.actionFeedback, state.actionFeedbackType, state.searchMode, state.searchQuery, filteredConnected, filteredAvailable, selectedIntegration, onClose, triggerAction]));
+
+  const searchResultCount = filteredConnected.length + filteredAvailable.length;
 
   // Compute hint text based on current state
-  const hintText = state.actionStep === "confirm-disconnect"
-    ? "y confirm · n cancel"
-    : state.focusSection === "detail"
-      ? "h/l actions · Enter run · Tab section · Esc close"
-      : "Tab section · j/k nav · Enter select · Esc close";
+  const hintText = state.searchMode
+    ? "Type to search · Esc cancel"
+    : state.actionStep === "confirm-disconnect"
+      ? "y confirm · n cancel"
+      : state.focusSection === "detail"
+        ? "h/l actions · Enter run · Tab section · / search · Esc close"
+        : "Tab section · j/k nav · Enter select · / search · Esc close";
 
   return (
     <ModalPanel
@@ -1057,24 +1165,42 @@ export function IntegrationPanel({ visible, onClose }: IntegrationPanelProps) {
       closeOnEscape={false}
       onClose={onClose}
     >
+      {/* Search bar */}
+      {state.searchMode ? (
+        <Box style={{ flexDirection: "row", marginBottom: 1 }}>
+          <Text content="/ " style={{ color: tokens["accent.primary"] }} />
+          <Text
+            content={state.searchQuery.length > 0 ? state.searchQuery : ""}
+            style={{ color: tokens["text.primary"] }}
+          />
+          <Text content="▌" style={{ color: tokens["accent.primary"] }} />
+          {state.searchQuery.length > 0 ? (
+            <Text
+              content={`  ${searchResultCount} found`}
+              style={{ color: tokens["text.muted"] }}
+            />
+          ) : null}
+        </Box>
+      ) : null}
+
       <Box style={{ flexDirection: "row", flexGrow: 1, minHeight: 0 }}>
         {/* Left column: connected + available lists */}
         <Box style={{ flexDirection: "column", width: 32 }}>
           <IntegrationList
             title="Connected"
-            items={state.connected}
+            items={filteredConnected}
             selectedIndex={state.connectedIndex}
             isFocused={state.focusSection === "connected"}
             tokens={tokens}
           />
           <IntegrationList
             title="Available"
-            items={state.available}
+            items={filteredAvailable}
             selectedIndex={state.availableIndex}
             isFocused={state.focusSection === "available"}
             tokens={tokens}
           />
-          <ActionBar tokens={tokens} />
+          <ActionBar searchMode={state.searchMode} tokens={tokens} />
         </Box>
 
         {/* Right column: detail pane with actions */}

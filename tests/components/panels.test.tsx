@@ -37,8 +37,12 @@ import {
   getStatusColorToken,
   getStatusLabel,
   findIntegration,
+  filterIntegrations,
+  getAvailableActions,
+  getActionLabel,
   type IntegrationStatus,
   type IntegrationSummary,
+  type IntegrationActionName,
 } from "../../src/components/integration-panel";
 
 // ---------------------------------------------------------------------------
@@ -649,6 +653,211 @@ describe("IntegrationPanel", () => {
     test("suspended maps to gray (muted)", () => {
       const token = getStatusColorToken("suspended");
       expect(MOCK_TOKENS[token]).toBe(MOCK_TOKENS["text.muted"]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // filterIntegrations — search filtering
+  // -------------------------------------------------------------------------
+
+  describe("filterIntegrations", () => {
+    const integrations: IntegrationSummary[] = [
+      {
+        id: "obsidian",
+        name: "Obsidian",
+        status: "connected",
+        version: "1.0.0",
+        description: "Local Markdown vault for notes and knowledge management.",
+        category: "productivity",
+        operations: [{ name: "search-notes", description: "Search notes" }],
+      },
+      {
+        id: "gmail",
+        name: "Gmail",
+        status: "auth_expired",
+        version: "1.0.0",
+        description: "Google email with OAuth2 authentication.",
+        category: "communication",
+        operations: [],
+      },
+      {
+        id: "spotify",
+        name: "Spotify",
+        status: "error",
+        version: "1.0.0",
+        description: "Music playback and library management.",
+        category: "media",
+        operations: [],
+      },
+      {
+        id: "slack",
+        name: "Slack",
+        status: "disconnected",
+        version: "1.0.0",
+        description: "Team messaging and collaboration.",
+        category: "communication",
+        operations: [],
+      },
+    ];
+
+    test("returns all integrations when query is empty", () => {
+      expect(filterIntegrations(integrations, "")).toEqual(integrations);
+    });
+
+    test("returns all integrations when query is whitespace", () => {
+      expect(filterIntegrations(integrations, "   ")).toEqual(integrations);
+    });
+
+    test("filters by name (case-insensitive)", () => {
+      const result = filterIntegrations(integrations, "gmail");
+      expect(result.length).toBe(1);
+      expect(result[0].id).toBe("gmail");
+    });
+
+    test("filters by name with mixed case", () => {
+      const result = filterIntegrations(integrations, "OBSIDIAN");
+      expect(result.length).toBe(1);
+      expect(result[0].id).toBe("obsidian");
+    });
+
+    test("filters by id", () => {
+      const result = filterIntegrations(integrations, "spotify");
+      expect(result.length).toBe(1);
+      expect(result[0].id).toBe("spotify");
+    });
+
+    test("filters by description content", () => {
+      const result = filterIntegrations(integrations, "markdown");
+      expect(result.length).toBe(1);
+      expect(result[0].id).toBe("obsidian");
+    });
+
+    test("filters by partial match", () => {
+      const result = filterIntegrations(integrations, "mail");
+      expect(result.length).toBe(1);
+      expect(result[0].id).toBe("gmail");
+    });
+
+    test("returns multiple matches", () => {
+      // Both Gmail and Slack have "communication" in description or category,
+      // but description includes "messaging" for Slack and "email" for Gmail.
+      // "a" matches all four names.
+      const result = filterIntegrations(integrations, "a");
+      expect(result.length).toBeGreaterThanOrEqual(2);
+    });
+
+    test("returns empty array when no matches", () => {
+      const result = filterIntegrations(integrations, "nonexistent");
+      expect(result.length).toBe(0);
+    });
+
+    test("handles empty integration list", () => {
+      const result = filterIntegrations([], "test");
+      expect(result.length).toBe(0);
+    });
+
+    test("matches across name and description", () => {
+      // "music" appears in Spotify's description
+      const result = filterIntegrations(integrations, "music");
+      expect(result.length).toBe(1);
+      expect(result[0].id).toBe("spotify");
+    });
+
+    test("trims query whitespace before matching", () => {
+      const result = filterIntegrations(integrations, "  gmail  ");
+      expect(result.length).toBe(1);
+      expect(result[0].id).toBe("gmail");
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getAvailableActions — action mapping per status
+  // -------------------------------------------------------------------------
+
+  describe("getAvailableActions", () => {
+    test("connected status offers disable and disconnect", () => {
+      const actions = getAvailableActions("connected");
+      expect(actions).toContain("disable");
+      expect(actions).toContain("disconnect");
+    });
+
+    test("disconnected status offers enable and connect", () => {
+      const actions = getAvailableActions("disconnected");
+      expect(actions).toContain("enable");
+      expect(actions).toContain("connect");
+    });
+
+    test("auth_expired status offers reconnect and disconnect", () => {
+      const actions = getAvailableActions("auth_expired");
+      expect(actions).toContain("reconnect");
+      expect(actions).toContain("disconnect");
+    });
+
+    test("suspended status offers resume and disconnect", () => {
+      const actions = getAvailableActions("suspended");
+      expect(actions).toContain("resume");
+      expect(actions).toContain("disconnect");
+    });
+
+    test("error status offers retry and disconnect", () => {
+      const actions = getAvailableActions("error");
+      expect(actions).toContain("retry");
+      expect(actions).toContain("disconnect");
+    });
+
+    test("all statuses return at least one action", () => {
+      for (const status of ALL_STATUSES) {
+        expect(getAvailableActions(status).length).toBeGreaterThan(0);
+      }
+    });
+
+    test("disconnect is available for every non-disconnected status", () => {
+      const nonDisconnected: IntegrationStatus[] = [
+        "connected",
+        "error",
+        "auth_expired",
+        "suspended",
+      ];
+      for (const status of nonDisconnected) {
+        expect(getAvailableActions(status)).toContain("disconnect");
+      }
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // getActionLabel — human-readable action labels
+  // -------------------------------------------------------------------------
+
+  describe("getActionLabel", () => {
+    const allActions: IntegrationActionName[] = [
+      "enable",
+      "disable",
+      "connect",
+      "disconnect",
+      "reconnect",
+      "resume",
+      "retry",
+    ];
+
+    test("all actions return a non-empty label", () => {
+      for (const action of allActions) {
+        expect(getActionLabel(action).length).toBeGreaterThan(0);
+      }
+    });
+
+    test("labels are capitalized", () => {
+      for (const action of allActions) {
+        const label = getActionLabel(action);
+        expect(label[0]).toBe(label[0].toUpperCase());
+      }
+    });
+
+    test("enable returns Enable", () => {
+      expect(getActionLabel("enable")).toBe("Enable");
+    });
+
+    test("disconnect returns Disconnect", () => {
+      expect(getActionLabel("disconnect")).toBe("Disconnect");
     });
   });
 });
