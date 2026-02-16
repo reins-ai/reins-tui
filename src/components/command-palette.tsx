@@ -260,6 +260,8 @@ function PaletteResultRow({
   const bgColor = isSelected ? tokens["surface.elevated"] : "transparent";
   const highlightColor = tokens["accent.primary"];
   const shortcutHint = resolveShortcutHint(result.item.action);
+  const hideLeadingCommandGlyph = result.item.category === "command" && categoryGlyph === "/";
+  const glyphText = hideLeadingCommandGlyph ? "" : `${categoryGlyph} `;
   const displayLabel = truncateWithEllipsis(result.item.label, labelMaxChars);
   const labelVisibleLength = displayLabel.endsWith("…") ? displayLabel.length - 1 : displayLabel.length;
   const displayDescription = truncateWithEllipsis(result.item.description, descriptionMaxChars);
@@ -275,7 +277,9 @@ function PaletteResultRow({
       }}
     >
       <Text content={isSelected ? "▸ " : "  "} style={{ color: tokens["accent.primary"] }} />
-      <Text content={`${categoryGlyph} `} style={{ color: tokens["text.secondary"] }} />
+      {glyphText.length > 0 ? (
+        <Text content={glyphText} style={{ color: tokens["text.secondary"] }} />
+      ) : null}
       <HighlightedText
         text={displayLabel}
         ranges={clampRanges(result.ranges, labelVisibleLength)}

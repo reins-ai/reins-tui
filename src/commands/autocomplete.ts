@@ -19,7 +19,7 @@ function normalizeQuery(input: string): string | null {
   return commandChunk.toLowerCase();
 }
 
-function fuzzyScore(query: string, value: string): number | null {
+export function fuzzyScore(query: string, value: string): number | null {
   if (query.length === 0) {
     return 0;
   }
@@ -50,7 +50,7 @@ function fuzzyScore(query: string, value: string): number | null {
   return totalGap;
 }
 
-function getScore(query: string, name: string, aliases: readonly string[]): number | null {
+export function getScore(query: string, name: string, aliases: readonly string[]): number | null {
   if (query.length === 0) {
     return 0;
   }

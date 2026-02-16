@@ -134,6 +134,7 @@ export interface AppState {
   activeToolName: string | null;
   expandedToolCalls: Set<string>;
   isCommandPaletteOpen: boolean;
+  isCompletionActive: boolean;
   isConnectFlowOpen: boolean;
   isEmbeddingSetupOpen: boolean;
   isModelSelectorOpen: boolean;
@@ -166,6 +167,7 @@ export const DEFAULT_STATE: AppState = {
   activeToolName: null,
   expandedToolCalls: new Set<string>(),
   isCommandPaletteOpen: false,
+  isCompletionActive: false,
   isConnectFlowOpen: false,
   isEmbeddingSetupOpen: false,
   isModelSelectorOpen: false,

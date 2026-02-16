@@ -71,6 +71,7 @@ export type AppAction =
   | { type: "SET_STREAMING_LIFECYCLE_STATUS"; payload: AppState["streamingLifecycleStatus"] }
   | { type: "SET_ACTIVE_TOOL_NAME"; payload: string | null }
   | { type: "SET_COMMAND_PALETTE_OPEN"; payload: boolean }
+  | { type: "SET_COMPLETION_ACTIVE"; payload: boolean }
   | { type: "SET_CONNECT_FLOW_OPEN"; payload: boolean }
   | { type: "SET_EMBEDDING_SETUP_OPEN"; payload: boolean }
   | { type: "SET_MODEL_SELECTOR_OPEN"; payload: boolean }
@@ -427,6 +428,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "SET_COMMAND_PALETTE_OPEN":
       return typeof action.payload === "boolean"
         ? { ...state, isCommandPaletteOpen: action.payload }
+        : state;
+    case "SET_COMPLETION_ACTIVE":
+      return typeof action.payload === "boolean"
+        ? { ...state, isCompletionActive: action.payload }
         : state;
     case "SET_CONNECT_FLOW_OPEN":
       return typeof action.payload === "boolean"

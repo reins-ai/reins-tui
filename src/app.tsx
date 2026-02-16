@@ -1049,8 +1049,9 @@ function AppView({ version, dimensions }: AppViewProps) {
       return;
     }
 
-    // Escape dismisses topmost unpinned panel before any other action
-    if (isEscapeEvent(event)) {
+    // Escape dismisses topmost unpinned panel before any other action.
+    // Skip when completion popup is active — InputArea handles Esc to dismiss it.
+    if (isEscapeEvent(event) && !state.isCompletionActive) {
       const hasAnyVisible = state.panels.drawer.visible || state.panels.today.visible || state.panels.modal.visible;
       if (hasAnyVisible) {
         dispatch({ type: "DISMISS_TOPMOST" });
@@ -1101,12 +1102,14 @@ function AppView({ version, dimensions }: AppViewProps) {
       return;
     }
 
-    if (isFocusForwardEvent(event)) {
+    // Skip Tab focus cycling when the command completion popup is active —
+    // InputArea captures Tab to accept the selected completion suggestion.
+    if (isFocusForwardEvent(event) && !state.isCompletionActive) {
       focus.focusNext();
       return;
     }
 
-    if (isFocusBackwardEvent(event)) {
+    if (isFocusBackwardEvent(event) && !state.isCompletionActive) {
       focus.focusPrev();
       return;
     }
