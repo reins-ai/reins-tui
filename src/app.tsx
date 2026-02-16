@@ -8,6 +8,8 @@ import { ConnectFlow, type ConnectResult } from "./components/connect-flow";
 import { EmbeddingSetupWizard, type EmbeddingSetupResult } from "./components/setup/embedding-setup-wizard";
 import { SearchSettingsModal } from "./components/search-settings-modal";
 import { OnboardingWizard, type OnboardingWizardResult } from "./components/onboarding";
+import { ChannelTokenPrompt } from "./components/channel-token-prompt";
+import { callDaemonChannelApi, maskBotToken } from "./commands/handlers/channels";
 import { DaemonPanel } from "./components/daemon-panel";
 import { DaemonMemoryClient } from "./daemon/memory-client";
 import { HelpScreen } from "./screens";
@@ -804,6 +806,63 @@ function AppView({ version, dimensions }: AppViewProps) {
     dispatch({ type: "SET_STATUS", payload: "Ready" });
   }, [dispatch]);
 
+  const handleChannelTokenSubmit = useCallback(async (token: string) => {
+    const platform = state.channelTokenPromptPlatform;
+    dispatch({ type: "SET_CHANNEL_TOKEN_PROMPT", payload: { open: false } });
+
+    if (!platform) return;
+
+    dispatch({ type: "SET_STATUS", payload: `Adding ${platform} channel...` });
+
+    const baseUrl = await getActiveDaemonUrl();
+    const result = await callDaemonChannelApi(
+      "/channels/add",
+      { platform, token },
+      60_000,
+      fetch,
+      baseUrl,
+    );
+
+    if (result.ok) {
+      const masked = maskBotToken(token);
+      const channelState = result.data.channel?.state ?? "unknown";
+      const platformLabel = platform.charAt(0).toUpperCase() + platform.slice(1);
+      dispatch({
+        type: "ADD_MESSAGE",
+        payload: {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: [
+            `**${platformLabel} channel configured successfully.**`,
+            "",
+            `Token: ${masked}`,
+            `Status: ${channelState}`,
+            "",
+            "Use `/channels status` to check connection state.",
+          ].join("\n"),
+          createdAt: new Date(),
+        },
+      });
+      dispatch({ type: "SET_STATUS", payload: `${platformLabel} channel added` });
+    } else {
+      dispatch({
+        type: "ADD_MESSAGE",
+        payload: {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: `[error] Failed to add ${platform} channel: ${result.error}`,
+          createdAt: new Date(),
+        },
+      });
+      dispatch({ type: "SET_STATUS", payload: `Failed to add ${platform} channel` });
+    }
+  }, [dispatch, state.channelTokenPromptPlatform]);
+
+  const handleChannelTokenCancel = useCallback(() => {
+    dispatch({ type: "SET_CHANNEL_TOKEN_PROMPT", payload: { open: false } });
+    dispatch({ type: "SET_STATUS", payload: "Ready" });
+  }, [dispatch]);
+
   const paletteSources = useMemo<CommandPaletteDataSources>(() => ({
     conversations: state.conversations.map((conversation) => ({
       id: conversation.id,
@@ -959,6 +1018,9 @@ function AppView({ version, dimensions }: AppViewProps) {
         if (state.isConnectFlowOpen) {
           dispatch({ type: "SET_CONNECT_FLOW_OPEN", payload: false });
         }
+        if (state.isChannelTokenPromptOpen) {
+          dispatch({ type: "SET_CHANNEL_TOKEN_PROMPT", payload: { open: false } });
+        }
       }
       setCommandPaletteOpen(!state.isCommandPaletteOpen);
       dispatch({ type: "SET_STATUS", payload: state.isCommandPaletteOpen ? "Ready" : "Command palette" });
@@ -983,7 +1045,7 @@ function AppView({ version, dimensions }: AppViewProps) {
       return;
     }
 
-    if (state.isConnectFlowOpen || state.isModelSelectorOpen || state.isSearchSettingsOpen || state.isDaemonPanelOpen) {
+    if (state.isConnectFlowOpen || state.isModelSelectorOpen || state.isSearchSettingsOpen || state.isDaemonPanelOpen || state.isChannelTokenPromptOpen) {
       return;
     }
 
@@ -1149,6 +1211,13 @@ function AppView({ version, dimensions }: AppViewProps) {
         visible={state.isDaemonPanelOpen}
         onClose={closeDaemonPanel}
       />
+      {state.isChannelTokenPromptOpen && state.channelTokenPromptPlatform ? (
+        <ChannelTokenPrompt
+          platform={state.channelTokenPromptPlatform}
+          onSubmit={handleChannelTokenSubmit}
+          onCancel={handleChannelTokenCancel}
+        />
+      ) : null}
     </>
   );
 }

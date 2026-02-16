@@ -76,6 +76,7 @@ export type AppAction =
   | { type: "SET_MODEL_SELECTOR_OPEN"; payload: boolean }
   | { type: "SET_SEARCH_SETTINGS_OPEN"; payload: boolean }
   | { type: "SET_DAEMON_PANEL_OPEN"; payload: boolean }
+  | { type: "SET_CHANNEL_TOKEN_PROMPT"; payload: { open: boolean; platform?: string } }
   | { type: "SET_ONBOARDING_STATUS"; payload: OnboardingStatus }
   | { type: "SET_ONBOARDING_RERUN" }
   | { type: "SET_ONBOARDING_COMPLETE" }
@@ -447,6 +448,12 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return typeof action.payload === "boolean"
         ? { ...state, isDaemonPanelOpen: action.payload }
         : state;
+    case "SET_CHANNEL_TOKEN_PROMPT":
+      return {
+        ...state,
+        isChannelTokenPromptOpen: action.payload.open,
+        channelTokenPromptPlatform: action.payload.open ? (action.payload.platform ?? null) : null,
+      };
     case "SET_ONBOARDING_STATUS":
       return { ...state, onboardingStatus: action.payload, onboardingForceRerun: false };
     case "SET_ONBOARDING_RERUN":

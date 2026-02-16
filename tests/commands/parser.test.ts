@@ -25,6 +25,7 @@ describe("slash command registry", () => {
       "remember",
       "memory",
       "daemon",
+      "channels",
       "setup",
     ]);
   });
@@ -49,6 +50,7 @@ describe("slash command registry", () => {
       remember: "memory",
       memory: "memory",
       daemon: "system",
+      channels: "system",
       setup: "system",
     });
   });
@@ -183,6 +185,7 @@ describe("getCommandAutocomplete", () => {
 
     expect(result.length).toBe(SLASH_COMMANDS.length);
     expect(result.map((item) => item.name)).toEqual([
+      "channels",
       "clear",
       "compact",
       "connect",

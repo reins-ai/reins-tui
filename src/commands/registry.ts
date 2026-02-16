@@ -18,6 +18,7 @@ export type SlashCommandHandlerKey =
   | "MEMORY"
   | "MEMORY_SETUP"
   | "DAEMON"
+  | "CHANNELS"
   | "SETUP";
 
 export interface SlashCommandDefinition {
@@ -169,6 +170,14 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     usage: "/daemon [add|switch|remove|status|token] [options]",
     category: "system",
     handlerKey: "DAEMON",
+  }),
+  Object.freeze({
+    name: "channels",
+    aliases: Object.freeze(["ch"]),
+    description: "Manage external chat channel integrations.",
+    usage: "/channels [add|remove|enable|disable|status] [platform]",
+    category: "system",
+    handlerKey: "CHANNELS",
   }),
   Object.freeze({
     name: "setup",
