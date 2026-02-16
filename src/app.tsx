@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import { writeUserConfig, getDataRoot } from "@reins/core";
-import { SkillRegistry, SkillScanner } from "@reins/core/skills";
+import { FileSkillStateStore, SkillRegistry, SkillScanner } from "@reins/core/skills";
 import type { Skill } from "@reins/core/skills";
 
 import { CommandPalette, type CommandPaletteDataSources, ErrorBoundary, Layout } from "./components";
@@ -354,9 +354,15 @@ function AppView({ version, dimensions }: AppViewProps) {
     dispatch({ type: "SET_STATUS", payload: "Ready" });
   }, [dispatch]);
 
-  // Skill registry and scanner — initialized once, shared across callbacks
-  const skillRegistryRef = useRef<SkillRegistry>(new SkillRegistry());
+  // Skill state store, registry, and scanner — initialized once, shared across callbacks
+  const skillStateStoreRef = useRef<FileSkillStateStore>(
+    new FileSkillStateStore(join(getDataRoot(), "skill-state.json")),
+  );
+  const skillRegistryRef = useRef<SkillRegistry>(
+    new SkillRegistry({ stateStore: skillStateStoreRef.current }),
+  );
   const skillScannerRef = useRef<SkillScanner | null>(null);
+  const skillStateLoadedRef = useRef(false);
   const [skills, setSkills] = useState<SkillListItem[]>([]);
 
   // Scan skills directory on mount and when panel becomes visible
@@ -369,7 +375,13 @@ function AppView({ version, dimensions }: AppViewProps) {
       const dataRoot = getDataRoot();
       const skillsDir = join(dataRoot, "skills");
 
-      // Clear and re-scan to pick up any changes
+      // Load persisted state once per app lifetime
+      if (!skillStateLoadedRef.current) {
+        await skillStateStoreRef.current.load();
+        skillStateLoadedRef.current = true;
+      }
+
+      // Clear and re-scan to pick up any changes (persisted state is applied on register)
       skillRegistryRef.current.clear();
       const scanner = new SkillScanner(skillRegistryRef.current, skillsDir);
       skillScannerRef.current = scanner;
