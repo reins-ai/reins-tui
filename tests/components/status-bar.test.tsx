@@ -738,6 +738,7 @@ function makeDefaultSources(overrides: Partial<StatusSegmentSources> = {}): Stat
     tokenCount: 0,
     cost: null,
     compactionActive: false,
+    thinkingLevel: "none",
     terminalWidth: 120,
     ...overrides,
   };
@@ -857,6 +858,63 @@ describe("deriveStatusSegments", () => {
     const segments = deriveStatusSegments(makeDefaultSources({ currentModel: "gpt-4o" }));
     const model = segments.find((s) => s.id === "model")!;
     expect(model.content).toBe("gpt-4o");
+  });
+
+  test("model segment shows no suffix when thinking level is none", () => {
+    const segments = deriveStatusSegments(makeDefaultSources({
+      currentModel: "claude-sonnet-4-5",
+      thinkingLevel: "none",
+    }));
+    const model = segments.find((s) => s.id === "model")!;
+    expect(model.content).toBe("claude-sonnet-4-5");
+  });
+
+  test("model segment appends (Low) when thinking level is low", () => {
+    const segments = deriveStatusSegments(makeDefaultSources({
+      currentModel: "claude-sonnet-4-5",
+      thinkingLevel: "low",
+    }));
+    const model = segments.find((s) => s.id === "model")!;
+    expect(model.content).toBe("claude-sonnet-4-5 (Low)");
+  });
+
+  test("model segment appends (Medium) when thinking level is medium", () => {
+    const segments = deriveStatusSegments(makeDefaultSources({
+      currentModel: "claude-sonnet-4-5",
+      thinkingLevel: "medium",
+    }));
+    const model = segments.find((s) => s.id === "model")!;
+    expect(model.content).toBe("claude-sonnet-4-5 (Medium)");
+  });
+
+  test("model segment appends (High) when thinking level is high", () => {
+    const segments = deriveStatusSegments(makeDefaultSources({
+      currentModel: "claude-sonnet-4-5",
+      thinkingLevel: "high",
+    }));
+    const model = segments.find((s) => s.id === "model")!;
+    expect(model.content).toBe("claude-sonnet-4-5 (High)");
+  });
+
+  test("thinking level suffix is capitalized", () => {
+    for (const level of ["low", "medium", "high"] as const) {
+      const segments = deriveStatusSegments(makeDefaultSources({
+        currentModel: "test-model",
+        thinkingLevel: level,
+      }));
+      const model = segments.find((s) => s.id === "model")!;
+      const expected = level.charAt(0).toUpperCase() + level.slice(1);
+      expect(model.content).toBe(`test-model (${expected})`);
+    }
+  });
+
+  test("thinking level suffix works with any model name", () => {
+    const segments = deriveStatusSegments(makeDefaultSources({
+      currentModel: "gpt-4o",
+      thinkingLevel: "high",
+    }));
+    const model = segments.find((s) => s.id === "model")!;
+    expect(model.content).toBe("gpt-4o (High)");
   });
 
   test("lifecycle segment shows idle Ready state", () => {
@@ -1065,6 +1123,26 @@ describe("resolveStatusSegmentSet", () => {
   test("wide terminal shows all segments", () => {
     const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
     expect(result.visibleSegments).toHaveLength(5);
+  });
+
+  test("thinking level suffix appears in full pipeline output", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({
+      terminalWidth: 200,
+      currentModel: "claude-sonnet-4-5",
+      thinkingLevel: "high",
+    }));
+    const model = result.visibleSegments.find((s) => s.id === "model")!;
+    expect(model.content).toBe("claude-sonnet-4-5 (High)");
+  });
+
+  test("thinking level none shows plain model name in full pipeline", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({
+      terminalWidth: 200,
+      currentModel: "claude-sonnet-4-5",
+      thinkingLevel: "none",
+    }));
+    const model = result.visibleSegments.find((s) => s.id === "model")!;
+    expect(model.content).toBe("claude-sonnet-4-5");
   });
 });
 

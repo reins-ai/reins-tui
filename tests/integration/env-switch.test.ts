@@ -70,6 +70,7 @@ function createStatusSources(activeEnvironment: string | null): StatusSegmentSou
     tokenCount: 0,
     cost: null,
     compactionActive: false,
+    thinkingLevel: "none",
     terminalWidth: 120,
   };
 }

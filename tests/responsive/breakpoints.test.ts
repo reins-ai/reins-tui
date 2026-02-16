@@ -584,6 +584,7 @@ function makeSegmentSources(overrides: Partial<StatusSegmentSources> = {}): Stat
     tokenCount: 0,
     cost: null,
     compactionActive: false,
+    thinkingLevel: "none",
     terminalWidth: 120,
     ...overrides,
   };

@@ -379,8 +379,12 @@ export function deriveStatusSegments(sources: StatusSegmentSources): StatusSegme
     switch (id) {
       case "connection":
         return buildSegment(id, connGlyph, `${connGlyph} ${connLabel}`, connColor);
-      case "model":
-        return buildSegment(id, "", sources.currentModel, "text.secondary");
+      case "model": {
+        const thinkingSuffix = sources.thinkingLevel !== "none"
+          ? ` (${sources.thinkingLevel.charAt(0).toUpperCase()}${sources.thinkingLevel.slice(1)})`
+          : "";
+        return buildSegment(id, "", `${sources.currentModel}${thinkingSuffix}`, "text.secondary");
+      }
       case "environment": {
         const envName = sources.activeEnvironment;
         if (!envName || envName === "default") {
