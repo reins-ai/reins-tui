@@ -17,6 +17,7 @@ import {
 import { handleSetupCommand } from "./setup";
 import { handleCompactCommand, handleHelpCommand, handleQuitCommand, handleSettingsCommand, handleStatusCommand } from "./system";
 import { handleThemeCommand } from "./theme";
+import { handleThinkingCommand } from "./thinking";
 import type { CommandError, CommandHandler, CommandHandlerContext, CommandResult } from "./types";
 
 const HANDLER_MAP: Record<SlashCommandHandlerKey, CommandHandler> = {
@@ -39,6 +40,7 @@ const HANDLER_MAP: Record<SlashCommandHandlerKey, CommandHandler> = {
   DAEMON: handleDaemonCommand,
   CHANNELS: handleChannelsCommand,
   SETUP: handleSetupCommand,
+  TOGGLE_THINKING: handleThinkingCommand,
 };
 
 export async function dispatchCommand(

@@ -391,6 +391,7 @@ export function StatusBar({
     tokenCount,
     cost,
     compactionActive: compactionVisible,
+    thinkingLevel: state.thinkingLevel,
     terminalWidth: dimensions.width,
   };
 

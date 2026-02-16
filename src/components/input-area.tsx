@@ -313,6 +313,9 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
       if (signal.type === "ENVIRONMENT_SWITCHED" && signal.payload) {
         dispatch({ type: "SET_ENVIRONMENT", payload: signal.payload });
       }
+      if (signal.type === "TOGGLE_THINKING_VISIBILITY") {
+        dispatch({ type: "TOGGLE_THINKING_VISIBILITY" });
+      }
     }
   };
 

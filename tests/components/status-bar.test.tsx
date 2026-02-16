@@ -738,6 +738,7 @@ function makeDefaultSources(overrides: Partial<StatusSegmentSources> = {}): Stat
     tokenCount: 0,
     cost: null,
     compactionActive: false,
+    thinkingLevel: "none",
     terminalWidth: 120,
     ...overrides,
   };
@@ -859,6 +860,63 @@ describe("deriveStatusSegments", () => {
     expect(model.content).toBe("gpt-4o");
   });
 
+  test("model segment shows no suffix when thinking level is none", () => {
+    const segments = deriveStatusSegments(makeDefaultSources({
+      currentModel: "claude-sonnet-4-5",
+      thinkingLevel: "none",
+    }));
+    const model = segments.find((s) => s.id === "model")!;
+    expect(model.content).toBe("claude-sonnet-4-5");
+  });
+
+  test("model segment appends (Low) when thinking level is low", () => {
+    const segments = deriveStatusSegments(makeDefaultSources({
+      currentModel: "claude-sonnet-4-5",
+      thinkingLevel: "low",
+    }));
+    const model = segments.find((s) => s.id === "model")!;
+    expect(model.content).toBe("claude-sonnet-4-5 (Low)");
+  });
+
+  test("model segment appends (Medium) when thinking level is medium", () => {
+    const segments = deriveStatusSegments(makeDefaultSources({
+      currentModel: "claude-sonnet-4-5",
+      thinkingLevel: "medium",
+    }));
+    const model = segments.find((s) => s.id === "model")!;
+    expect(model.content).toBe("claude-sonnet-4-5 (Medium)");
+  });
+
+  test("model segment appends (High) when thinking level is high", () => {
+    const segments = deriveStatusSegments(makeDefaultSources({
+      currentModel: "claude-sonnet-4-5",
+      thinkingLevel: "high",
+    }));
+    const model = segments.find((s) => s.id === "model")!;
+    expect(model.content).toBe("claude-sonnet-4-5 (High)");
+  });
+
+  test("thinking level suffix is capitalized", () => {
+    for (const level of ["low", "medium", "high"] as const) {
+      const segments = deriveStatusSegments(makeDefaultSources({
+        currentModel: "test-model",
+        thinkingLevel: level,
+      }));
+      const model = segments.find((s) => s.id === "model")!;
+      const expected = level.charAt(0).toUpperCase() + level.slice(1);
+      expect(model.content).toBe(`test-model (${expected})`);
+    }
+  });
+
+  test("thinking level suffix works with any model name", () => {
+    const segments = deriveStatusSegments(makeDefaultSources({
+      currentModel: "gpt-4o",
+      thinkingLevel: "high",
+    }));
+    const model = segments.find((s) => s.id === "model")!;
+    expect(model.content).toBe("gpt-4o (High)");
+  });
+
   test("lifecycle segment shows idle Ready state", () => {
     const segments = deriveStatusSegments(makeDefaultSources({ lifecycleStatus: "idle" }));
     const lc = segments.find((s) => s.id === "lifecycle")!;
@@ -925,8 +983,9 @@ describe("deriveStatusSegments", () => {
   test("hints segment contains keyboard shortcuts", () => {
     const segments = deriveStatusSegments(makeDefaultSources());
     const hints = segments.find((s) => s.id === "hints")!;
-    expect(hints.content).toContain("Ctrl+K");
-    expect(hints.content).toContain("Ctrl+M");
+    expect(hints.content).toContain("Ctrl+T thinking");
+    expect(hints.content).toContain("Ctrl+M model");
+    expect(hints.content).toContain("Ctrl+1 context");
   });
 
   test("each segment has correct priority from constant", () => {
@@ -1065,6 +1124,26 @@ describe("resolveStatusSegmentSet", () => {
   test("wide terminal shows all segments", () => {
     const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
     expect(result.visibleSegments).toHaveLength(5);
+  });
+
+  test("thinking level suffix appears in full pipeline output", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({
+      terminalWidth: 200,
+      currentModel: "claude-sonnet-4-5",
+      thinkingLevel: "high",
+    }));
+    const model = result.visibleSegments.find((s) => s.id === "model")!;
+    expect(model.content).toBe("claude-sonnet-4-5 (High)");
+  });
+
+  test("thinking level none shows plain model name in full pipeline", () => {
+    const result = resolveStatusSegmentSet(makeDefaultSources({
+      terminalWidth: 200,
+      currentModel: "claude-sonnet-4-5",
+      thinkingLevel: "none",
+    }));
+    const model = result.visibleSegments.find((s) => s.id === "model")!;
+    expect(model.content).toBe("claude-sonnet-4-5");
   });
 });
 
@@ -1269,8 +1348,9 @@ describe("buildGroupText", () => {
     const { right } = groupSegments(result.visibleSegments);
     const text = buildGroupText(right);
 
-    expect(text).toContain("Ctrl+K");
-    expect(text).toContain("Ctrl+M");
+    expect(text).toContain("Ctrl+T thinking");
+    expect(text).toContain("Ctrl+M model");
+    expect(text).toContain("Ctrl+1 context");
   });
 });
 
@@ -1383,10 +1463,10 @@ describe("polished status bar content requirements", () => {
     expect(ctrlMatches!.length).toBeGreaterThanOrEqual(2);
   });
 
-  test("hints contain Ctrl+K palette shortcut", () => {
+  test("hints contain Ctrl+T thinking shortcut", () => {
     const result = resolveStatusSegmentSet(makeDefaultSources({ terminalWidth: 200 }));
     const hints = result.visibleSegments.find((s) => s.id === "hints");
-    expect(hints!.content).toContain("Ctrl+K");
+    expect(hints!.content).toContain("Ctrl+T thinking");
   });
 
   test("hints contain Ctrl+M model shortcut", () => {

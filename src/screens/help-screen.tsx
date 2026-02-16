@@ -43,6 +43,13 @@ export const HELP_SHORTCUT_CATEGORIES: HelpShortcutCategory[] = [
     ],
   },
   {
+    title: "MODEL & THINKING",
+    shortcuts: [
+      { key: "Ctrl+T", description: "Cycle thinking level" },
+      { key: "/thinking", description: "Toggle thinking visibility" },
+    ],
+  },
+  {
     title: "APPLICATION",
     shortcuts: [
       { key: "Ctrl+K", description: "Command palette" },

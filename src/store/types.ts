@@ -1,6 +1,6 @@
 import type { Conversation, ConversationSummary, MessageRole } from "@reins/core";
 
-import type { DaemonConnectionStatus } from "../daemon/contracts";
+import type { DaemonConnectionStatus, ThinkingLevel } from "../daemon/contracts";
 import type { LayoutMode, PanelState } from "../state/layout-mode";
 import { DEFAULT_PANEL_STATE } from "../state/layout-mode";
 import type { ConversationLifecycleStatus } from "../state/status-machine";
@@ -90,6 +90,7 @@ export interface StatusSegmentSources {
   tokenCount: number;
   cost: string | null;
   compactionActive: boolean;
+  thinkingLevel: ThinkingLevel;
   terminalWidth: number;
 }
 
@@ -105,7 +106,7 @@ export interface DisplayToolCall {
 }
 
 export interface DisplayContentBlock {
-  type: "text" | "tool-call";
+  type: "text" | "tool-call" | "thinking";
   toolCallId?: string;
   text?: string;
 }
@@ -151,6 +152,8 @@ export interface AppState {
   activeEnvironment: string | null;
   status: string;
   focusedPanel: FocusedPanel;
+  thinkingLevel: ThinkingLevel;
+  thinkingVisible: boolean;
   layoutMode: LayoutMode;
   panels: PanelState;
 }
@@ -183,6 +186,8 @@ export const DEFAULT_STATE: AppState = {
   activeEnvironment: null,
   status: "Ready",
   focusedPanel: "conversation",
+  thinkingLevel: "none",
+  thinkingVisible: true,
   layoutMode: "zen",
   panels: DEFAULT_PANEL_STATE,
 };

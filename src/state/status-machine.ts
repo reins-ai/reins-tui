@@ -72,6 +72,12 @@ export type StatusMachineEvent =
       assistantMessageId: string;
     }
   | {
+      type: "thinking-chunk";
+      timestamp: string;
+      conversationId: string;
+      assistantMessageId: string;
+    }
+  | {
       type: "tool-call-start";
       timestamp: string;
       conversationId: string;
@@ -180,6 +186,12 @@ export function reduceStatusMachine(state: StatusMachineState, event: StatusMach
         ...state,
         chunkCount: state.chunkCount + 1,
       };
+    case "thinking-chunk":
+      if (state.status === "thinking") {
+        return state;
+      }
+
+      return state;
     case "tool-call-start":
     case "tool-call-complete":
       if (state.status === "thinking") {
@@ -379,8 +391,12 @@ export function deriveStatusSegments(sources: StatusSegmentSources): StatusSegme
     switch (id) {
       case "connection":
         return buildSegment(id, connGlyph, `${connGlyph} ${connLabel}`, connColor);
-      case "model":
-        return buildSegment(id, "", sources.currentModel, "text.secondary");
+      case "model": {
+        const thinkingSuffix = sources.thinkingLevel !== "none"
+          ? ` (${sources.thinkingLevel.charAt(0).toUpperCase()}${sources.thinkingLevel.slice(1)})`
+          : "";
+        return buildSegment(id, "", `${sources.currentModel}${thinkingSuffix}`, "text.secondary");
+      }
       case "environment": {
         const envName = sources.activeEnvironment;
         if (!envName || envName === "default") {
@@ -391,7 +407,7 @@ export function deriveStatusSegments(sources: StatusSegmentSources): StatusSegme
       case "lifecycle":
         return buildSegment(id, lc.glyph, `${lc.glyph} ${lc.label}`, lc.colorToken);
       case "hints":
-        return buildSegment(id, "", "Ctrl+K palette · Ctrl+M model · Ctrl+1 context", "text.muted");
+        return buildSegment(id, "", "Ctrl+T thinking · Ctrl+M model · Ctrl+1 context", "text.muted");
     }
   });
 }

@@ -386,6 +386,15 @@ export class DaemonWsTransport {
       return { type: "delta", conversationId, messageId, delta, timestamp };
     }
 
+    if (type === "thinking-delta" || type === "thinking_chunk") {
+      const delta = typeof event.delta === "string" ? event.delta : typeof event.chunk === "string" ? event.chunk : undefined;
+      if (delta === undefined) {
+        return null;
+      }
+
+      return { type: "thinking-delta", conversationId, messageId, delta, timestamp };
+    }
+
     if (type === "tool-call-start" || type === "tool_call_start" || type === "tool-start" || type === "tool_start") {
       const toolCallRecord = this.isRecord(event.toolCall) ? event.toolCall : undefined;
       const toolCallId = typeof event.toolCallId === "string"
