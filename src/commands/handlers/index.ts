@@ -6,6 +6,7 @@ import { handleConnectCommand } from "./connect";
 import { handleDaemonCommand } from "./daemon";
 import { handleEnvironmentCommand } from "./environment";
 import { handleIntegrationsCommand } from "./integrations";
+import { handleSkillsCommand } from "./skills";
 import { handleMemoryCommand, handleRememberCommand } from "./memory";
 import { handleMemorySetupCommand } from "./memory-setup";
 import { handleModelCommand } from "./model";
@@ -43,6 +44,7 @@ const HANDLER_MAP: Record<SlashCommandHandlerKey, CommandHandler> = {
   SETUP: handleSetupCommand,
   TOGGLE_THINKING: handleThinkingCommand,
   INTEGRATIONS: handleIntegrationsCommand,
+  SKILLS: handleSkillsCommand,
 };
 
 export async function dispatchCommand(

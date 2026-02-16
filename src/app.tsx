@@ -12,6 +12,9 @@ import { ChannelTokenPrompt } from "./components/channel-token-prompt";
 import { callDaemonChannelApi, maskBotToken } from "./commands/handlers/channels";
 import { DaemonPanel } from "./components/daemon-panel";
 import { IntegrationPanel } from "./components/integration-panel";
+import { SkillPanel } from "./components/skills/SkillPanel";
+import type { SkillListItem } from "./components/skills/SkillListPanel";
+import type { SkillDetailData } from "./components/skills/SkillDetailView";
 import { DaemonMemoryClient } from "./daemon/memory-client";
 import { HelpScreen } from "./screens";
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "./daemon/client";
@@ -253,6 +256,10 @@ function isToggleIntegrationPanelEvent(event: KeyEvent): boolean {
   return event.ctrl === true && (event.name === "i" || event.sequence === "\x09" || event.sequence === "i");
 }
 
+export function isToggleSkillPanelEvent(event: KeyEvent): boolean {
+  return event.ctrl === true && (event.name === "l" || event.sequence === "\x0c" || event.sequence === "l");
+}
+
 function resolveDirectPanelFocus(event: KeyEvent) {
   if (event.ctrl !== true) {
     return null;
@@ -327,6 +334,22 @@ function AppView({ version, dimensions }: AppViewProps) {
     dispatch({ type: "SET_INTEGRATION_PANEL_OPEN", payload: false });
     dispatch({ type: "SET_STATUS", payload: "Ready" });
   }, [dispatch]);
+
+  const closeSkillPanel = useCallback(() => {
+    dispatch({ type: "SET_SKILL_PANEL_OPEN", payload: false });
+    dispatch({ type: "SET_STATUS", payload: "Ready" });
+  }, [dispatch]);
+
+  // Placeholder skill data — will be replaced with daemon API calls
+  const mockSkills = useMemo<SkillListItem[]>(() => [], []);
+
+  const loadSkillDetail = useCallback((_name: string): SkillDetailData | null => {
+    return null;
+  }, []);
+
+  const toggleSkillEnabled = useCallback((_name: string): void => {
+    // No-op placeholder — will be wired to daemon API
+  }, []);
 
   const [startupContent, setStartupContent] = useState<StartupContent | null>(null);
   const renderer = useRenderer();
@@ -984,6 +1007,10 @@ function AppView({ version, dimensions }: AppViewProps) {
         dispatch({ type: "SET_INTEGRATION_PANEL_OPEN", payload: true });
         dispatch({ type: "SET_STATUS", payload: "Integrations" });
         break;
+      case "skills":
+        dispatch({ type: "SET_SKILL_PANEL_OPEN", payload: true });
+        dispatch({ type: "SET_STATUS", payload: "Skills" });
+        break;
       case "thinking":
         dispatch({ type: "TOGGLE_THINKING_VISIBILITY" });
         dispatch({
@@ -1055,6 +1082,10 @@ function AppView({ version, dimensions }: AppViewProps) {
         dispatch({ type: "SET_INTEGRATION_PANEL_OPEN", payload: true });
         dispatch({ type: "SET_STATUS", payload: "Integrations" });
         break;
+      case "open-skills":
+        dispatch({ type: "SET_SKILL_PANEL_OPEN", payload: true });
+        dispatch({ type: "SET_STATUS", payload: "Skills" });
+        break;
       default:
         dispatch({ type: "SET_STATUS", payload: `Action: ${actionKey}` });
     }
@@ -1090,7 +1121,7 @@ function AppView({ version, dimensions }: AppViewProps) {
     // Palette-closes-first rule: if palette is open and another shortcut fires,
     // close palette first then let the shortcut through
     if (state.isCommandPaletteOpen) {
-      if (isToggleModelSelectorEvent(event) || isToggleDrawerEvent(event) || isToggleTodayEvent(event)) {
+      if (isToggleModelSelectorEvent(event) || isToggleDrawerEvent(event) || isToggleTodayEvent(event) || isToggleSkillPanelEvent(event)) {
         setCommandPaletteOpen(false);
         // Fall through to let the shortcut execute below
       } else {
@@ -1111,7 +1142,13 @@ function AppView({ version, dimensions }: AppViewProps) {
       return;
     }
 
-    if (state.isConnectFlowOpen || state.isModelSelectorOpen || state.isSearchSettingsOpen || state.isDaemonPanelOpen || state.isIntegrationPanelOpen || state.isChannelTokenPromptOpen) {
+    if (isToggleSkillPanelEvent(event)) {
+      dispatch({ type: "SET_SKILL_PANEL_OPEN", payload: !state.isSkillPanelOpen });
+      dispatch({ type: "SET_STATUS", payload: state.isSkillPanelOpen ? "Ready" : "Skills" });
+      return;
+    }
+
+    if (state.isConnectFlowOpen || state.isModelSelectorOpen || state.isSearchSettingsOpen || state.isDaemonPanelOpen || state.isIntegrationPanelOpen || state.isSkillPanelOpen || state.isChannelTokenPromptOpen) {
       return;
     }
 
@@ -1288,6 +1325,13 @@ function AppView({ version, dimensions }: AppViewProps) {
       <IntegrationPanel
         visible={state.isIntegrationPanelOpen}
         onClose={closeIntegrationPanel}
+      />
+      <SkillPanel
+        visible={state.isSkillPanelOpen}
+        skills={mockSkills}
+        onLoadSkillDetail={loadSkillDetail}
+        onToggleEnabled={toggleSkillEnabled}
+        onClose={closeSkillPanel}
       />
       {state.isChannelTokenPromptOpen && state.channelTokenPromptPlatform ? (
         <ChannelTokenPrompt

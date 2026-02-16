@@ -169,7 +169,7 @@ class PaletteNavigationSimulator {
 describe("command palette: search integration", () => {
   test("empty query returns all registered commands", () => {
     const index = buildTestIndex();
-    const results = searchAndRank(index, "");
+    const results = rankSearchResults(index, "", { limit: 50 });
 
     expect(results.length).toBeGreaterThanOrEqual(SLASH_COMMANDS.length);
   });
