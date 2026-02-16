@@ -141,6 +141,7 @@ export interface AppState {
   isModelSelectorOpen: boolean;
   isSearchSettingsOpen: boolean;
   isDaemonPanelOpen: boolean;
+  isIntegrationPanelOpen: boolean;
   isChannelTokenPromptOpen: boolean;
   channelTokenPromptPlatform: string | null;
   onboardingStatus: OnboardingStatus;
@@ -176,6 +177,7 @@ export const DEFAULT_STATE: AppState = {
   isModelSelectorOpen: false,
   isSearchSettingsOpen: false,
   isDaemonPanelOpen: false,
+  isIntegrationPanelOpen: false,
   isChannelTokenPromptOpen: false,
   channelTokenPromptPlatform: null,
   onboardingStatus: "checking",

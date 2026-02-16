@@ -20,7 +20,8 @@ export type SlashCommandHandlerKey =
   | "DAEMON"
   | "CHANNELS"
   | "SETUP"
-  | "TOGGLE_THINKING";
+  | "TOGGLE_THINKING"
+  | "INTEGRATIONS";
 
 export interface SlashCommandDefinition {
   readonly name: string;
@@ -196,6 +197,14 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     category: "appearance",
     handlerKey: "TOGGLE_THINKING",
   }),
+  Object.freeze({
+    name: "integrations",
+    aliases: Object.freeze(["int"]),
+    description: "Manage external service integrations.",
+    usage: "/integrations",
+    category: "system",
+    handlerKey: "INTEGRATIONS",
+  }),
 ]);
 
 const COMMAND_LOOKUP = new Map<string, SlashCommandDefinition>();
@@ -284,6 +293,15 @@ const PALETTE_ACTION_DEFINITIONS: readonly PaletteActionDefinition[] = Object.fr
     shortcutHint: "Ctrl+2",
     keywords: Object.freeze(["today", "panel", "activity", "summary"]),
     actionKey: "toggle-today",
+  }),
+  Object.freeze({
+    id: "action:open-integrations",
+    label: "Integrations",
+    description: "Manage external service integrations.",
+    category: "panels",
+    shortcutHint: "Ctrl+I",
+    keywords: Object.freeze(["integrations", "services", "obsidian", "gmail", "spotify", "connect"]),
+    actionKey: "open-integrations",
   }),
   // Settings/Help
   Object.freeze({

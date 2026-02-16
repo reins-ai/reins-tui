@@ -154,7 +154,9 @@ describe("action search items", () => {
 describe("category grouping", () => {
   test("results include both commands and actions categories", () => {
     const index = buildFullIndex();
-    const results = searchAndRank(index, "");
+    // Use a higher limit to ensure both commands and actions appear in empty-query results,
+    // since the default limit (20) may be filled entirely by commands when there are ≥20.
+    const results = rankSearchResults(index, "", { limit: 50 });
     const groups = groupResultsByCategory(results);
 
     const categories = groups.map((g) => g.category);
