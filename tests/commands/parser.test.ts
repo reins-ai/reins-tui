@@ -29,6 +29,7 @@ describe("slash command registry", () => {
       "setup",
       "thinking",
       "integrations",
+      "skills",
     ]);
   });
 
@@ -56,6 +57,7 @@ describe("slash command registry", () => {
       setup: "system",
       thinking: "appearance",
       integrations: "system",
+      skills: "system",
     });
   });
 
@@ -206,6 +208,7 @@ describe("getCommandAutocomplete", () => {
       "search-settings",
       "settings",
       "setup",
+      "skills",
       "status",
       "theme",
       "thinking",

@@ -21,7 +21,8 @@ export type SlashCommandHandlerKey =
   | "CHANNELS"
   | "SETUP"
   | "TOGGLE_THINKING"
-  | "INTEGRATIONS";
+  | "INTEGRATIONS"
+  | "SKILLS";
 
 export interface SlashCommandDefinition {
   readonly name: string;
@@ -205,6 +206,14 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     category: "system",
     handlerKey: "INTEGRATIONS",
   }),
+  Object.freeze({
+    name: "skills",
+    aliases: Object.freeze(["sk"]),
+    description: "Manage agent skills and capabilities.",
+    usage: "/skills",
+    category: "system",
+    handlerKey: "SKILLS",
+  }),
 ]);
 
 const COMMAND_LOOKUP = new Map<string, SlashCommandDefinition>();
@@ -302,6 +311,15 @@ const PALETTE_ACTION_DEFINITIONS: readonly PaletteActionDefinition[] = Object.fr
     shortcutHint: "Ctrl+I",
     keywords: Object.freeze(["integrations", "services", "obsidian", "vault", "connect"]),
     actionKey: "open-integrations",
+  }),
+  Object.freeze({
+    id: "action:open-skills",
+    label: "Skills",
+    description: "Manage agent skills and capabilities.",
+    category: "panels",
+    shortcutHint: "Ctrl+L",
+    keywords: Object.freeze(["skills", "agent", "capabilities", "plugins", "tools"]),
+    actionKey: "open-skills",
   }),
   // Settings/Help
   Object.freeze({

@@ -1,6 +1,10 @@
+import { join } from "node:path";
+
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
-import { writeUserConfig } from "@reins/core";
+import { writeUserConfig, getDataRoot } from "@reins/core";
+import { FileSkillStateStore, SkillRegistry, SkillScanner } from "@reins/core/skills";
+import type { Skill } from "@reins/core/skills";
 
 import { CommandPalette, type CommandPaletteDataSources, ErrorBoundary, Layout } from "./components";
 import { ModelSelectorModal, type ProviderModelGroup } from "./components/model-selector";
@@ -12,6 +16,9 @@ import { ChannelTokenPrompt } from "./components/channel-token-prompt";
 import { callDaemonChannelApi, maskBotToken } from "./commands/handlers/channels";
 import { DaemonPanel } from "./components/daemon-panel";
 import { IntegrationPanel } from "./components/integration-panel";
+import { SkillPanel } from "./components/skills/SkillPanel";
+import type { SkillListItem } from "./components/skills/SkillListPanel";
+import type { SkillDetailData } from "./components/skills/SkillDetailView";
 import { DaemonMemoryClient } from "./daemon/memory-client";
 import { HelpScreen } from "./screens";
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "./daemon/client";
@@ -176,6 +183,16 @@ function toDisplayMessages(
   });
 }
 
+function skillToListItem(skill: Skill): SkillListItem {
+  return {
+    name: skill.config.name,
+    description: skill.summary.description,
+    enabled: skill.config.enabled,
+    trustLevel: skill.config.trustLevel,
+    hasIntegration: skill.hasIntegration,
+  };
+}
+
 function getStatusTextForLifecycle(status: ConversationLifecycleStatus): string {
   switch (status) {
     case "idle":
@@ -253,6 +270,10 @@ function isToggleIntegrationPanelEvent(event: KeyEvent): boolean {
   return event.ctrl === true && (event.name === "i" || event.sequence === "\x09" || event.sequence === "i");
 }
 
+export function isToggleSkillPanelEvent(event: KeyEvent): boolean {
+  return event.ctrl === true && (event.name === "l" || event.sequence === "\x0c" || event.sequence === "l");
+}
+
 function resolveDirectPanelFocus(event: KeyEvent) {
   if (event.ctrl !== true) {
     return null;
@@ -327,6 +348,96 @@ function AppView({ version, dimensions }: AppViewProps) {
     dispatch({ type: "SET_INTEGRATION_PANEL_OPEN", payload: false });
     dispatch({ type: "SET_STATUS", payload: "Ready" });
   }, [dispatch]);
+
+  const closeSkillPanel = useCallback(() => {
+    dispatch({ type: "SET_SKILL_PANEL_OPEN", payload: false });
+    dispatch({ type: "SET_STATUS", payload: "Ready" });
+  }, [dispatch]);
+
+  // Skill state store, registry, and scanner — initialized once, shared across callbacks
+  const skillStateStoreRef = useRef<FileSkillStateStore>(
+    new FileSkillStateStore(join(getDataRoot(), "skill-state.json")),
+  );
+  const skillRegistryRef = useRef<SkillRegistry>(
+    new SkillRegistry({ stateStore: skillStateStoreRef.current }),
+  );
+  const skillScannerRef = useRef<SkillScanner | null>(null);
+  const skillStateLoadedRef = useRef(false);
+  const [skills, setSkills] = useState<SkillListItem[]>([]);
+
+  // Scan skills directory on mount and when panel becomes visible
+  useEffect(() => {
+    if (!state.isSkillPanelOpen) return;
+
+    let cancelled = false;
+
+    const scanSkills = async () => {
+      const dataRoot = getDataRoot();
+      const skillsDir = join(dataRoot, "skills");
+
+      // Load persisted state once per app lifetime
+      if (!skillStateLoadedRef.current) {
+        await skillStateStoreRef.current.load();
+        skillStateLoadedRef.current = true;
+      }
+
+      // Clear and re-scan to pick up any changes (persisted state is applied on register)
+      skillRegistryRef.current.clear();
+      const scanner = new SkillScanner(skillRegistryRef.current, skillsDir);
+      skillScannerRef.current = scanner;
+
+      await scanner.scan();
+
+      if (cancelled) return;
+
+      const registered = skillRegistryRef.current.list();
+      setSkills(registered.map(skillToListItem));
+    };
+
+    void scanSkills();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [state.isSkillPanelOpen]);
+
+  const loadSkillDetail = useCallback((name: string): SkillDetailData | null => {
+    const registry = skillRegistryRef.current;
+    const scanner = skillScannerRef.current;
+    const skill = registry.get(name);
+    if (!skill) return null;
+
+    const content = scanner?.loadSkill(name);
+
+    return {
+      name: skill.config.name,
+      description: skill.summary.description,
+      enabled: skill.config.enabled,
+      trustLevel: skill.config.trustLevel,
+      categories: skill.categories,
+      triggers: skill.triggers,
+      requiredTools: [],
+      scripts: skill.scriptFiles,
+      integrationStatus: skill.hasIntegration ? "needs_setup" : "not_required",
+      body: content?.body ?? "",
+    };
+  }, []);
+
+  const toggleSkillEnabled = useCallback((name: string): void => {
+    const registry = skillRegistryRef.current;
+    const skill = registry.get(name);
+    if (!skill) return;
+
+    if (skill.config.enabled) {
+      registry.disable(name);
+    } else {
+      registry.enable(name);
+    }
+
+    // Update the skills list to reflect the change
+    const registered = registry.list();
+    setSkills(registered.map(skillToListItem));
+  }, []);
 
   const [startupContent, setStartupContent] = useState<StartupContent | null>(null);
   const renderer = useRenderer();
@@ -984,6 +1095,10 @@ function AppView({ version, dimensions }: AppViewProps) {
         dispatch({ type: "SET_INTEGRATION_PANEL_OPEN", payload: true });
         dispatch({ type: "SET_STATUS", payload: "Integrations" });
         break;
+      case "skills":
+        dispatch({ type: "SET_SKILL_PANEL_OPEN", payload: true });
+        dispatch({ type: "SET_STATUS", payload: "Skills" });
+        break;
       case "thinking":
         dispatch({ type: "TOGGLE_THINKING_VISIBILITY" });
         dispatch({
@@ -1055,6 +1170,10 @@ function AppView({ version, dimensions }: AppViewProps) {
         dispatch({ type: "SET_INTEGRATION_PANEL_OPEN", payload: true });
         dispatch({ type: "SET_STATUS", payload: "Integrations" });
         break;
+      case "open-skills":
+        dispatch({ type: "SET_SKILL_PANEL_OPEN", payload: true });
+        dispatch({ type: "SET_STATUS", payload: "Skills" });
+        break;
       default:
         dispatch({ type: "SET_STATUS", payload: `Action: ${actionKey}` });
     }
@@ -1090,7 +1209,7 @@ function AppView({ version, dimensions }: AppViewProps) {
     // Palette-closes-first rule: if palette is open and another shortcut fires,
     // close palette first then let the shortcut through
     if (state.isCommandPaletteOpen) {
-      if (isToggleModelSelectorEvent(event) || isToggleDrawerEvent(event) || isToggleTodayEvent(event)) {
+      if (isToggleModelSelectorEvent(event) || isToggleDrawerEvent(event) || isToggleTodayEvent(event) || isToggleSkillPanelEvent(event)) {
         setCommandPaletteOpen(false);
         // Fall through to let the shortcut execute below
       } else {
@@ -1111,7 +1230,13 @@ function AppView({ version, dimensions }: AppViewProps) {
       return;
     }
 
-    if (state.isConnectFlowOpen || state.isModelSelectorOpen || state.isSearchSettingsOpen || state.isDaemonPanelOpen || state.isIntegrationPanelOpen || state.isChannelTokenPromptOpen) {
+    if (isToggleSkillPanelEvent(event)) {
+      dispatch({ type: "SET_SKILL_PANEL_OPEN", payload: !state.isSkillPanelOpen });
+      dispatch({ type: "SET_STATUS", payload: state.isSkillPanelOpen ? "Ready" : "Skills" });
+      return;
+    }
+
+    if (state.isConnectFlowOpen || state.isModelSelectorOpen || state.isSearchSettingsOpen || state.isDaemonPanelOpen || state.isIntegrationPanelOpen || state.isSkillPanelOpen || state.isChannelTokenPromptOpen) {
       return;
     }
 
@@ -1288,6 +1413,13 @@ function AppView({ version, dimensions }: AppViewProps) {
       <IntegrationPanel
         visible={state.isIntegrationPanelOpen}
         onClose={closeIntegrationPanel}
+      />
+      <SkillPanel
+        visible={state.isSkillPanelOpen}
+        skills={skills}
+        onLoadSkillDetail={loadSkillDetail}
+        onToggleEnabled={toggleSkillEnabled}
+        onClose={closeSkillPanel}
       />
       {state.isChannelTokenPromptOpen && state.channelTokenPromptPlatform ? (
         <ChannelTokenPrompt
