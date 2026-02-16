@@ -17,15 +17,21 @@ export interface IntegrationPanelProps {
 // Display types (structured for future daemon API wiring)
 // ---------------------------------------------------------------------------
 
-type IntegrationStatus = "connected" | "error" | "auth_expired" | "suspended" | "disconnected";
+export type IntegrationStatus = "connected" | "error" | "auth_expired" | "suspended" | "disconnected";
 
-interface IntegrationSummary {
+export interface OperationSummary {
+  readonly name: string;
+  readonly description: string;
+}
+
+export interface IntegrationSummary {
   readonly id: string;
   readonly name: string;
   readonly status: IntegrationStatus;
   readonly version: string;
   readonly description: string;
-  readonly operations: readonly string[];
+  readonly category: string;
+  readonly operations: readonly OperationSummary[];
 }
 
 // ---------------------------------------------------------------------------
@@ -193,7 +199,7 @@ function panelReducer(state: PanelState, action: PanelAction): PanelState {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function getStatusGlyph(status: IntegrationStatus): string {
+export function getStatusGlyph(status: IntegrationStatus): string {
   switch (status) {
     case "connected":
       return "●";
@@ -208,7 +214,7 @@ function getStatusGlyph(status: IntegrationStatus): string {
   }
 }
 
-function getStatusColorToken(status: IntegrationStatus): string {
+export function getStatusColorToken(status: IntegrationStatus): string {
   switch (status) {
     case "connected":
       return "status.success";
@@ -223,7 +229,22 @@ function getStatusColorToken(status: IntegrationStatus): string {
   }
 }
 
-function findIntegration(
+export function getStatusLabel(status: IntegrationStatus): string {
+  switch (status) {
+    case "connected":
+      return "Connected";
+    case "error":
+      return "Error";
+    case "auth_expired":
+      return "Auth Expired";
+    case "suspended":
+      return "Suspended";
+    case "disconnected":
+      return "Not Connected";
+  }
+}
+
+export function findIntegration(
   connected: readonly IntegrationSummary[],
   available: readonly IntegrationSummary[],
   id: string | null,
@@ -270,6 +291,7 @@ function IntegrationList({
         const isSelected = isFocused && index === selectedIndex;
         const statusGlyph = getStatusGlyph(item.status);
         const statusColor = tokens[getStatusColorToken(item.status)];
+        const statusLabel = getStatusLabel(item.status);
 
         return (
           <Box
@@ -292,11 +314,12 @@ function IntegrationList({
                 color: isSelected ? tokens["text.primary"] : tokens["text.secondary"],
               }}
             />
-            <Text content="  " style={{ color: tokens["text.primary"] }} />
-            <Text
-              content={`v${item.version}`}
-              style={{ color: tokens["text.muted"] }}
-            />
+            {item.status !== "disconnected" ? (
+              <Text
+                content={`  ${statusLabel}`}
+                style={{ color: statusColor }}
+              />
+            ) : null}
           </Box>
         );
       })}
@@ -329,6 +352,8 @@ function DetailPane({
   const statusGlyph = getStatusGlyph(integration.status);
   const statusColor = tokens[getStatusColorToken(integration.status)];
 
+  const statusLabel = getStatusLabel(integration.status);
+
   return (
     <Box style={{ flexDirection: "column", flexGrow: 1 }}>
       <Box style={{ flexDirection: "row", marginBottom: 1 }}>
@@ -338,27 +363,52 @@ function DetailPane({
         />
       </Box>
       <Box style={{ flexDirection: "column", paddingLeft: 2 }}>
+        {/* Name and version */}
         <Box style={{ flexDirection: "row" }}>
           <Text content={integration.name} style={{ color: tokens["text.primary"] }} />
           <Text content={`  v${integration.version}`} style={{ color: tokens["text.muted"] }} />
         </Box>
+
+        {/* Status with label */}
         <Box style={{ flexDirection: "row" }}>
           <Text content="Status: " style={{ color: tokens["text.muted"] }} />
           <Text content={statusGlyph} style={{ color: statusColor }} />
-          <Text content={` ${integration.status}`} style={{ color: statusColor }} />
+          <Text content={` ${statusLabel}`} style={{ color: statusColor }} />
         </Box>
+
+        {/* Category */}
+        {integration.category.length > 0 ? (
+          <Box style={{ flexDirection: "row" }}>
+            <Text content="Category: " style={{ color: tokens["text.muted"] }} />
+            <Text content={integration.category} style={{ color: tokens["text.secondary"] }} />
+          </Box>
+        ) : null}
+
+        {/* Description */}
         {integration.description.length > 0 ? (
           <Box style={{ flexDirection: "row", marginTop: 1 }}>
             <Text content={integration.description} style={{ color: tokens["text.secondary"] }} />
           </Box>
         ) : null}
+
+        {/* Operations with descriptions */}
         {integration.operations.length > 0 ? (
           <Box style={{ flexDirection: "column", marginTop: 1 }}>
-            <Text content="Operations:" style={{ color: tokens["text.muted"] }} />
+            <Text
+              content={`Operations (${integration.operations.length}):`}
+              style={{ color: tokens["text.muted"] }}
+            />
             {integration.operations.map((op) => (
-              <Box key={op} style={{ flexDirection: "row", paddingLeft: 2 }}>
-                <Text content="• " style={{ color: tokens["text.muted"] }} />
-                <Text content={op} style={{ color: tokens["text.secondary"] }} />
+              <Box key={op.name} style={{ flexDirection: "column", paddingLeft: 2 }}>
+                <Box style={{ flexDirection: "row" }}>
+                  <Text content="• " style={{ color: tokens["accent.primary"] }} />
+                  <Text content={op.name} style={{ color: tokens["text.primary"] }} />
+                </Box>
+                {op.description.length > 0 ? (
+                  <Box style={{ flexDirection: "row", paddingLeft: 4 }}>
+                    <Text content={op.description} style={{ color: tokens["text.muted"] }} />
+                  </Box>
+                ) : null}
               </Box>
             ))}
           </Box>
@@ -419,23 +469,41 @@ export function IntegrationPanel({ visible, onClose }: IntegrationPanelProps) {
           status: "connected",
           version: "1.0.0",
           description: "Local Markdown vault for notes and knowledge management.",
-          operations: ["search-notes", "read-note", "create-note", "list-notes"],
+          category: "productivity",
+          operations: [
+            { name: "search-notes", description: "Search notes by content and title" },
+            { name: "read-note", description: "Read note content by path" },
+            { name: "create-note", description: "Create new note with title and content" },
+            { name: "list-notes", description: "List notes in a directory" },
+          ],
         },
         {
           id: "gmail",
           name: "Gmail",
-          status: "connected",
+          status: "auth_expired",
           version: "1.0.0",
           description: "Google email with OAuth2 authentication.",
-          operations: ["read-email", "search-emails", "send-email", "list-emails"],
+          category: "communication",
+          operations: [
+            { name: "read-email", description: "Read email by ID" },
+            { name: "search-emails", description: "Search emails by query" },
+            { name: "send-email", description: "Send email with to/cc/bcc/subject/body" },
+            { name: "list-emails", description: "List recent inbox emails" },
+          ],
         },
         {
           id: "spotify",
           name: "Spotify",
-          status: "connected",
+          status: "error",
           version: "1.0.0",
           description: "Music playback and library management.",
-          operations: ["get-playback", "control-playback", "search", "get-playlists"],
+          category: "media",
+          operations: [
+            { name: "get-playback", description: "Get current playback state" },
+            { name: "control-playback", description: "Play, pause, skip, or go to previous track" },
+            { name: "search", description: "Search tracks, albums, artists, playlists" },
+            { name: "get-playlists", description: "Get user's playlists" },
+          ],
         },
       ],
       available: [
@@ -445,7 +513,12 @@ export function IntegrationPanel({ visible, onClose }: IntegrationPanelProps) {
           status: "disconnected",
           version: "1.0.0",
           description: "Team messaging and collaboration.",
-          operations: ["send-message", "list-channels", "search-messages"],
+          category: "communication",
+          operations: [
+            { name: "send-message", description: "Send a message to a channel or user" },
+            { name: "list-channels", description: "List available channels" },
+            { name: "search-messages", description: "Search messages across channels" },
+          ],
         },
         {
           id: "notion",
@@ -453,7 +526,12 @@ export function IntegrationPanel({ visible, onClose }: IntegrationPanelProps) {
           status: "disconnected",
           version: "1.0.0",
           description: "Workspace for notes, docs, and project management.",
-          operations: ["search-pages", "read-page", "create-page"],
+          category: "productivity",
+          operations: [
+            { name: "search-pages", description: "Search pages by title or content" },
+            { name: "read-page", description: "Read page content by ID" },
+            { name: "create-page", description: "Create a new page in a database" },
+          ],
         },
       ],
     });
