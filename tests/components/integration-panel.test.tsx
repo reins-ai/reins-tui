@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  callIntegrationAction,
   filterIntegrations,
   getAvailableActions,
   getActionLabel,
@@ -474,5 +475,104 @@ describe("IntegrationPanel search result count", () => {
     const filteredAvailable = filterIntegrations(AVAILABLE_INTEGRATIONS, "");
     const total = filteredConnected.length + filteredAvailable.length;
     expect(total).toBe(CONNECTED_INTEGRATIONS.length + AVAILABLE_INTEGRATIONS.length);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Daemon API mock — OAuth config validation
+// ---------------------------------------------------------------------------
+
+describe("IntegrationPanel callIntegrationAction", () => {
+  const originalEnv = { ...process.env };
+
+  function clearOAuthEnv(): void {
+    delete process.env["GMAIL_CLIENT_ID"];
+    delete process.env["GMAIL_CLIENT_SECRET"];
+    delete process.env["SPOTIFY_CLIENT_ID"];
+    delete process.env["SPOTIFY_CLIENT_SECRET"];
+  }
+
+  function restoreEnv(): void {
+    // Restore only the keys we care about
+    if (originalEnv["GMAIL_CLIENT_ID"] !== undefined) {
+      process.env["GMAIL_CLIENT_ID"] = originalEnv["GMAIL_CLIENT_ID"];
+    } else {
+      delete process.env["GMAIL_CLIENT_ID"];
+    }
+    if (originalEnv["SPOTIFY_CLIENT_ID"] !== undefined) {
+      process.env["SPOTIFY_CLIENT_ID"] = originalEnv["SPOTIFY_CLIENT_ID"];
+    } else {
+      delete process.env["SPOTIFY_CLIENT_ID"];
+    }
+  }
+
+  test("connect fails for gmail when GMAIL_CLIENT_ID is missing", async () => {
+    clearOAuthEnv();
+    try {
+      const result = await callIntegrationAction("gmail", "connect");
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+      expect(result.error).toContain("Gmail requires OAuth credentials");
+      expect(result.error).toContain("GMAIL_CLIENT_ID");
+      expect(result.error).toContain("GMAIL_CLIENT_SECRET");
+    } finally {
+      restoreEnv();
+    }
+  });
+
+  test("connect fails for spotify when SPOTIFY_CLIENT_ID is missing", async () => {
+    clearOAuthEnv();
+    try {
+      const result = await callIntegrationAction("spotify", "connect");
+      expect(result.success).toBe(false);
+      expect(result.error).toBeDefined();
+      expect(result.error).toContain("Spotify requires OAuth credentials");
+      expect(result.error).toContain("SPOTIFY_CLIENT_ID");
+    } finally {
+      restoreEnv();
+    }
+  });
+
+  test("connect succeeds for gmail when GMAIL_CLIENT_ID is set", async () => {
+    process.env["GMAIL_CLIENT_ID"] = "test-client-id";
+    try {
+      const result = await callIntegrationAction("gmail", "connect");
+      expect(result.success).toBe(true);
+    } finally {
+      restoreEnv();
+    }
+  });
+
+  test("connect succeeds for non-OAuth integrations without env vars", async () => {
+    clearOAuthEnv();
+    try {
+      const result = await callIntegrationAction("obsidian", "connect");
+      expect(result.success).toBe(true);
+    } finally {
+      restoreEnv();
+    }
+  });
+
+  test("non-connect actions succeed regardless of OAuth config", async () => {
+    clearOAuthEnv();
+    try {
+      const result = await callIntegrationAction("gmail", "disconnect");
+      expect(result.success).toBe(true);
+    } finally {
+      restoreEnv();
+    }
+  });
+
+  test("connect error message includes setup instructions", async () => {
+    clearOAuthEnv();
+    try {
+      const result = await callIntegrationAction("gmail", "connect");
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("developer console");
+      expect(result.error).toContain("OAuth 2.0 credentials");
+      expect(result.error).toContain("Restart Reins daemon");
+    } finally {
+      restoreEnv();
+    }
   });
 });
