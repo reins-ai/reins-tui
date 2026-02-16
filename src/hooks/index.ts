@@ -3,3 +3,4 @@ export type { FocusManager } from "./use-focus";
 export * from "./use-conversation";
 export * from "./use-conversations";
 export { useFirstRun, detectFirstRunState, type FirstRunState, type UseFirstRunOptions } from "./use-first-run";
+export { useCommandCompletion, type CommandCompletionState, type CommandCompletionActions, type UseCommandCompletionOptions } from "./use-command-completion";

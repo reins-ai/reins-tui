@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { dispatchCommand, type CommandResult } from "../commands/handlers";
 import { parseSlashCommand } from "../commands/parser";
 import { SLASH_COMMANDS } from "../commands/registry";
+import type { CompletionProviderContext } from "../commands/completion";
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "../daemon/client";
 import { getActiveDaemonUrl } from "../daemon/actions";
 import { useDaemon } from "../daemon/daemon-context";
@@ -10,12 +11,14 @@ import { createEnvironmentClient } from "../daemon/environment-client";
 import { createMemoryClient } from "../daemon/memory-client";
 import { useApp } from "../store";
 import { InputHistory } from "../lib";
+import { useCommandCompletion } from "../hooks/use-command-completion";
 import { useThemeContext, useThemeTokens } from "../theme";
 import type { ThemeTokens } from "../theme/theme-schema";
 import type { BorderCharacters, FramedBlockStyle } from "../ui/types";
 import { Box, Input, Text, useKeyboard, useRenderer } from "../ui";
 import { ACCENT_BORDER_CHARS, FramedBlock, SUBTLE_BORDER_CHARS } from "../ui/primitives";
 import { useConversations } from "../hooks";
+import { CompletionPopup } from "./completion-popup";
 
 export interface InputAreaProps {
   isFocused: boolean;
@@ -206,6 +209,28 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
   const [compactMode, setCompactMode] = useState(false);
   const [daemonUrl, setDaemonUrl] = useState(DEFAULT_DAEMON_HTTP_BASE_URL);
 
+  // --- Command completion ---
+  const completionProviderContext: CompletionProviderContext = useMemo(() => ({
+    models: state.availableModels,
+    themes: () => registry.listThemes(),
+    environments: state.activeEnvironment ? [state.activeEnvironment] : [],
+    commands: SLASH_COMMANDS.map((c) => c.name),
+  }), [state.availableModels, state.activeEnvironment, registry]);
+
+  const [completionState, completionActions] = useCommandCompletion({
+    isFocused,
+    providerContext: completionProviderContext,
+  });
+
+  // Sync completion active state to the store so AppView can skip Tab focus cycling
+  const prevCompletionOpenRef = useRef(false);
+  useEffect(() => {
+    if (completionState.isOpen !== prevCompletionOpenRef.current) {
+      prevCompletionOpenRef.current = completionState.isOpen;
+      dispatch({ type: "SET_COMPLETION_ACTIVE", payload: completionState.isOpen });
+    }
+  }, [completionState.isOpen, dispatch]);
+
   // Resolve active daemon URL from profile store
   useEffect(() => {
     void (async () => {
@@ -354,7 +379,40 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
       return;
     }
 
-    if (isUpKey(event.name)) {
+    // --- Completion keyboard handling ---
+    const keyName = event.name ?? "";
+
+    // Tab: accept the selected completion suggestion
+    if (keyName === "tab" && !event.shift && completionState.isOpen) {
+      const applied = completionActions.acceptSelected();
+      if (applied) {
+        setInput(applied.value);
+        history.current.setDraft(applied.value);
+        // Trigger re-evaluation of completions for chained completion
+        completionActions.update(applied.value);
+      }
+      return;
+    }
+
+    // Up/Down: navigate completion suggestions when popup is open
+    if (isUpKey(keyName) && completionState.isOpen) {
+      completionActions.moveSelection(-1);
+      return;
+    }
+
+    if (isDownKey(keyName) && completionState.isOpen) {
+      completionActions.moveSelection(1);
+      return;
+    }
+
+    // Escape: dismiss completion popup
+    if ((keyName === "escape" || keyName === "esc") && completionState.isOpen) {
+      completionActions.dismiss();
+      return;
+    }
+
+    // --- Original history navigation (only when popup is NOT open) ---
+    if (isUpKey(keyName)) {
       if (input.trim().length > 0) {
         return;
       }
@@ -367,7 +425,7 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
       return;
     }
 
-    if (isDownKey(event.name)) {
+    if (isDownKey(keyName)) {
       if (input.trim().length > 0) {
         return;
       }
@@ -383,6 +441,7 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
     const next = clampText(normalizeInputValue(value));
     setInput(next);
     history.current.setDraft(next);
+    completionActions.update(next);
 
     if (validationError !== null) {
       setValidationError(null);
@@ -406,12 +465,14 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
       void handleCommand(input);
       history.current.push(input);
       setInput("");
+      completionActions.update("");
       return;
     }
 
     onSubmit(input);
     history.current.push(input);
     setInput("");
+    completionActions.update("");
     setValidationError(null);
   };
 
@@ -420,10 +481,23 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
   const borderChars = getInputBorderChars(frameState);
   const charCount = formatCharCount(input.length, MAX_INPUT_LENGTH);
 
+  // Build contextual hint text
+  const completionHintParts: string[] = [];
+  if (completionState.ghostText && isFocused) {
+    completionHintParts.push(completionState.ghostText);
+  }
+  if (completionState.isOpen) {
+    completionHintParts.push("Tab complete · ↑↓ select · Esc dismiss");
+  } else if (isFocused) {
+    completionHintParts.push("Enter to send · Ctrl+K palette");
+  } else {
+    completionHintParts.push("Tab to focus · Ctrl+K palette");
+  }
+
   const hintText = validationError
     ?? (daemonMode === "mock"
       ? "⚠ Daemon disconnected — start daemon for real responses"
-      : isFocused ? "Enter to send · Ctrl+K palette" : "Tab to focus · Ctrl+K palette");
+      : completionHintParts.join("  ·  "));
 
   const hintColor = validationError
     ? tokens["status.error"]
@@ -432,28 +506,36 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
       : tokens["text.muted"];
 
   return (
-    <FramedBlock style={blockStyle} borderChars={borderChars}>
-      <Input
-        focused={isFocused}
-        placeholder={daemonMode === "mock" ? "⚠ Daemon offline — responses are simulated" : "Type a message... (Enter to send)"}
-        value={input}
-        onInput={handleInput}
-        onSubmit={handleSubmit}
+    <>
+      {/* Completion popup — sits above the input in natural flow */}
+      <CompletionPopup
+        visible={completionState.isOpen}
+        suggestions={completionState.result.suggestions}
+        selectedIndex={completionState.selectedIndex}
       />
-      <Box style={{ flexDirection: "row" }}>
-        <Box style={{ flexGrow: 1 }}>
-          <Text
-            content={hintText}
-            style={{ color: hintColor }}
-          />
+      <FramedBlock style={blockStyle} borderChars={borderChars}>
+        <Input
+          focused={isFocused}
+          placeholder={daemonMode === "mock" ? "⚠ Daemon offline — responses are simulated" : "Type a message... (Enter to send)"}
+          value={input}
+          onInput={handleInput}
+          onSubmit={handleSubmit}
+        />
+        <Box style={{ flexDirection: "row" }}>
+          <Box style={{ flexGrow: 1 }}>
+            <Text
+              content={hintText}
+              style={{ color: hintColor }}
+            />
+          </Box>
+          {charCount ? (
+            <Text
+              content={charCount}
+              style={{ color: tokens["text.muted"] }}
+            />
+          ) : null}
         </Box>
-        {charCount ? (
-          <Text
-            content={charCount}
-            style={{ color: tokens["text.muted"] }}
-          />
-        ) : null}
-      </Box>
-    </FramedBlock>
+      </FramedBlock>
+    </>
   );
 }
