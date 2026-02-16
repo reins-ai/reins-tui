@@ -20,13 +20,14 @@ export interface StreamToolCall {
 }
 
 export interface TurnContentBlock {
-  type: "text" | "tool-call";
+  type: "text" | "tool-call" | "thinking";
   toolCallId?: string;
   text?: string;
 }
 
 export interface MultiToolTurnState {
   contentBlocks: TurnContentBlock[];
+  thinkingContent: string;
   synthesisContent: string;
   hasToolCalls: boolean;
   textBeforeTools: string;
@@ -142,6 +143,7 @@ export type StreamingState =
 export function createInitialTurnState(): MultiToolTurnState {
   return {
     contentBlocks: [],
+    thinkingContent: "",
     synthesisContent: "",
     hasToolCalls: false,
     textBeforeTools: "",
@@ -190,7 +192,7 @@ function toStatusMachineEvent(event: StreamingEvent): StatusMachineEvent {
       };
     case "thinking-delta":
       return {
-        type: "stream-chunk",
+        type: "thinking-chunk",
         timestamp: event.timestamp,
         conversationId: event.conversationId,
         assistantMessageId: event.messageId,
@@ -324,15 +326,23 @@ function applyToolCallComplete(toolCalls: StreamToolCall[], event: Extract<Strea
 function buildTurnState(
   toolCalls: StreamToolCall[],
   partialContent: string,
+  thinkingContent: string,
   previousTurnState: MultiToolTurnState,
 ): MultiToolTurnState {
   const hasToolCalls = toolCalls.length > 0;
 
   if (!hasToolCalls) {
+    const contentBlocks: TurnContentBlock[] = [];
+    if (thinkingContent.length > 0) {
+      contentBlocks.push({ type: "thinking", text: thinkingContent });
+    }
+    if (partialContent.length > 0) {
+      contentBlocks.push({ type: "text", text: partialContent });
+    }
+
     return {
-      contentBlocks: partialContent.length > 0
-        ? [{ type: "text", text: partialContent }]
-        : [],
+      contentBlocks,
+      thinkingContent,
       synthesisContent: "",
       hasToolCalls: false,
       textBeforeTools: partialContent,
@@ -341,6 +351,10 @@ function buildTurnState(
 
   const textBeforeTools = previousTurnState.textBeforeTools;
   const blocks: TurnContentBlock[] = [];
+
+  if (thinkingContent.length > 0) {
+    blocks.push({ type: "thinking", text: thinkingContent });
+  }
 
   if (textBeforeTools.length > 0) {
     blocks.push({ type: "text", text: textBeforeTools });
@@ -361,6 +375,7 @@ function buildTurnState(
 
   return {
     contentBlocks: blocks,
+    thinkingContent,
     synthesisContent,
     hasToolCalls: true,
     textBeforeTools,
@@ -444,9 +459,37 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
         state.status === "streaming" || state.status === "thinking" || state.status === "error" ? state.partialContent : "";
       const partialContent = `${currentPartial}${event.delta}`;
       const nextToolCalls = state.toolCalls;
-      const nextTurnState = buildTurnState(nextToolCalls, partialContent, state.turnState);
+      const nextTurnState = buildTurnState(
+        nextToolCalls,
+        partialContent,
+        state.turnState.thinkingContent,
+        state.turnState,
+      );
       return {
         status: "streaming",
+        lifecycle,
+        conversationId: event.conversationId,
+        messages: upsertAssistantMessage(state.messages, event.messageId, partialContent, event.timestamp),
+        assistantMessageId: event.messageId,
+        partialContent,
+        toolCalls: nextToolCalls,
+        turnState: nextTurnState,
+      };
+    }
+    case "thinking-delta": {
+      if (lifecycle.status !== "thinking" && lifecycle.status !== "streaming") {
+        return state;
+      }
+
+      const partialContent =
+        state.status === "streaming" || state.status === "thinking" || state.status === "error" ? state.partialContent : "";
+      const thinkingContent = `${state.turnState.thinkingContent}${event.delta}`;
+      const nextToolCalls = state.toolCalls;
+      const nextTurnState = buildTurnState(nextToolCalls, partialContent, thinkingContent, state.turnState);
+      const nextStatus = lifecycle.status === "thinking" ? "thinking" : "streaming";
+
+      return {
+        status: nextStatus,
         lifecycle,
         conversationId: event.conversationId,
         messages: upsertAssistantMessage(state.messages, event.messageId, partialContent, event.timestamp),
@@ -461,7 +504,12 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
         return state;
       }
 
-      const finalTurnState = buildTurnState(state.toolCalls, event.content, state.turnState);
+      const finalTurnState = buildTurnState(
+        state.toolCalls,
+        event.content,
+        state.turnState.thinkingContent,
+        state.turnState,
+      );
       return {
         status: "complete",
         lifecycle,
@@ -506,7 +554,12 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
       const prevTurnState: MultiToolTurnState = state.turnState.hasToolCalls
         ? state.turnState
         : { ...state.turnState, textBeforeTools: basePartial };
-      const nextTurnState = buildTurnState(nextToolCalls, basePartial, prevTurnState);
+      const nextTurnState = buildTurnState(
+        nextToolCalls,
+        basePartial,
+        prevTurnState.thinkingContent,
+        prevTurnState,
+      );
 
       return {
         status: "streaming",
@@ -527,7 +580,12 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
       const basePartial =
         state.status === "streaming" || state.status === "thinking" || state.status === "error" ? state.partialContent : "";
       const nextToolCalls = applyToolCallComplete(state.toolCalls, event);
-      const nextTurnState = buildTurnState(nextToolCalls, basePartial, state.turnState);
+      const nextTurnState = buildTurnState(
+        nextToolCalls,
+        basePartial,
+        state.turnState.thinkingContent,
+        state.turnState,
+      );
 
       return {
         status: "streaming",

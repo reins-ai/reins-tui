@@ -72,6 +72,12 @@ export type StatusMachineEvent =
       assistantMessageId: string;
     }
   | {
+      type: "thinking-chunk";
+      timestamp: string;
+      conversationId: string;
+      assistantMessageId: string;
+    }
+  | {
       type: "tool-call-start";
       timestamp: string;
       conversationId: string;
@@ -180,6 +186,12 @@ export function reduceStatusMachine(state: StatusMachineState, event: StatusMach
         ...state,
         chunkCount: state.chunkCount + 1,
       };
+    case "thinking-chunk":
+      if (state.status === "thinking") {
+        return state;
+      }
+
+      return state;
     case "tool-call-start":
     case "tool-call-complete":
       if (state.status === "thinking") {
