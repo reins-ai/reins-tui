@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer } from "react";
+import { useCallback, useEffect, useReducer, useRef } from "react";
 
 import { useThemeTokens } from "../theme";
 import { Box, Text, useKeyboard } from "../ui";
@@ -40,6 +40,19 @@ export interface IntegrationSummary {
 
 type FocusSection = "connected" | "available" | "detail";
 
+export type IntegrationActionName =
+  | "enable"
+  | "disable"
+  | "connect"
+  | "disconnect"
+  | "reconnect"
+  | "resume"
+  | "retry";
+
+type ActionStep = "idle" | "confirm-disconnect" | "action-in-progress";
+
+type FeedbackType = "success" | "error";
+
 interface PanelState {
   readonly connected: readonly IntegrationSummary[];
   readonly available: readonly IntegrationSummary[];
@@ -49,6 +62,11 @@ interface PanelState {
   readonly availableIndex: number;
   readonly statusMessage: string | null;
   readonly busy: boolean;
+  // Action state
+  readonly actionStep: ActionStep;
+  readonly actionFeedback: string | null;
+  readonly actionFeedbackType: FeedbackType | null;
+  readonly selectedActionIndex: number;
 }
 
 type PanelAction =
@@ -63,7 +81,16 @@ type PanelAction =
   | { type: "SWITCH_SECTION" }
   | { type: "SELECT_CURRENT" }
   | { type: "SET_BUSY"; busy: boolean }
-  | { type: "DISMISS_STATUS" };
+  | { type: "DISMISS_STATUS" }
+  // Action flow
+  | { type: "START_ACTION" }
+  | { type: "ACTION_SUCCESS"; message: string }
+  | { type: "ACTION_ERROR"; error: string }
+  | { type: "CLEAR_ACTION_FEEDBACK" }
+  | { type: "START_CONFIRM_DISCONNECT" }
+  | { type: "CANCEL_CONFIRM" }
+  | { type: "NAVIGATE_ACTION_LEFT" }
+  | { type: "NAVIGATE_ACTION_RIGHT" };
 
 const INITIAL_STATE: PanelState = {
   connected: [],
@@ -74,6 +101,10 @@ const INITIAL_STATE: PanelState = {
   availableIndex: 0,
   statusMessage: null,
   busy: false,
+  actionStep: "idle",
+  actionFeedback: null,
+  actionFeedbackType: null,
+  selectedActionIndex: 0,
 };
 
 function getActiveList(state: PanelState): readonly IntegrationSummary[] {
@@ -190,6 +221,68 @@ function panelReducer(state: PanelState, action: PanelAction): PanelState {
     case "DISMISS_STATUS":
       return { ...state, statusMessage: null };
 
+    // --- Action flow ---
+
+    case "START_ACTION":
+      return {
+        ...state,
+        actionStep: "action-in-progress",
+        busy: true,
+        actionFeedback: null,
+        actionFeedbackType: null,
+      };
+
+    case "ACTION_SUCCESS":
+      return {
+        ...state,
+        actionStep: "idle",
+        busy: false,
+        actionFeedback: action.message,
+        actionFeedbackType: "success",
+      };
+
+    case "ACTION_ERROR":
+      return {
+        ...state,
+        actionStep: "idle",
+        busy: false,
+        actionFeedback: action.error,
+        actionFeedbackType: "error",
+      };
+
+    case "CLEAR_ACTION_FEEDBACK":
+      return {
+        ...state,
+        actionFeedback: null,
+        actionFeedbackType: null,
+      };
+
+    case "START_CONFIRM_DISCONNECT":
+      return {
+        ...state,
+        actionStep: "confirm-disconnect",
+        actionFeedback: null,
+        actionFeedbackType: null,
+      };
+
+    case "CANCEL_CONFIRM":
+      return {
+        ...state,
+        actionStep: "idle",
+      };
+
+    case "NAVIGATE_ACTION_LEFT":
+      return {
+        ...state,
+        selectedActionIndex: Math.max(0, state.selectedActionIndex - 1),
+      };
+
+    case "NAVIGATE_ACTION_RIGHT":
+      return {
+        ...state,
+        selectedActionIndex: state.selectedActionIndex + 1,
+      };
+
     default:
       return state;
   }
@@ -255,6 +348,132 @@ export function findIntegration(
     ?? available.find((i) => i.id === id)
     ?? null
   );
+}
+
+// ---------------------------------------------------------------------------
+// Action helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns the list of available actions for a given integration status.
+ * Actions are displayed as keyboard-driven buttons in the detail pane.
+ */
+export function getAvailableActions(status: IntegrationStatus): readonly IntegrationActionName[] {
+  switch (status) {
+    case "connected":
+      return ["disable", "disconnect"];
+    case "disconnected":
+      return ["enable", "connect"];
+    case "auth_expired":
+      return ["reconnect", "disconnect"];
+    case "suspended":
+      return ["resume", "disconnect"];
+    case "error":
+      return ["retry", "disconnect"];
+  }
+}
+
+export function getActionLabel(action: IntegrationActionName): string {
+  switch (action) {
+    case "enable":
+      return "Enable";
+    case "disable":
+      return "Disable";
+    case "connect":
+      return "Connect";
+    case "disconnect":
+      return "Disconnect";
+    case "reconnect":
+      return "Reconnect";
+    case "resume":
+      return "Resume";
+    case "retry":
+      return "Retry";
+  }
+}
+
+function getActionKeyHint(action: IntegrationActionName): string {
+  switch (action) {
+    case "enable":
+      return "e";
+    case "disable":
+      return "d";
+    case "connect":
+      return "c";
+    case "disconnect":
+      return "x";
+    case "reconnect":
+      return "c";
+    case "resume":
+      return "e";
+    case "retry":
+      return "e";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Daemon API (mock — all integration logic lives in the daemon)
+// ---------------------------------------------------------------------------
+
+/**
+ * Mock daemon API call for integration actions.
+ *
+ * TODO: Replace with actual daemon HTTP calls once the daemon integration
+ * service (Wave 9) is wired. The TUI never performs integration logic
+ * directly — it only sends action requests and displays results.
+ */
+export async function callIntegrationAction(
+  integrationId: string,
+  action: string,
+  config?: Record<string, unknown>,
+): Promise<{ success: boolean; message: string; error?: string }> {
+  // Simulate network delay to daemon
+  await new Promise((resolve) => setTimeout(resolve, 400));
+
+  // TODO: Replace with actual fetch to daemon API:
+  //   const url = `${daemonBaseUrl}/integrations/${integrationId}/${action}`;
+  //   const response = await fetch(url, { method: "POST", body: JSON.stringify(config) });
+  //   return response.json();
+
+  void config;
+
+  return {
+    success: true,
+    message: `${action} completed for ${integrationId}`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Action handlers
+// ---------------------------------------------------------------------------
+
+async function executeIntegrationAction(
+  integrationId: string,
+  action: IntegrationActionName,
+  dispatch: React.Dispatch<PanelAction>,
+): Promise<void> {
+  dispatch({ type: "START_ACTION" });
+
+  try {
+    const endpoint = action === "reconnect" ? "connect" : action;
+    const result = await callIntegrationAction(integrationId, endpoint);
+
+    if (result.success) {
+      const label = getActionLabel(action);
+      dispatch({
+        type: "ACTION_SUCCESS",
+        message: result.message || `${label} successful`,
+      });
+    } else {
+      dispatch({
+        type: "ACTION_ERROR",
+        error: result.error || `Failed to ${action} integration`,
+      });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    dispatch({ type: "ACTION_ERROR", error: message });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -330,10 +549,18 @@ function IntegrationList({
 function DetailPane({
   integration,
   isFocused,
+  actionStep,
+  actionFeedback,
+  actionFeedbackType,
+  selectedActionIndex,
   tokens,
 }: {
   integration: IntegrationSummary | null;
   isFocused: boolean;
+  actionStep: ActionStep;
+  actionFeedback: string | null;
+  actionFeedbackType: FeedbackType | null;
+  selectedActionIndex: number;
   tokens: Record<string, string>;
 }) {
   if (!integration) {
@@ -351,8 +578,8 @@ function DetailPane({
 
   const statusGlyph = getStatusGlyph(integration.status);
   const statusColor = tokens[getStatusColorToken(integration.status)];
-
   const statusLabel = getStatusLabel(integration.status);
+  const actions = getAvailableActions(integration.status);
 
   return (
     <Box style={{ flexDirection: "column", flexGrow: 1 }}>
@@ -413,6 +640,38 @@ function DetailPane({
             ))}
           </Box>
         ) : null}
+
+        {/* Action buttons — only when focused and not confirming */}
+        {isFocused && actionStep !== "confirm-disconnect" ? (
+          <IntegrationActionButtons
+            actions={actions}
+            selectedIndex={selectedActionIndex}
+            disabled={actionStep === "action-in-progress"}
+            tokens={tokens}
+          />
+        ) : null}
+
+        {/* Confirm disconnect dialog */}
+        {actionStep === "confirm-disconnect" ? (
+          <ConfirmDisconnect integrationName={integration.name} tokens={tokens} />
+        ) : null}
+
+        {/* Action in progress indicator */}
+        {actionStep === "action-in-progress" ? (
+          <Box style={{ flexDirection: "row", marginTop: 1 }}>
+            <Text content="⏳ " style={{ color: tokens["accent.primary"] }} />
+            <Text content="Performing action..." style={{ color: tokens["text.muted"] }} />
+          </Box>
+        ) : null}
+
+        {/* Action feedback */}
+        {actionFeedback !== null && actionFeedbackType !== null ? (
+          <ActionFeedback
+            message={actionFeedback}
+            feedbackType={actionFeedbackType}
+            tokens={tokens}
+          />
+        ) : null}
       </Box>
     </Box>
   );
@@ -442,6 +701,98 @@ function ActionBar({ tokens }: { tokens: Record<string, string> }) {
           />
         </Box>
       ))}
+    </Box>
+  );
+}
+
+function IntegrationActionButtons({
+  actions,
+  selectedIndex,
+  disabled,
+  tokens,
+}: {
+  actions: readonly IntegrationActionName[];
+  selectedIndex: number;
+  disabled: boolean;
+  tokens: Record<string, string>;
+}) {
+  if (actions.length === 0) return null;
+
+  // Clamp index to valid range
+  const clampedIndex = Math.min(selectedIndex, actions.length - 1);
+
+  return (
+    <Box style={{ flexDirection: "column", marginTop: 1 }}>
+      <Text content="Actions" style={{ color: tokens["text.muted"] }} />
+      <Box style={{ flexDirection: "row", marginTop: 1 }}>
+        {actions.map((action, index) => {
+          const isSelected = index === clampedIndex;
+          const label = getActionLabel(action);
+          const keyHint = getActionKeyHint(action);
+          const isDestructive = action === "disconnect" || action === "disable";
+
+          let textColor = tokens["text.secondary"];
+          if (disabled) {
+            textColor = tokens["text.muted"];
+          } else if (isSelected && isDestructive) {
+            textColor = tokens["status.error"];
+          } else if (isSelected) {
+            textColor = tokens["accent.primary"];
+          }
+
+          return (
+            <Box key={action} style={{ flexDirection: "row" }}>
+              {index > 0 ? (
+                <Text content="  " style={{ color: tokens["text.muted"] }} />
+              ) : null}
+              <Text
+                content={isSelected ? `[${keyHint}] ${label}` : `${keyHint} ${label}`}
+                style={{ color: textColor }}
+              />
+            </Box>
+          );
+        })}
+      </Box>
+    </Box>
+  );
+}
+
+function ConfirmDisconnect({
+  integrationName,
+  tokens,
+}: {
+  integrationName: string;
+  tokens: Record<string, string>;
+}) {
+  return (
+    <Box style={{ flexDirection: "column", marginTop: 1 }}>
+      <Box style={{ flexDirection: "row" }}>
+        <Text
+          content={`Disconnect '${integrationName}'? `}
+          style={{ color: tokens["status.warning"] }}
+        />
+        <Text content="(y/n)" style={{ color: tokens["text.muted"] }} />
+      </Box>
+    </Box>
+  );
+}
+
+function ActionFeedback({
+  message,
+  feedbackType,
+  tokens,
+}: {
+  message: string;
+  feedbackType: FeedbackType;
+  tokens: Record<string, string>;
+}) {
+  const glyph = feedbackType === "success" ? "✓" : "✗";
+  const color = feedbackType === "success" ? tokens["status.success"] : tokens["status.error"];
+
+  return (
+    <Box style={{ flexDirection: "row", marginTop: 1 }}>
+      <Text content={`${glyph} `} style={{ color }} />
+      <Text content={message} style={{ color }} />
     </Box>
   );
 }
@@ -537,15 +888,75 @@ export function IntegrationPanel({ visible, onClose }: IntegrationPanelProps) {
     });
   }, [visible]);
 
+  // Auto-clear success feedback after a delay
+  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (state.actionFeedback !== null && state.actionFeedbackType === "success") {
+      feedbackTimerRef.current = setTimeout(() => {
+        dispatch({ type: "CLEAR_ACTION_FEEDBACK" });
+      }, 3000);
+      return () => {
+        if (feedbackTimerRef.current !== null) {
+          clearTimeout(feedbackTimerRef.current);
+        }
+      };
+    }
+  }, [state.actionFeedback, state.actionFeedbackType]);
+
+  // Resolve the selected integration for action dispatch
+  const selectedIntegration = findIntegration(
+    state.connected,
+    state.available,
+    state.selectedId,
+  );
+
+  // Trigger an action on the selected integration via daemon API
+  const triggerAction = useCallback(
+    (action: IntegrationActionName) => {
+      if (!selectedIntegration) return;
+
+      // Clear any previous feedback
+      dispatch({ type: "CLEAR_ACTION_FEEDBACK" });
+
+      // Disconnect requires confirmation
+      if (action === "disconnect") {
+        dispatch({ type: "START_CONFIRM_DISCONNECT" });
+        return;
+      }
+
+      void executeIntegrationAction(selectedIntegration.id, action, dispatch);
+    },
+    [selectedIntegration],
+  );
+
   // Keyboard handler
   useKeyboard(useCallback((event) => {
     if (!visible) return;
-    if (state.busy) return;
 
     const keyName = event.name ?? "";
 
-    // Escape closes the panel
+    // --- Confirm disconnect step ---
+    if (state.actionStep === "confirm-disconnect") {
+      if (keyName === "y" && selectedIntegration) {
+        void executeIntegrationAction(selectedIntegration.id, "disconnect", dispatch);
+        return;
+      }
+      if (keyName === "n" || keyName === "escape" || keyName === "esc") {
+        dispatch({ type: "CANCEL_CONFIRM" });
+        return;
+      }
+      return;
+    }
+
+    // Block all input during action-in-progress
+    if (state.busy) return;
+
+    // Escape closes the panel (or clears error feedback first)
     if (keyName === "escape" || keyName === "esc") {
+      if (state.actionFeedback !== null && state.actionFeedbackType === "error") {
+        dispatch({ type: "CLEAR_ACTION_FEEDBACK" });
+        return;
+      }
       onClose();
       return;
     }
@@ -553,6 +964,7 @@ export function IntegrationPanel({ visible, onClose }: IntegrationPanelProps) {
     // Tab switches between sections
     if (keyName === "tab") {
       dispatch({ type: "SWITCH_SECTION" });
+      dispatch({ type: "CLEAR_ACTION_FEEDBACK" });
       return;
     }
 
@@ -568,18 +980,72 @@ export function IntegrationPanel({ visible, onClose }: IntegrationPanelProps) {
 
     // Enter selects current item and shows detail
     if (keyName === "return" || keyName === "enter") {
+      if (state.focusSection === "detail" && selectedIntegration) {
+        // In detail view, Enter triggers the currently highlighted action
+        const actions = getAvailableActions(selectedIntegration.status);
+        const clampedIndex = Math.min(state.selectedActionIndex, actions.length - 1);
+        const action = actions[clampedIndex];
+        if (action) {
+          triggerAction(action);
+        }
+        return;
+      }
       dispatch({ type: "SELECT_CURRENT" });
       return;
     }
-  }, [visible, state.busy, onClose]));
 
-  const selectedIntegration = findIntegration(
-    state.connected,
-    state.available,
-    state.selectedId,
-  );
+    // Action keyboard shortcuts (only in detail view)
+    if (state.focusSection === "detail" && selectedIntegration) {
+      const actions = getAvailableActions(selectedIntegration.status);
 
-  const hintText = "Tab section · j/k nav · Enter select · Esc close";
+      // Left/Right or h/l to navigate action buttons
+      if (keyName === "left" || keyName === "h") {
+        dispatch({ type: "NAVIGATE_ACTION_LEFT" });
+        return;
+      }
+      if (keyName === "right" || keyName === "l") {
+        dispatch({ type: "NAVIGATE_ACTION_RIGHT" });
+        return;
+      }
+
+      // Direct key shortcuts for actions
+      if (keyName === "e" && actions.includes("enable")) {
+        triggerAction("enable");
+        return;
+      }
+      if (keyName === "e" && actions.includes("resume")) {
+        triggerAction("resume");
+        return;
+      }
+      if (keyName === "e" && actions.includes("retry")) {
+        triggerAction("retry");
+        return;
+      }
+      if (keyName === "d" && actions.includes("disable")) {
+        triggerAction("disable");
+        return;
+      }
+      if (keyName === "c" && actions.includes("connect")) {
+        triggerAction("connect");
+        return;
+      }
+      if (keyName === "c" && actions.includes("reconnect")) {
+        triggerAction("reconnect");
+        return;
+      }
+      if (keyName === "x" && actions.includes("disconnect")) {
+        triggerAction("disconnect");
+        return;
+      }
+    }
+  }, [visible, state.busy, state.actionStep, state.focusSection, state.selectedActionIndex, state.actionFeedback, state.actionFeedbackType, selectedIntegration, onClose, triggerAction]));
+
+  // Compute hint text based on current state
+  const hintText = state.actionStep === "confirm-disconnect"
+    ? "y confirm · n cancel"
+    : state.focusSection === "detail"
+      ? "h/l actions · Enter run · Tab section · Esc close"
+      : "Tab section · j/k nav · Enter select · Esc close";
 
   return (
     <ModalPanel
@@ -611,11 +1077,15 @@ export function IntegrationPanel({ visible, onClose }: IntegrationPanelProps) {
           <ActionBar tokens={tokens} />
         </Box>
 
-        {/* Right column: detail pane */}
+        {/* Right column: detail pane with actions */}
         <Box style={{ flexDirection: "column", flexGrow: 1, paddingLeft: 2 }}>
           <DetailPane
             integration={selectedIntegration}
             isFocused={state.focusSection === "detail"}
+            actionStep={state.actionStep}
+            actionFeedback={state.actionFeedback}
+            actionFeedbackType={state.actionFeedbackType}
+            selectedActionIndex={state.selectedActionIndex}
             tokens={tokens}
           />
         </Box>
@@ -629,8 +1099,8 @@ export function IntegrationPanel({ visible, onClose }: IntegrationPanelProps) {
         </Box>
       ) : null}
 
-      {/* Busy indicator */}
-      {state.busy ? (
+      {/* Busy indicator (only for non-action busy states like initial load) */}
+      {state.busy && state.actionStep !== "action-in-progress" ? (
         <Box style={{ marginTop: 1 }}>
           <Text content="Loading..." style={{ color: tokens["text.muted"] }} />
         </Box>
