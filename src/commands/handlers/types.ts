@@ -3,7 +3,7 @@ import type { Result } from "../../daemon/contracts";
 import type { ParsedCommand } from "../parser";
 import type { SlashCommandDefinition } from "../registry";
 
-export type CommandSignalType = "OPEN_CONNECT_FLOW" | "OPEN_EMBEDDING_SETUP" | "OPEN_SETTINGS" | "OPEN_SEARCH_SETTINGS" | "OPEN_DAEMON_PANEL" | "PROMPT_CHANNEL_TOKEN" | "RELAUNCH_ONBOARDING" | "QUIT_TUI" | "ENVIRONMENT_SWITCHED";
+export type CommandSignalType = "OPEN_CONNECT_FLOW" | "OPEN_EMBEDDING_SETUP" | "OPEN_SETTINGS" | "OPEN_SEARCH_SETTINGS" | "OPEN_DAEMON_PANEL" | "PROMPT_CHANNEL_TOKEN" | "RELAUNCH_ONBOARDING" | "QUIT_TUI" | "ENVIRONMENT_SWITCHED" | "TOGGLE_THINKING_VISIBILITY";
 
 export interface CommandSignal {
   readonly type: CommandSignalType;

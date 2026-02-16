@@ -27,6 +27,7 @@ describe("slash command registry", () => {
       "daemon",
       "channels",
       "setup",
+      "thinking",
     ]);
   });
 
@@ -52,6 +53,7 @@ describe("slash command registry", () => {
       daemon: "system",
       channels: "system",
       setup: "system",
+      thinking: "appearance",
     });
   });
 
@@ -203,6 +205,7 @@ describe("getCommandAutocomplete", () => {
       "setup",
       "status",
       "theme",
+      "thinking",
     ]);
   });
 

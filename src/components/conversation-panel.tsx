@@ -11,6 +11,7 @@ import { Box, ScrollBox, Text } from "../ui";
 import { FramedBlock, SUBTLE_BORDER_CHARS } from "../ui/primitives";
 import { LogoAscii } from "./logo-ascii";
 import { Message } from "./message";
+import { ThinkingBlock } from "./thinking-block";
 import { ToolBlock } from "./tool-inline";
 
 /**
@@ -196,6 +197,7 @@ export function ConversationPanel({ isFocused, borderColor: _borderColor, versio
   const { state } = useApp();
   const { tokens, getRoleBorder } = useThemeTokens();
   const expandedToolCalls = state.expandedToolCalls;
+  const thinkingVisible = state.thinkingVisible;
   const showEmptyState = messages.length === 0 && !isStreaming;
   const hasContent = messages.some(
     (message) => message.content.trim().length > 0 || (message.toolCalls && message.toolCalls.length > 0),
@@ -301,6 +303,20 @@ export function ConversationPanel({ isFocused, borderColor: _borderColor, versio
                     );
                   }
 
+                  if (block.type === "thinking" && thinkingVisible && block.text) {
+                    const marginTop = renderedBlockCount === 0 ? 0 : adjustedBlockGap(MESSAGE_GAP);
+                    renderedBlockCount += 1;
+
+                    return (
+                      <Box key={`${message.id}-thinking-${blockIndex}`} style={{ flexDirection: "column", marginTop }}>
+                        <ThinkingBlock
+                          content={block.text}
+                          isStreaming={message.isStreaming}
+                        />
+                      </Box>
+                    );
+                  }
+
                   return null;
                 })
               : null;
@@ -314,6 +330,7 @@ export function ConversationPanel({ isFocused, borderColor: _borderColor, versio
                     message={message}
                     lifecycleStatus={message.isStreaming ? lifecycleStatus : undefined}
                     renderToolBlocks={useToolBlocks}
+                    thinkingVisible={thinkingVisible}
                   />
                 )}
                 {useToolBlocks && remainingToolCalls.length > 0 ? (

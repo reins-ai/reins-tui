@@ -24,6 +24,7 @@ import { createConversationStore, type ConversationStoreState } from "./state/co
 import type { StreamToolCall, TurnContentBlock } from "./state/streaming-state";
 import { loadModelPreferences, saveModelPreferences } from "./state/model-persistence";
 import { loadPinPreferences, savePinPreferences } from "./state/pin-persistence";
+import { loadThinkingPreferences, saveThinkingPreferences } from "./state/thinking-persistence";
 import { toPinPreferences, applyPinPreferences, DEFAULT_PANEL_STATE } from "./state/layout-mode";
 import { useConversations, useFocus, useFirstRun } from "./hooks";
 import type { PaletteAction } from "./palette/fuzzy-index";
@@ -239,6 +240,10 @@ function isToggleTodayEvent(event: KeyEvent): boolean {
   return event.ctrl === true && (event.name === "2" || event.sequence === "2");
 }
 
+function isCycleThinkingEvent(event: KeyEvent): boolean {
+  return event.ctrl === true && (event.name === "t" || event.sequence === "\x14");
+}
+
 function isToggleModelSelectorEvent(event: KeyEvent): boolean {
   return event.ctrl === true && (event.name === "m" || event.sequence === "\x0d" || event.sequence === "m");
 }
@@ -352,6 +357,20 @@ function AppView({ version, dimensions }: AppViewProps) {
     }
     if (prefs.provider) {
       dispatch({ type: "SET_PROVIDER", payload: prefs.provider });
+    }
+  }, [dispatch]);
+
+  // Restore thinking preferences on startup
+  const thinkingPrefsLoadedRef = useRef(false);
+  useEffect(() => {
+    if (thinkingPrefsLoadedRef.current) return;
+    thinkingPrefsLoadedRef.current = true;
+    const prefs = loadThinkingPreferences();
+    if (prefs.thinkingLevel !== "none") {
+      dispatch({ type: "SET_THINKING_LEVEL", payload: prefs.thinkingLevel });
+    }
+    if (!prefs.thinkingVisible) {
+      dispatch({ type: "TOGGLE_THINKING_VISIBILITY" });
     }
   }, [dispatch]);
 
@@ -628,6 +647,21 @@ function AppView({ version, dimensions }: AppViewProps) {
     }
   }, [state.currentModel, state.currentProvider]);
 
+  // Persist thinking preferences when they change
+  const prevThinkingRef = useRef({ level: state.thinkingLevel, visible: state.thinkingVisible });
+  useEffect(() => {
+    if (
+      state.thinkingLevel !== prevThinkingRef.current.level ||
+      state.thinkingVisible !== prevThinkingRef.current.visible
+    ) {
+      prevThinkingRef.current = { level: state.thinkingLevel, visible: state.thinkingVisible };
+      saveThinkingPreferences({
+        thinkingLevel: state.thinkingLevel,
+        thinkingVisible: state.thinkingVisible,
+      });
+    }
+  }, [state.thinkingLevel, state.thinkingVisible]);
+
   const handleModelSelect = useCallback((modelId: string, providerId: string) => {
     dispatch({ type: "SET_MODEL", payload: modelId });
     dispatch({ type: "SET_PROVIDER", payload: providerId });
@@ -692,6 +726,7 @@ function AppView({ version, dimensions }: AppViewProps) {
       conversationId: state.activeConversationId ?? undefined,
       content: trimmed,
       model: state.currentModel,
+      thinkingLevel: state.thinkingLevel !== "none" ? state.thinkingLevel : undefined,
     });
 
     if (!sendResult.ok) {
@@ -935,6 +970,13 @@ function AppView({ version, dimensions }: AppViewProps) {
         dispatch({ type: "SET_DAEMON_PANEL_OPEN", payload: true });
         dispatch({ type: "SET_STATUS", payload: "Daemon panel" });
         break;
+      case "thinking":
+        dispatch({ type: "TOGGLE_THINKING_VISIBILITY" });
+        dispatch({
+          type: "SET_STATUS",
+          payload: state.thinkingVisible ? "Thinking blocks hidden" : "Thinking blocks visible",
+        });
+        break;
       case "quit":
         exitApp();
         break;
@@ -1099,6 +1141,11 @@ function AppView({ version, dimensions }: AppViewProps) {
 
     if (isNewConversationEvent(event)) {
       void createNewConversation();
+      return;
+    }
+
+    if (isCycleThinkingEvent(event)) {
+      dispatch({ type: "CYCLE_THINKING_LEVEL" });
       return;
     }
 

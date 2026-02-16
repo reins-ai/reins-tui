@@ -6,6 +6,7 @@ import {
   type DaemonMessage,
   type DaemonResult,
   type SendMessageResponse,
+  type ThinkingLevel,
 } from "../daemon/contracts";
 import {
   createInitialStreamingState,
@@ -23,7 +24,7 @@ export interface ConversationStoreState {
 export interface ConversationStore {
   getState(): ConversationStoreState;
   subscribe(listener: (state: ConversationStoreState) => void): () => void;
-  sendUserMessage(input: { conversationId?: string; content: string; model?: string }): Promise<DaemonResult<void>>;
+  sendUserMessage(input: { conversationId?: string; content: string; model?: string; thinkingLevel?: ThinkingLevel }): Promise<DaemonResult<void>>;
   dismissError(): void;
   reset(): void;
 }
@@ -194,6 +195,7 @@ export function createConversationStore(options: ConversationStoreOptions): Conv
         conversationId: input.conversationId,
         content: input.content,
         model: input.model,
+        thinkingLevel: input.thinkingLevel,
       });
 
       if (!sendResult.ok) {

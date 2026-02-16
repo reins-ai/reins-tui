@@ -17,6 +17,7 @@ import type {
   DaemonHistoryPayloadNormalizer,
   DaemonRawHistoryMessage,
 } from "../daemon/contracts";
+import type { ThinkingLevel } from "../daemon/contracts";
 import type { AppState, DisplayContentBlock, DisplayMessage, DisplayToolCall, DisplayToolCallStatus, FocusedPanel, OnboardingStatus } from "./types";
 import { DEFAULT_STATE } from "./types";
 import { applyHydratedHistoryChunk } from "./history-hydration";
@@ -110,6 +111,9 @@ export type AppAction =
   | { type: "TOGGLE_TOOL_EXPAND"; payload: { toolCallId: string } }
   | { type: "COLLAPSE_ALL_TOOLS" }
   | { type: "CLEAR_MESSAGES" }
+  | { type: "SET_THINKING_LEVEL"; payload: ThinkingLevel }
+  | { type: "TOGGLE_THINKING_VISIBILITY" }
+  | { type: "CYCLE_THINKING_LEVEL" }
   | {
       type: "HYDRATE_HISTORY";
       payload: {
@@ -177,6 +181,14 @@ export interface ApplyHydratedHistoryChunkResult {
 export type ApplyHydratedHistoryChunk = (
   input: ApplyHydratedHistoryChunkInput,
 ) => ApplyHydratedHistoryChunkResult;
+
+const THINKING_LEVEL_CYCLE: readonly ThinkingLevel[] = ["none", "low", "medium", "high"] as const;
+
+export function cycleThinkingLevel(current: ThinkingLevel): ThinkingLevel {
+  const index = THINKING_LEVEL_CYCLE.indexOf(current);
+  if (index === -1) return "none";
+  return THINKING_LEVEL_CYCLE[(index + 1) % THINKING_LEVEL_CYCLE.length];
+}
 
 function streamToolCallsToDisplay(toolCalls: StreamToolCall[]): DisplayToolCall[] {
   return [...toolCalls]
@@ -667,6 +679,12 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         isStreaming: false,
         expandedToolCalls: new Set<string>(),
       };
+    case "SET_THINKING_LEVEL":
+      return { ...state, thinkingLevel: action.payload };
+    case "TOGGLE_THINKING_VISIBILITY":
+      return { ...state, thinkingVisible: !state.thinkingVisible };
+    case "CYCLE_THINKING_LEVEL":
+      return { ...state, thinkingLevel: cycleThinkingLevel(state.thinkingLevel) };
     case "TOGGLE_PANEL":
     case "DISMISS_PANEL":
     case "PIN_PANEL":

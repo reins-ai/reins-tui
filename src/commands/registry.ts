@@ -19,7 +19,8 @@ export type SlashCommandHandlerKey =
   | "MEMORY_SETUP"
   | "DAEMON"
   | "CHANNELS"
-  | "SETUP";
+  | "SETUP"
+  | "TOGGLE_THINKING";
 
 export interface SlashCommandDefinition {
   readonly name: string;
@@ -186,6 +187,14 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     usage: "/setup",
     category: "system",
     handlerKey: "SETUP",
+  }),
+  Object.freeze({
+    name: "thinking",
+    aliases: Object.freeze([]),
+    description: "Toggle visibility of thinking blocks.",
+    usage: "/thinking",
+    category: "appearance",
+    handlerKey: "TOGGLE_THINKING",
   }),
 ]);
 

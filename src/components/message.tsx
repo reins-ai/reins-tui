@@ -11,6 +11,7 @@ import { FramedBlock, SUBTLE_BORDER_CHARS } from "../ui/primitives";
 import { CardRenderer } from "./cards";
 import { MarkdownText } from "./markdown-text";
 import { StreamingText } from "./streaming-text";
+import { ThinkingBlock } from "./thinking-block";
 
 // Chat label vocabulary (text-only, symbol-free)
 export const GLYPH_REINS = "Assistant";
@@ -273,9 +274,14 @@ export interface MessageProps {
    * The Message component skips its own tool call rendering in this case.
    */
   renderToolBlocks?: boolean;
+  /**
+   * Controls whether thinking blocks are rendered. When false, thinking
+   * blocks are hidden from display but remain in the message data.
+   */
+  thinkingVisible?: boolean;
 }
 
-export function Message({ message, lifecycleStatus, renderToolBlocks }: MessageProps) {
+export function Message({ message, lifecycleStatus, renderToolBlocks, thinkingVisible = true }: MessageProps) {
   const { tokens, getRoleBorder } = useThemeTokens();
   const roleLabel = getRoleGlyph(message.role);
   const roleLabelColor = getRoleColor(message.role, tokens);
@@ -288,10 +294,21 @@ export function Message({ message, lifecycleStatus, renderToolBlocks }: MessageP
       ? tokens["conversation.assistant.text"]
       : tokens["conversation.user.text"];
 
+  const thinkingBlocks = thinkingVisible && message.contentBlocks
+    ? message.contentBlocks.filter((block) => block.type === "thinking" && block.text)
+    : [];
+
   return (
     <FramedBlock style={blockStyle} borderChars={borderChars}>
       <Box style={{ flexDirection: "column" }}>
         <Text style={{ color: roleLabelColor }}><b>{roleLabel}</b></Text>
+        {thinkingBlocks.map((block, index) => (
+          <ThinkingBlock
+            key={`thinking-${index}`}
+            content={block.text ?? ""}
+            isStreaming={message.isStreaming}
+          />
+        ))}
         {message.content.trim().length > 0 || message.isStreaming ? (
           <Box style={{ marginTop: 0 }}>
             {message.role === "assistant" ? (

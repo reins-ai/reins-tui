@@ -6,7 +6,7 @@ describe("Help Screen", () => {
   test("exports expected keyboard shortcut categories", () => {
     const categories = HELP_SHORTCUT_CATEGORIES.map((category) => category.title);
 
-    expect(categories).toEqual(["NAVIGATION", "CONVERSATION", "SIDEBAR", "APPLICATION"]);
+    expect(categories).toEqual(["NAVIGATION", "CONVERSATION", "SIDEBAR", "MODEL & THINKING", "APPLICATION"]);
   });
 
   test("each shortcut has key and description", () => {
