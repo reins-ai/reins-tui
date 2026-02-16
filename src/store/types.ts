@@ -105,7 +105,7 @@ export interface DisplayToolCall {
 }
 
 export interface DisplayContentBlock {
-  type: "text" | "tool-call";
+  type: "text" | "tool-call" | "thinking";
   toolCallId?: string;
   text?: string;
 }

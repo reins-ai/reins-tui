@@ -188,6 +188,13 @@ function toStatusMachineEvent(event: StreamingEvent): StatusMachineEvent {
         conversationId: event.conversationId,
         assistantMessageId: event.messageId,
       };
+    case "thinking-delta":
+      return {
+        type: "stream-chunk",
+        timestamp: event.timestamp,
+        conversationId: event.conversationId,
+        assistantMessageId: event.messageId,
+      };
     case "complete":
       return {
         type: "stream-complete",

@@ -211,12 +211,15 @@ export interface ConversationUpdateRequest {
   model?: string;
 }
 
+export type ThinkingLevel = "none" | "low" | "medium" | "high";
+
 export interface SendMessageRequest {
   conversationId?: string;
   content: string;
   role?: DaemonMessageRole;
   model?: string;
   provider?: string;
+  thinkingLevel?: ThinkingLevel;
 }
 
 export interface SendMessageResponse {
@@ -245,6 +248,13 @@ export type DaemonStreamEvent =
     }
   | {
       type: "delta";
+      conversationId: string;
+      messageId: string;
+      delta: string;
+      timestamp: string;
+    }
+  | {
+      type: "thinking-delta";
       conversationId: string;
       messageId: string;
       delta: string;
