@@ -514,6 +514,22 @@ const CHANNELS_SPEC: CommandSpec = {
   ],
 };
 
+const INTEGRATIONS_SPEC: CommandSpec = {
+  name: "integrations",
+  aliases: ["int"],
+  description: "Open integrations panel.",
+  usage: "/integrations",
+  root: [],
+};
+
+const SKILLS_SPEC: CommandSpec = {
+  name: "skills",
+  aliases: ["sk"],
+  description: "Open skills management panel.",
+  usage: "/skills",
+  root: [],
+};
+
 // ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
@@ -537,6 +553,8 @@ const ALL_SPECS: readonly CommandSpec[] = [
   DAEMON_SPEC,
   CHANNELS_SPEC,
   SETUP_SPEC,
+  INTEGRATIONS_SPEC,
+  SKILLS_SPEC,
 ];
 
 /**
