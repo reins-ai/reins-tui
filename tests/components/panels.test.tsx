@@ -566,11 +566,11 @@ describe("IntegrationPanel", () => {
         operations: [{ name: "search", description: "Search notes" }],
       },
       {
-        id: "gmail",
-        name: "Gmail",
+        id: "google-calendar",
+        name: "Google Calendar",
         status: "auth_expired",
         version: "1.0.0",
-        description: "Email",
+        description: "Calendar",
         category: "communication",
         operations: [],
       },
@@ -672,20 +672,20 @@ describe("IntegrationPanel", () => {
         operations: [{ name: "search-notes", description: "Search notes" }],
       },
       {
-        id: "gmail",
-        name: "Gmail",
+        id: "google-calendar",
+        name: "Google Calendar",
         status: "auth_expired",
         version: "1.0.0",
-        description: "Google email with OAuth2 authentication.",
+        description: "Calendar scheduling with OAuth2 authentication.",
         category: "communication",
         operations: [],
       },
       {
-        id: "spotify",
-        name: "Spotify",
+        id: "linear",
+        name: "Linear",
         status: "error",
         version: "1.0.0",
-        description: "Music playback and library management.",
+        description: "Issue tracking and task management.",
         category: "media",
         operations: [],
       },
@@ -709,9 +709,9 @@ describe("IntegrationPanel", () => {
     });
 
     test("filters by name (case-insensitive)", () => {
-      const result = filterIntegrations(integrations, "gmail");
+      const result = filterIntegrations(integrations, "calendar");
       expect(result.length).toBe(1);
-      expect(result[0].id).toBe("gmail");
+      expect(result[0].id).toBe("google-calendar");
     });
 
     test("filters by name with mixed case", () => {
@@ -721,9 +721,9 @@ describe("IntegrationPanel", () => {
     });
 
     test("filters by id", () => {
-      const result = filterIntegrations(integrations, "spotify");
+      const result = filterIntegrations(integrations, "linear");
       expect(result.length).toBe(1);
-      expect(result[0].id).toBe("spotify");
+      expect(result[0].id).toBe("linear");
     });
 
     test("filters by description content", () => {
@@ -733,14 +733,13 @@ describe("IntegrationPanel", () => {
     });
 
     test("filters by partial match", () => {
-      const result = filterIntegrations(integrations, "mail");
+      const result = filterIntegrations(integrations, "calendar");
       expect(result.length).toBe(1);
-      expect(result[0].id).toBe("gmail");
+      expect(result[0].id).toBe("google-calendar");
     });
 
     test("returns multiple matches", () => {
-      // Both Gmail and Slack have "communication" in description or category,
-      // but description includes "messaging" for Slack and "email" for Gmail.
+      // Google Calendar and Slack both have communication-oriented metadata.
       // "a" matches all four names.
       const result = filterIntegrations(integrations, "a");
       expect(result.length).toBeGreaterThanOrEqual(2);
@@ -757,16 +756,16 @@ describe("IntegrationPanel", () => {
     });
 
     test("matches across name and description", () => {
-      // "music" appears in Spotify's description
-      const result = filterIntegrations(integrations, "music");
+      // "issue" appears in Linear's description.
+      const result = filterIntegrations(integrations, "issue");
       expect(result.length).toBe(1);
-      expect(result[0].id).toBe("spotify");
+      expect(result[0].id).toBe("linear");
     });
 
     test("trims query whitespace before matching", () => {
-      const result = filterIntegrations(integrations, "  gmail  ");
+      const result = filterIntegrations(integrations, "  calendar  ");
       expect(result.length).toBe(1);
-      expect(result[0].id).toBe("gmail");
+      expect(result[0].id).toBe("google-calendar");
     });
   });
 

@@ -30,31 +30,31 @@ const CONNECTED_INTEGRATIONS: IntegrationSummary[] = [
     ],
   },
   {
-    id: "gmail",
-    name: "Gmail",
+    id: "google-calendar",
+    name: "Google Calendar",
     status: "auth_expired",
     version: "1.0.0",
-    description: "Google email with OAuth2 authentication.",
+    description: "Calendar scheduling with OAuth2 authentication.",
     category: "communication",
     operations: [
-      { name: "read-email", description: "Read email by ID" },
-      { name: "search-emails", description: "Search emails by query" },
-      { name: "send-email", description: "Send email" },
-      { name: "list-emails", description: "List recent inbox emails" },
+      { name: "list-events", description: "List upcoming events" },
+      { name: "get-event", description: "Read event details by ID" },
+      { name: "create-event", description: "Create a calendar event" },
+      { name: "update-event", description: "Update an existing event" },
     ],
   },
   {
-    id: "spotify",
-    name: "Spotify",
+    id: "linear",
+    name: "Linear",
     status: "error",
     version: "1.0.0",
-    description: "Music playback and library management.",
+    description: "Issue tracking and task management for software teams.",
     category: "media",
     operations: [
-      { name: "get-playback", description: "Get current playback state" },
-      { name: "control-playback", description: "Play, pause, skip" },
-      { name: "search", description: "Search tracks, albums, artists" },
-      { name: "get-playlists", description: "Get user's playlists" },
+      { name: "list-issues", description: "List open issues" },
+      { name: "create-issue", description: "Create a new issue" },
+      { name: "update-issue", description: "Update issue status" },
+      { name: "search-issues", description: "Search issues by title" },
     ],
   },
 ];
@@ -112,15 +112,15 @@ describe("IntegrationPanel search filtering", () => {
     });
 
     test("filters case-insensitively", () => {
-      const result = filterIntegrations(ALL_INTEGRATIONS, "GMAIL");
+      const result = filterIntegrations(ALL_INTEGRATIONS, "CALENDAR");
       expect(result.length).toBe(1);
-      expect(result[0].id).toBe("gmail");
+      expect(result[0].id).toBe("google-calendar");
     });
 
     test("filters by partial name", () => {
-      const result = filterIntegrations(ALL_INTEGRATIONS, "spo");
+      const result = filterIntegrations(ALL_INTEGRATIONS, "linear");
       expect(result.length).toBe(1);
-      expect(result[0].id).toBe("spotify");
+      expect(result[0].id).toBe("linear");
     });
 
     test("filters by integration id", () => {
@@ -130,9 +130,9 @@ describe("IntegrationPanel search filtering", () => {
     });
 
     test("filters by description keyword", () => {
-      const result = filterIntegrations(ALL_INTEGRATIONS, "playback");
+      const result = filterIntegrations(ALL_INTEGRATIONS, "issue");
       expect(result.length).toBe(1);
-      expect(result[0].id).toBe("spotify");
+      expect(result[0].id).toBe("linear");
     });
 
     test("returns multiple matches for shared terms", () => {
@@ -155,21 +155,21 @@ describe("IntegrationPanel search filtering", () => {
     });
 
     test("trims leading and trailing whitespace from query", () => {
-      const result = filterIntegrations(ALL_INTEGRATIONS, "  gmail  ");
+      const result = filterIntegrations(ALL_INTEGRATIONS, "  calendar  ");
       expect(result.length).toBe(1);
-      expect(result[0].id).toBe("gmail");
+      expect(result[0].id).toBe("google-calendar");
     });
 
     test("matches description with OAuth keyword", () => {
       const result = filterIntegrations(ALL_INTEGRATIONS, "oauth");
       expect(result.length).toBe(1);
-      expect(result[0].id).toBe("gmail");
+      expect(result[0].id).toBe("google-calendar");
     });
 
     test("matches across connected and available lists separately", () => {
-      const connectedResult = filterIntegrations(CONNECTED_INTEGRATIONS, "email");
+      const connectedResult = filterIntegrations(CONNECTED_INTEGRATIONS, "calendar");
       expect(connectedResult.length).toBe(1);
-      expect(connectedResult[0].id).toBe("gmail");
+      expect(connectedResult[0].id).toBe("google-calendar");
 
       const availableResult = filterIntegrations(AVAILABLE_INTEGRATIONS, "messaging");
       expect(availableResult.length).toBe(1);
@@ -177,11 +177,11 @@ describe("IntegrationPanel search filtering", () => {
     });
 
     test("single character query works", () => {
-      // "s" matches Spotify, Slack (name), and possibly others via description
-      const result = filterIntegrations(ALL_INTEGRATIONS, "s");
+      // "l" matches Linear and Slack by name.
+      const result = filterIntegrations(ALL_INTEGRATIONS, "l");
       expect(result.length).toBeGreaterThanOrEqual(2);
       const ids = result.map((i) => i.id);
-      expect(ids).toContain("spotify");
+      expect(ids).toContain("linear");
       expect(ids).toContain("slack");
     });
   });
@@ -323,16 +323,16 @@ describe("IntegrationPanel keyboard navigation logic", () => {
   describe("search query building", () => {
     test("typing characters appends to search query", () => {
       let query = "";
-      query += "g";
-      query += "m";
+      query += "c";
       query += "a";
-      expect(query).toBe("gma");
+      query += "l";
+      expect(query).toBe("cal");
     });
 
     test("backspace removes last character", () => {
-      const query = "gmail";
+      const query = "calendar";
       const afterBackspace = query.slice(0, -1);
-      expect(afterBackspace).toBe("gmai");
+      expect(afterBackspace).toBe("calenda");
     });
 
     test("backspace on empty query stays empty", () => {
@@ -449,10 +449,10 @@ describe("IntegrationPanel keyboard navigation logic", () => {
 
 describe("IntegrationPanel search result count", () => {
   test("total count is sum of filtered connected and available", () => {
-    const filteredConnected = filterIntegrations(CONNECTED_INTEGRATIONS, "email");
-    const filteredAvailable = filterIntegrations(AVAILABLE_INTEGRATIONS, "email");
+    const filteredConnected = filterIntegrations(CONNECTED_INTEGRATIONS, "calendar");
+    const filteredAvailable = filterIntegrations(AVAILABLE_INTEGRATIONS, "calendar");
     const total = filteredConnected.length + filteredAvailable.length;
-    expect(total).toBe(1); // Only Gmail matches "email"
+    expect(total).toBe(1); // Only Google Calendar matches "calendar"
   });
 
   test("total count with broad query", () => {
@@ -479,100 +479,33 @@ describe("IntegrationPanel search result count", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Daemon API mock — OAuth config validation
+// Daemon API mock — active native scope validation
 // ---------------------------------------------------------------------------
 
 describe("IntegrationPanel callIntegrationAction", () => {
-  const originalEnv = { ...process.env };
-
-  function clearOAuthEnv(): void {
-    delete process.env["GMAIL_CLIENT_ID"];
-    delete process.env["GMAIL_CLIENT_SECRET"];
-    delete process.env["SPOTIFY_CLIENT_ID"];
-    delete process.env["SPOTIFY_CLIENT_SECRET"];
-  }
-
-  function restoreEnv(): void {
-    // Restore only the keys we care about
-    if (originalEnv["GMAIL_CLIENT_ID"] !== undefined) {
-      process.env["GMAIL_CLIENT_ID"] = originalEnv["GMAIL_CLIENT_ID"];
-    } else {
-      delete process.env["GMAIL_CLIENT_ID"];
-    }
-    if (originalEnv["SPOTIFY_CLIENT_ID"] !== undefined) {
-      process.env["SPOTIFY_CLIENT_ID"] = originalEnv["SPOTIFY_CLIENT_ID"];
-    } else {
-      delete process.env["SPOTIFY_CLIENT_ID"];
-    }
-  }
-
-  test("connect fails for gmail when GMAIL_CLIENT_ID is missing", async () => {
-    clearOAuthEnv();
-    try {
-      const result = await callIntegrationAction("gmail", "connect");
-      expect(result.success).toBe(false);
-      expect(result.error).toBeDefined();
-      expect(result.error).toContain("Gmail requires OAuth credentials");
-      expect(result.error).toContain("GMAIL_CLIENT_ID");
-      expect(result.error).toContain("GMAIL_CLIENT_SECRET");
-    } finally {
-      restoreEnv();
-    }
+  test("connect succeeds for obsidian", async () => {
+    const result = await callIntegrationAction("obsidian", "connect");
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("connect completed for obsidian");
   });
 
-  test("connect fails for spotify when SPOTIFY_CLIENT_ID is missing", async () => {
-    clearOAuthEnv();
-    try {
-      const result = await callIntegrationAction("spotify", "connect");
-      expect(result.success).toBe(false);
-      expect(result.error).toBeDefined();
-      expect(result.error).toContain("Spotify requires OAuth credentials");
-      expect(result.error).toContain("SPOTIFY_CLIENT_ID");
-    } finally {
-      restoreEnv();
-    }
+  test("disconnect succeeds for obsidian", async () => {
+    const result = await callIntegrationAction("obsidian", "disconnect");
+    expect(result.success).toBe(true);
+    expect(result.message).toContain("disconnect completed for obsidian");
   });
 
-  test("connect succeeds for gmail when GMAIL_CLIENT_ID is set", async () => {
-    process.env["GMAIL_CLIENT_ID"] = "test-client-id";
-    try {
-      const result = await callIntegrationAction("gmail", "connect");
-      expect(result.success).toBe(true);
-    } finally {
-      restoreEnv();
-    }
+  test("non-obsidian integrations are rejected", async () => {
+    const result = await callIntegrationAction("google-calendar", "connect");
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("Only Obsidian is enabled as a native integration");
   });
 
-  test("connect succeeds for non-OAuth integrations without env vars", async () => {
-    clearOAuthEnv();
-    try {
-      const result = await callIntegrationAction("obsidian", "connect");
-      expect(result.success).toBe(true);
-    } finally {
-      restoreEnv();
-    }
-  });
-
-  test("non-connect actions succeed regardless of OAuth config", async () => {
-    clearOAuthEnv();
-    try {
-      const result = await callIntegrationAction("gmail", "disconnect");
-      expect(result.success).toBe(true);
-    } finally {
-      restoreEnv();
-    }
-  });
-
-  test("connect error message includes setup instructions", async () => {
-    clearOAuthEnv();
-    try {
-      const result = await callIntegrationAction("gmail", "connect");
-      expect(result.success).toBe(false);
-      expect(result.error).toContain("developer console");
-      expect(result.error).toContain("OAuth 2.0 credentials");
-      expect(result.error).toContain("Restart Reins daemon");
-    } finally {
-      restoreEnv();
-    }
+  test("error message is consistent across unsupported integrations", async () => {
+    const calendarResult = await callIntegrationAction("google-calendar", "connect");
+    const linearResult = await callIntegrationAction("linear", "connect");
+    expect(calendarResult.success).toBe(false);
+    expect(linearResult.success).toBe(false);
+    expect(calendarResult.error).toBe(linearResult.error);
   });
 });

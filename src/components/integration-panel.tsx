@@ -463,26 +463,7 @@ function getActionKeyHint(action: IntegrationActionName): string {
 // Daemon API (mock — all integration logic lives in the daemon)
 // ---------------------------------------------------------------------------
 
-// Integrations that require OAuth credentials and their env var names.
-const OAUTH_REQUIRED_INTEGRATIONS: Record<string, { envVar: string; name: string }> = {
-  gmail: { envVar: "GMAIL_CLIENT_ID", name: "Gmail" },
-  spotify: { envVar: "SPOTIFY_CLIENT_ID", name: "Spotify" },
-};
-
-function buildOAuthSetupMessage(integrationName: string, envVar: string): string {
-  return [
-    `${integrationName} requires OAuth credentials to connect.`,
-    "",
-    `To set up ${integrationName} OAuth:`,
-    "1. Go to the provider's developer console",
-    "2. Create OAuth 2.0 credentials (Desktop app type)",
-    "3. Set environment variables:",
-    `   export ${envVar}="your-client-id"`,
-    `   export ${envVar.replace("_CLIENT_ID", "_CLIENT_SECRET")}="your-client-secret"`,
-    "4. Restart Reins daemon",
-    "5. Try connecting again",
-  ].join("\n");
-}
+const ACTIVE_NATIVE_INTEGRATION_ID = "obsidian";
 
 /**
  * Mock daemon API call for integration actions.
@@ -506,23 +487,12 @@ export async function callIntegrationAction(
 
   void config;
 
-  // Validate OAuth config for connect actions before reaching the daemon.
-  // This catches missing credentials early and provides actionable guidance.
-  if (action === "connect") {
-    const oauthInfo = OAUTH_REQUIRED_INTEGRATIONS[integrationId];
-    if (oauthInfo) {
-      const envValue = typeof process !== "undefined"
-        ? process.env[oauthInfo.envVar]
-        : undefined;
-
-      if (!envValue || envValue.trim().length === 0) {
-        return {
-          success: false,
-          message: `${oauthInfo.name} connect failed`,
-          error: buildOAuthSetupMessage(oauthInfo.name, oauthInfo.envVar),
-        };
-      }
-    }
+  if (integrationId !== ACTIVE_NATIVE_INTEGRATION_ID) {
+    return {
+      success: false,
+      message: `${action} failed for ${integrationId}`,
+      error: "Only Obsidian is enabled as a native integration in this milestone.",
+    };
   }
 
   return {
@@ -906,75 +876,22 @@ export function IntegrationPanel({ visible, onClose }: IntegrationPanelProps) {
     // The TUI only displays data — all integration logic lives in the daemon.
     dispatch({
       type: "HYDRATE",
-      connected: [
+      connected: [],
+      available: [
         {
           id: "obsidian",
           name: "Obsidian",
-          status: "connected",
+          status: "disconnected",
           version: "1.0.0",
           description: "Local Markdown vault for notes and knowledge management.",
           category: "productivity",
           operations: [
+            { name: "connect", description: "Connect to an Obsidian vault path" },
             { name: "search-notes", description: "Search notes by content and title" },
             { name: "read-note", description: "Read note content by path" },
             { name: "create-note", description: "Create new note with title and content" },
             { name: "list-notes", description: "List notes in a directory" },
-          ],
-        },
-        {
-          id: "gmail",
-          name: "Gmail",
-          status: "auth_expired",
-          version: "1.0.0",
-          description: "Google email with OAuth2 authentication.",
-          category: "communication",
-          operations: [
-            { name: "read-email", description: "Read email by ID" },
-            { name: "search-emails", description: "Search emails by query" },
-            { name: "send-email", description: "Send email with to/cc/bcc/subject/body" },
-            { name: "list-emails", description: "List recent inbox emails" },
-          ],
-        },
-        {
-          id: "spotify",
-          name: "Spotify",
-          status: "error",
-          version: "1.0.0",
-          description: "Music playback and library management.",
-          category: "media",
-          operations: [
-            { name: "get-playback", description: "Get current playback state" },
-            { name: "control-playback", description: "Play, pause, skip, or go to previous track" },
-            { name: "search", description: "Search tracks, albums, artists, playlists" },
-            { name: "get-playlists", description: "Get user's playlists" },
-          ],
-        },
-      ],
-      available: [
-        {
-          id: "slack",
-          name: "Slack",
-          status: "disconnected",
-          version: "1.0.0",
-          description: "Team messaging and collaboration.",
-          category: "communication",
-          operations: [
-            { name: "send-message", description: "Send a message to a channel or user" },
-            { name: "list-channels", description: "List available channels" },
-            { name: "search-messages", description: "Search messages across channels" },
-          ],
-        },
-        {
-          id: "notion",
-          name: "Notion",
-          status: "disconnected",
-          version: "1.0.0",
-          description: "Workspace for notes, docs, and project management.",
-          category: "productivity",
-          operations: [
-            { name: "search-pages", description: "Search pages by title or content" },
-            { name: "read-page", description: "Read page content by ID" },
-            { name: "create-page", description: "Create a new page in a database" },
+            { name: "disconnect", description: "Disconnect Obsidian and clear local auth state" },
           ],
         },
       ],

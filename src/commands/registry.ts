@@ -300,7 +300,7 @@ const PALETTE_ACTION_DEFINITIONS: readonly PaletteActionDefinition[] = Object.fr
     description: "Manage external service integrations.",
     category: "panels",
     shortcutHint: "Ctrl+I",
-    keywords: Object.freeze(["integrations", "services", "obsidian", "gmail", "spotify", "connect"]),
+    keywords: Object.freeze(["integrations", "services", "obsidian", "vault", "connect"]),
     actionKey: "open-integrations",
   }),
   // Settings/Help
