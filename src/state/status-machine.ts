@@ -407,7 +407,7 @@ export function deriveStatusSegments(sources: StatusSegmentSources): StatusSegme
       case "lifecycle":
         return buildSegment(id, lc.glyph, `${lc.glyph} ${lc.label}`, lc.colorToken);
       case "hints":
-        return buildSegment(id, "", "Ctrl+K palette · Ctrl+M model · Ctrl+1 context", "text.muted");
+        return buildSegment(id, "", "Ctrl+T thinking · Ctrl+M model · Ctrl+1 context", "text.muted");
     }
   });
 }
