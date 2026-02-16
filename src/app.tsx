@@ -1,6 +1,10 @@
+import { join } from "node:path";
+
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
-import { writeUserConfig } from "@reins/core";
+import { writeUserConfig, getDataRoot } from "@reins/core";
+import { SkillRegistry, SkillScanner } from "@reins/core/skills";
+import type { Skill } from "@reins/core/skills";
 
 import { CommandPalette, type CommandPaletteDataSources, ErrorBoundary, Layout } from "./components";
 import { ModelSelectorModal, type ProviderModelGroup } from "./components/model-selector";
@@ -179,6 +183,16 @@ function toDisplayMessages(
   });
 }
 
+function skillToListItem(skill: Skill): SkillListItem {
+  return {
+    name: skill.config.name,
+    description: skill.summary.description,
+    enabled: skill.config.enabled,
+    trustLevel: skill.config.trustLevel,
+    hasIntegration: skill.hasIntegration,
+  };
+}
+
 function getStatusTextForLifecycle(status: ConversationLifecycleStatus): string {
   switch (status) {
     case "idle":
@@ -340,15 +354,77 @@ function AppView({ version, dimensions }: AppViewProps) {
     dispatch({ type: "SET_STATUS", payload: "Ready" });
   }, [dispatch]);
 
-  // Placeholder skill data — will be replaced with daemon API calls
-  const mockSkills = useMemo<SkillListItem[]>(() => [], []);
+  // Skill registry and scanner — initialized once, shared across callbacks
+  const skillRegistryRef = useRef<SkillRegistry>(new SkillRegistry());
+  const skillScannerRef = useRef<SkillScanner | null>(null);
+  const [skills, setSkills] = useState<SkillListItem[]>([]);
 
-  const loadSkillDetail = useCallback((_name: string): SkillDetailData | null => {
-    return null;
+  // Scan skills directory on mount and when panel becomes visible
+  useEffect(() => {
+    if (!state.isSkillPanelOpen) return;
+
+    let cancelled = false;
+
+    const scanSkills = async () => {
+      const dataRoot = getDataRoot();
+      const skillsDir = join(dataRoot, "skills");
+
+      // Clear and re-scan to pick up any changes
+      skillRegistryRef.current.clear();
+      const scanner = new SkillScanner(skillRegistryRef.current, skillsDir);
+      skillScannerRef.current = scanner;
+
+      await scanner.scan();
+
+      if (cancelled) return;
+
+      const registered = skillRegistryRef.current.list();
+      setSkills(registered.map(skillToListItem));
+    };
+
+    void scanSkills();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [state.isSkillPanelOpen]);
+
+  const loadSkillDetail = useCallback((name: string): SkillDetailData | null => {
+    const registry = skillRegistryRef.current;
+    const scanner = skillScannerRef.current;
+    const skill = registry.get(name);
+    if (!skill) return null;
+
+    const content = scanner?.loadSkill(name);
+
+    return {
+      name: skill.config.name,
+      description: skill.summary.description,
+      enabled: skill.config.enabled,
+      trustLevel: skill.config.trustLevel,
+      categories: skill.categories,
+      triggers: skill.triggers,
+      requiredTools: [],
+      scripts: skill.scriptFiles,
+      integrationStatus: skill.hasIntegration ? "needs_setup" : "not_required",
+      body: content?.body ?? "",
+    };
   }, []);
 
-  const toggleSkillEnabled = useCallback((_name: string): void => {
-    // No-op placeholder — will be wired to daemon API
+  const toggleSkillEnabled = useCallback((name: string): void => {
+    const registry = skillRegistryRef.current;
+    const skill = registry.get(name);
+    if (!skill) return;
+
+    if (skill.config.enabled) {
+      registry.disable(name);
+    } else {
+      registry.enable(name);
+    }
+
+    // Update the skills list to reflect the change
+    const registered = registry.list();
+    setSkills(registered.map(skillToListItem));
   }, []);
 
   const [startupContent, setStartupContent] = useState<StartupContent | null>(null);
@@ -1328,7 +1404,7 @@ function AppView({ version, dimensions }: AppViewProps) {
       />
       <SkillPanel
         visible={state.isSkillPanelOpen}
-        skills={mockSkills}
+        skills={skills}
         onLoadSkillDetail={loadSkillDetail}
         onToggleEnabled={toggleSkillEnabled}
         onClose={closeSkillPanel}
