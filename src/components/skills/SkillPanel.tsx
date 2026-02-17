@@ -8,6 +8,11 @@ import {
   SkillListPanel,
   type SkillListItem,
 } from "./SkillListPanel";
+import {
+  TabBar,
+  SKILL_PANEL_TABS,
+  getNextTabIndex,
+} from "./TabBar";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -29,6 +34,7 @@ export interface SkillPanelProps {
 
 export interface PanelState {
   readonly view: PanelView;
+  readonly activeTabIndex: number;
   readonly selectedSkillName: string | null;
   readonly selectedDetail: SkillDetailData | null;
 }
@@ -37,10 +43,12 @@ export type PanelAction =
   | { type: "SELECT_SKILL"; name: string; detail: SkillDetailData | null }
   | { type: "GO_BACK" }
   | { type: "TOGGLE_ENABLED"; updatedDetail: SkillDetailData | null }
+  | { type: "SWITCH_TAB"; index: number }
   | { type: "CLOSE" };
 
 export const INITIAL_PANEL_STATE: PanelState = {
   view: "list",
+  activeTabIndex: 0,
   selectedSkillName: null,
   selectedDetail: null,
 };
@@ -69,6 +77,16 @@ export function skillPanelReducer(state: PanelState, action: PanelAction): Panel
         selectedDetail: action.updatedDetail,
       };
 
+    case "SWITCH_TAB":
+      return {
+        ...state,
+        activeTabIndex: action.index,
+        // Reset detail view when switching tabs
+        view: "list",
+        selectedSkillName: null,
+        selectedDetail: null,
+      };
+
     case "CLOSE":
       return INITIAL_PANEL_STATE;
 
@@ -95,6 +113,7 @@ export function getHelpActions(view: PanelView): readonly HelpAction[] {
   }
 
   return [
+    { key: "Tab", label: "Switch Tab" },
     { key: "j/k", label: "Navigate" },
     { key: "Enter", label: "Select" },
     { key: "/", label: "Search" },
@@ -122,6 +141,24 @@ function HelpBar({ view, tokens }: { view: PanelView; tokens: Record<string, str
           />
         </Box>
       ))}
+    </Box>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Placeholder content for non-Installed tabs
+// ---------------------------------------------------------------------------
+
+function PlaceholderContent({
+  message,
+  tokens,
+}: {
+  message: string;
+  tokens: Record<string, string>;
+}) {
+  return (
+    <Box style={{ flexDirection: "column", flexGrow: 1, paddingLeft: 2, paddingTop: 1 }}>
+      <Text content={message} style={{ color: tokens["text.muted"] }} />
     </Box>
   );
 }
@@ -171,29 +208,48 @@ export function SkillPanel({
     onClose();
   }, [onClose]);
 
-  // Keyboard handler for detail view shortcuts
+  // Handle tab change
+  const handleTabChange = useCallback((index: number) => {
+    dispatch({ type: "SWITCH_TAB", index });
+  }, []);
+
+  // Keyboard handler for panel-level shortcuts
   useKeyboard(
     useCallback(
       (event) => {
         if (!visible) return;
-        if (state.view !== "detail") return;
 
         const keyName = event.name ?? "";
 
-        if (keyName === "e" && state.selectedSkillName) {
-          handleToggle(state.selectedSkillName);
+        // Detail view shortcuts
+        if (state.view === "detail") {
+          if (keyName === "e" && state.selectedSkillName) {
+            handleToggle(state.selectedSkillName);
+            return;
+          }
+
+          if (keyName === "escape" || keyName === "esc") {
+            handleBack();
+            return;
+          }
           return;
         }
 
-        if (keyName === "escape" || keyName === "esc") {
-          handleBack();
+        // Tab key cycles tabs (only in list view)
+        if (keyName === "tab") {
+          const nextIndex = getNextTabIndex(
+            state.activeTabIndex,
+            SKILL_PANEL_TABS.length,
+          );
+          handleTabChange(nextIndex);
           return;
         }
       },
-      [visible, state.view, state.selectedSkillName, handleToggle, handleBack],
+      [visible, state.view, state.activeTabIndex, state.selectedSkillName, handleToggle, handleBack, handleTabChange],
     ),
   );
 
+  // Detail view — shown regardless of active tab when a skill is selected
   if (state.view === "detail") {
     return (
       <ModalPanel
@@ -219,13 +275,76 @@ export function SkillPanel({
     );
   }
 
-  // List view — delegate entirely to SkillListPanel
+  // Installed tab — delegate entirely to SkillListPanel
+  if (state.activeTabIndex === 0) {
+    return (
+      <SkillListPanel
+        visible={visible}
+        skills={[...skills]}
+        onSelect={handleSelect}
+        onClose={handleClose}
+        tabBar={
+          <TabBar
+            tabs={SKILL_PANEL_TABS}
+            activeIndex={state.activeTabIndex}
+            onTabChange={handleTabChange}
+          />
+        }
+      />
+    );
+  }
+
+  // ClawHub tab — placeholder
+  if (state.activeTabIndex === 1) {
+    return (
+      <ModalPanel
+        visible={visible}
+        title="Skills"
+        hint="Tab switch · Esc close"
+        width={76}
+        height={24}
+        closeOnEscape={false}
+        onClose={handleClose}
+      >
+        <TabBar
+          tabs={SKILL_PANEL_TABS}
+          activeIndex={state.activeTabIndex}
+          onTabChange={handleTabChange}
+        />
+        <PlaceholderContent
+          message="ClawHub marketplace - coming in Task 5.2"
+          tokens={tokens}
+        />
+        <Box style={{ marginTop: 1 }}>
+          <HelpBar view="list" tokens={tokens} />
+        </Box>
+      </ModalPanel>
+    );
+  }
+
+  // Reins Marketplace tab — placeholder
   return (
-    <SkillListPanel
+    <ModalPanel
       visible={visible}
-      skills={[...skills]}
-      onSelect={handleSelect}
+      title="Skills"
+      hint="Tab switch · Esc close"
+      width={76}
+      height={24}
+      closeOnEscape={false}
       onClose={handleClose}
-    />
+    >
+      <TabBar
+        tabs={SKILL_PANEL_TABS}
+        activeIndex={state.activeTabIndex}
+        onTabChange={handleTabChange}
+      />
+      <PlaceholderContent
+        message="Reins Marketplace - coming in Task 5.5"
+        tokens={tokens}
+      />
+      <Box style={{ marginTop: 1 }}>
+        <HelpBar view="list" tokens={tokens} />
+      </Box>
+    </ModalPanel>
   );
 }

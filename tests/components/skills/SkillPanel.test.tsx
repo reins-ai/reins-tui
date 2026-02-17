@@ -138,6 +138,7 @@ describe("SkillPanel reducer GO_BACK", () => {
   test("transitions from detail to list view", () => {
     const detailState: PanelState = {
       view: "detail",
+      activeTabIndex: 0,
       selectedSkillName: "git-workflow",
       selectedDetail: FULL_DETAIL,
     };
@@ -166,6 +167,7 @@ describe("SkillPanel reducer TOGGLE_ENABLED", () => {
   test("updates selected detail with toggled state", () => {
     const detailState: PanelState = {
       view: "detail",
+      activeTabIndex: 0,
       selectedSkillName: "git-workflow",
       selectedDetail: FULL_DETAIL,
     };
@@ -184,6 +186,7 @@ describe("SkillPanel reducer TOGGLE_ENABLED", () => {
   test("handles null updated detail", () => {
     const detailState: PanelState = {
       view: "detail",
+      activeTabIndex: 0,
       selectedSkillName: "git-workflow",
       selectedDetail: FULL_DETAIL,
     };
@@ -199,6 +202,7 @@ describe("SkillPanel reducer TOGGLE_ENABLED", () => {
   test("preserves view and skill name when toggling", () => {
     const detailState: PanelState = {
       view: "detail",
+      activeTabIndex: 0,
       selectedSkillName: "git-workflow",
       selectedDetail: FULL_DETAIL,
     };
@@ -226,6 +230,7 @@ describe("SkillPanel reducer CLOSE", () => {
   test("resets to initial state from detail view", () => {
     const detailState: PanelState = {
       view: "detail",
+      activeTabIndex: 0,
       selectedSkillName: "git-workflow",
       selectedDetail: FULL_DETAIL,
     };
@@ -341,6 +346,7 @@ describe("SkillPanel enable/disable toggle", () => {
   test("toggling enabled skill produces disabled detail", () => {
     const detailState: PanelState = {
       view: "detail",
+      activeTabIndex: 0,
       selectedSkillName: "git-workflow",
       selectedDetail: FULL_DETAIL,
     };
@@ -357,6 +363,7 @@ describe("SkillPanel enable/disable toggle", () => {
   test("toggling disabled skill produces enabled detail", () => {
     const detailState: PanelState = {
       view: "detail",
+      activeTabIndex: 0,
       selectedSkillName: "code-review",
       selectedDetail: DISABLED_DETAIL,
     };
@@ -372,6 +379,7 @@ describe("SkillPanel enable/disable toggle", () => {
   test("multiple toggles alternate enabled state", () => {
     let state: PanelState = {
       view: "detail",
+      activeTabIndex: 0,
       selectedSkillName: "git-workflow",
       selectedDetail: FULL_DETAIL,
     };
@@ -397,10 +405,11 @@ describe("SkillPanel enable/disable toggle", () => {
 // ---------------------------------------------------------------------------
 
 describe("SkillPanel getHelpActions", () => {
-  test("list view shows navigation, select, search, and close actions", () => {
+  test("list view shows tab switch, navigation, select, search, and close actions", () => {
     const actions = getHelpActions("list");
     const keys = actions.map((a) => a.key);
 
+    expect(keys).toContain("Tab");
     expect(keys).toContain("j/k");
     expect(keys).toContain("Enter");
     expect(keys).toContain("/");
@@ -415,8 +424,8 @@ describe("SkillPanel getHelpActions", () => {
     expect(keys).toContain("Esc");
   });
 
-  test("list view has 4 actions", () => {
-    expect(getHelpActions("list").length).toBe(4);
+  test("list view has 5 actions (including Tab)", () => {
+    expect(getHelpActions("list").length).toBe(5);
   });
 
   test("detail view has 2 actions", () => {
