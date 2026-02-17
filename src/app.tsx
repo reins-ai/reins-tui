@@ -3,6 +3,8 @@ import { join } from "node:path";
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
+import { Clipboard } from "./util/clipboard";
+
 import { writeUserConfig, getDataRoot, MarketplaceRegistry, ClawHubSource } from "@reins/core";
 import type { MarketplaceSource } from "@reins/core";
 import { FileSkillStateStore, SkillRegistry, SkillScanner } from "@reins/core/skills";
@@ -103,6 +105,7 @@ function toDisplayToolCallStatus(status: "running" | "complete" | "error"): Disp
 interface ToolTurnCacheEntry {
   toolCalls: DisplayToolCall[];
   contentBlocks: DisplayContentBlock[];
+  wasCancelled: boolean;
 }
 
 function toDisplayToolCalls(toolCalls: readonly StreamToolCall[]): DisplayToolCall[] {
@@ -128,6 +131,7 @@ function resolveActiveToolTurn(streaming: ConversationStoreState["streaming"]): 
   assistantMessageId: string | null;
   toolCalls: readonly StreamToolCall[];
   contentBlocks: readonly TurnContentBlock[];
+  wasCancelled: boolean;
 } {
   if (
     streaming.status === "thinking"
@@ -135,17 +139,19 @@ function resolveActiveToolTurn(streaming: ConversationStoreState["streaming"]): 
     || streaming.status === "complete"
     || streaming.status === "error"
   ) {
-    return {
-      assistantMessageId: streaming.assistantMessageId,
-      toolCalls: streaming.toolCalls,
-      contentBlocks: streaming.turnState.contentBlocks,
-    };
+      return {
+        assistantMessageId: streaming.assistantMessageId,
+        toolCalls: streaming.toolCalls,
+        contentBlocks: streaming.turnState.contentBlocks,
+        wasCancelled: streaming.turnState.wasCancelled,
+      };
   }
 
   return {
     assistantMessageId: null,
     toolCalls: [],
     contentBlocks: [],
+    wasCancelled: false,
   };
 }
 
@@ -172,6 +178,9 @@ function toDisplayMessages(
     const contentBlocks = isActiveToolTurnMessage && activeContentBlocks.length > 0
       ? activeContentBlocks
       : cachedToolTurn?.contentBlocks;
+    const wasCancelled = isActiveToolTurnMessage
+      ? activeToolTurn.wasCancelled
+      : cachedToolTurn?.wasCancelled;
 
     return {
       id: message.id,
@@ -179,6 +188,7 @@ function toDisplayMessages(
       content: message.content,
       toolCalls,
       contentBlocks,
+      wasCancelled,
       isStreaming: isStreamingMessage,
       createdAt: parseIsoDate(message.createdAt),
     };
@@ -579,10 +589,14 @@ function AppView({ version, dimensions }: AppViewProps) {
       }
 
       const activeToolTurn = resolveActiveToolTurn(snapshot.streaming);
-      if (activeToolTurn.assistantMessageId !== null && activeToolTurn.toolCalls.length > 0) {
+      if (
+        activeToolTurn.assistantMessageId !== null
+        && (activeToolTurn.toolCalls.length > 0 || activeToolTurn.wasCancelled)
+      ) {
         toolTurnCacheRef.current.set(activeToolTurn.assistantMessageId, {
           toolCalls: toDisplayToolCalls(activeToolTurn.toolCalls),
           contentBlocks: toDisplayContentBlocks(activeToolTurn.contentBlocks),
+          wasCancelled: activeToolTurn.wasCancelled,
         });
       }
 
@@ -905,6 +919,16 @@ function AppView({ version, dimensions }: AppViewProps) {
     }
   };
 
+  const handleCancelPrompt = useCallback(async () => {
+    const result = await conversationStoreRef.current.cancelActiveResponse();
+    if (!result.ok) {
+      dispatch({ type: "SET_STATUS", payload: `Cancel failed: ${result.error.message}` });
+      return;
+    }
+
+    dispatch({ type: "SET_STATUS", payload: "Cancelling response..." });
+  }, [dispatch]);
+
   const handlePromptReinsSkillSetup = (prompt: string) => {
     void handleMessageSubmit(prompt);
     dispatch({ type: "SET_STATUS", payload: "Prompted Reins to help with skill setup" });
@@ -1199,11 +1223,22 @@ function AppView({ version, dimensions }: AppViewProps) {
         const lastAssistant = state.messages
           .filter((m) => m.role === "assistant")
           .pop();
-        if (lastAssistant) {
-          dispatch({ type: "SET_STATUS", payload: "Copied last response" });
-        } else {
+        if (!lastAssistant) {
           dispatch({ type: "SET_STATUS", payload: "No response to copy" });
+          break;
         }
+        const copyText = lastAssistant.content
+          || (lastAssistant.contentBlocks ?? [])
+              .filter((b) => b.type === "text" && b.text)
+              .map((b) => b.text!)
+              .join("\n");
+        if (!copyText) {
+          dispatch({ type: "SET_STATUS", payload: "No text content to copy" });
+          break;
+        }
+        void Clipboard.copy(copyText)
+          .then(() => dispatch({ type: "SET_STATUS", payload: "Copied last response" }))
+          .catch(() => dispatch({ type: "SET_STATUS", payload: "Clipboard copy failed" }));
         break;
       }
       case "open-integrations":
@@ -1418,7 +1453,18 @@ function AppView({ version, dimensions }: AppViewProps) {
     || state.panels.today.visible;
 
   return (
-    <>
+    <Box
+      style={{ width: "100%", height: "100%", flexDirection: "column" }}
+      onMouseUp={() => {
+        const selectedText = renderer.getSelection()?.getSelectedText();
+        if (selectedText && selectedText.length > 0) {
+          void Clipboard.copy(selectedText)
+            .then(() => dispatch({ type: "SET_STATUS", payload: "Copied to clipboard" }))
+            .catch(() => dispatch({ type: "SET_STATUS", payload: "Clipboard copy failed" }));
+          renderer.clearSelection();
+        }
+      }}
+    >
       <Layout
         version={version}
         dimensions={dimensions}
@@ -1427,6 +1473,7 @@ function AppView({ version, dimensions }: AppViewProps) {
         connectionStatus={connectionStatus}
         daemonMode={daemonMode}
         onSubmitMessage={handleMessageSubmit}
+        onCancelPrompt={handleCancelPrompt}
       />
       <CommandPalette
         isOpen={state.isCommandPaletteOpen}
@@ -1486,7 +1533,7 @@ function AppView({ version, dimensions }: AppViewProps) {
           onCancel={handleChannelTokenCancel}
         />
       ) : null}
-    </>
+    </Box>
   );
 }
 

@@ -25,6 +25,7 @@ export interface ConversationStore {
   getState(): ConversationStoreState;
   subscribe(listener: (state: ConversationStoreState) => void): () => void;
   sendUserMessage(input: { conversationId?: string; content: string; model?: string; thinkingLevel?: ThinkingLevel }): Promise<DaemonResult<void>>;
+  cancelActiveResponse(): Promise<DaemonResult<void>>;
   dismissError(): void;
   reset(): void;
 }
@@ -64,12 +65,18 @@ function createSendAckError(response: SendMessageResponse): DaemonClientError {
   };
 }
 
+function toExecutionKey(conversationId: string, assistantMessageId: string): string {
+  return `${conversationId}:${assistantMessageId}`;
+}
+
 export function createConversationStore(options: ConversationStoreOptions): ConversationStore {
   const now = options.now ?? (() => new Date());
   const completeDisplayMs = Math.max(0, options.completeDisplayMs ?? DEFAULT_COMPLETE_DISPLAY_MS);
   const listeners = new Set<(state: ConversationStoreState) => void>();
 
   let completeTimeout: ReturnType<typeof setTimeout> | null = null;
+  let activeStreamTarget: { conversationId: string; assistantMessageId: string } | null = null;
+  const cancelledExecutionKeys = new Set<string>();
   let state: ConversationStoreState = {
     conversationId: null,
     messages: [],
@@ -120,12 +127,19 @@ export function createConversationStore(options: ConversationStoreOptions): Conv
   }
 
   async function streamAssistantResponse(conversationId: string, assistantMessageId: string): Promise<DaemonResult<void>> {
+    const executionKey = toExecutionKey(conversationId, assistantMessageId);
+    activeStreamTarget = { conversationId, assistantMessageId };
+
     const streamResult = await options.daemonClient.streamResponse({
       conversationId,
       assistantMessageId,
     });
 
     if (!streamResult.ok) {
+      if (cancelledExecutionKeys.has(executionKey)) {
+        return ok(undefined);
+      }
+
       applyEvent({
         type: "error",
         timestamp: now().toISOString(),
@@ -137,31 +151,48 @@ export function createConversationStore(options: ConversationStoreOptions): Conv
     }
 
     let completed = false;
+    let cancelledByUser = false;
 
-    for await (const event of streamResult.value) {
-      applyEvent(event);
-      if (event.type === "complete") {
-        completed = true;
+    try {
+      for await (const event of streamResult.value) {
+        if (cancelledExecutionKeys.has(executionKey)) {
+          cancelledByUser = true;
+          break;
+        }
+
+        applyEvent(event);
+        if (event.type === "complete") {
+          completed = true;
+        }
+
+        if (event.type === "error") {
+          return err(event.error);
+        }
       }
 
-      if (event.type === "error") {
-        return err(event.error);
+      if (cancelledByUser || cancelledExecutionKeys.has(executionKey)) {
+        return ok(undefined);
       }
-    }
 
-    if (!completed) {
-      const streamClosedError = createStreamClosedError();
-      applyEvent({
-        type: "error",
-        timestamp: now().toISOString(),
-        conversationId,
-        messageId: assistantMessageId,
-        error: streamClosedError,
-      });
-      return err(streamClosedError);
-    }
+      if (!completed) {
+        const streamClosedError = createStreamClosedError();
+        applyEvent({
+          type: "error",
+          timestamp: now().toISOString(),
+          conversationId,
+          messageId: assistantMessageId,
+          error: streamClosedError,
+        });
+        return err(streamClosedError);
+      }
 
-    return ok(undefined);
+      return ok(undefined);
+    } finally {
+      if (activeStreamTarget && toExecutionKey(activeStreamTarget.conversationId, activeStreamTarget.assistantMessageId) === executionKey) {
+        activeStreamTarget = null;
+      }
+      cancelledExecutionKeys.delete(executionKey);
+    }
   }
 
   return {
@@ -229,6 +260,43 @@ export function createConversationStore(options: ConversationStoreOptions): Conv
       });
 
       return streamAssistantResponse(sendResult.value.conversationId, sendResult.value.assistantMessageId);
+    },
+
+    async cancelActiveResponse() {
+      const streaming = state.streaming;
+      if (streaming.status !== "thinking" && streaming.status !== "streaming") {
+        return ok(undefined);
+      }
+
+      const target = {
+        conversationId: streaming.conversationId,
+        assistantMessageId: streaming.assistantMessageId,
+      };
+      const executionKey = toExecutionKey(target.conversationId, target.assistantMessageId);
+      cancelledExecutionKeys.add(executionKey);
+
+      const cancelResult = await options.daemonClient.cancelStream({
+        conversationId: target.conversationId,
+        assistantMessageId: target.assistantMessageId,
+      });
+
+      const latest = state.streaming;
+      const latestContent =
+        latest.status === "streaming" || latest.status === "thinking" || latest.status === "error"
+          ? latest.partialContent
+          : latest.status === "complete"
+            ? latest.content
+            : "";
+
+      applyEvent({
+        type: "cancelled-complete",
+        timestamp: now().toISOString(),
+        conversationId: target.conversationId,
+        messageId: target.assistantMessageId,
+        content: latestContent,
+      });
+
+      return cancelResult.ok ? ok(undefined) : cancelResult;
     },
 
     dismissError() {

@@ -9,6 +9,8 @@ import {
   getInputBlockStyle,
   getInputBorderChars,
   formatCharCount,
+  getCancelPromptHint,
+  isPromptCancellableLifecycle,
   type InputFrameState,
 } from "../../src/components";
 import { resolveMainWindowFocusedPanel } from "../../src/screens/chat-screen";
@@ -190,6 +192,25 @@ describe("character count formatting", () => {
 
   test("shows count for single character", () => {
     expect(formatCharCount(1, 4000)).toBe("1/4000");
+  });
+});
+
+describe("prompt cancel hint helpers", () => {
+  test("marks thinking and streaming lifecycles as cancellable", () => {
+    expect(isPromptCancellableLifecycle("thinking")).toBe(true);
+    expect(isPromptCancellableLifecycle("streaming")).toBe(true);
+  });
+
+  test("marks idle/sending/complete/error as not cancellable", () => {
+    expect(isPromptCancellableLifecycle("idle")).toBe(false);
+    expect(isPromptCancellableLifecycle("sending")).toBe(false);
+    expect(isPromptCancellableLifecycle("complete")).toBe(false);
+    expect(isPromptCancellableLifecycle("error")).toBe(false);
+  });
+
+  test("returns default and armed cancel prompts", () => {
+    expect(getCancelPromptHint(false)).toBe("Esc to cancel");
+    expect(getCancelPromptHint(true)).toBe("Press escape again");
   });
 });
 

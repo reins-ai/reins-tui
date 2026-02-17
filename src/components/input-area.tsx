@@ -19,15 +19,26 @@ import { Box, Input, Text, useKeyboard, useRenderer } from "../ui";
 import { ACCENT_BORDER_CHARS, FramedBlock, SUBTLE_BORDER_CHARS } from "../ui/primitives";
 import { useConversations } from "../hooks";
 import { CompletionPopup } from "./completion-popup";
+import type { ConversationLifecycleStatus } from "../state/status-machine";
 
 export interface InputAreaProps {
   isFocused: boolean;
   onSubmit(text: string): void;
+  onCancelPrompt?(): void | Promise<void>;
 }
 
 export type InputSubmissionKind = "empty" | "command" | "message";
 
 export const MAX_INPUT_LENGTH = 4000;
+export const ESCAPE_CANCEL_CONFIRM_TIMEOUT_MS = 5_000;
+
+export function isPromptCancellableLifecycle(status: ConversationLifecycleStatus): boolean {
+  return status === "thinking" || status === "streaming";
+}
+
+export function getCancelPromptHint(isArmed: boolean): string {
+  return isArmed ? "Press escape again" : "Esc to cancel";
+}
 
 function isUpKey(name?: string): boolean {
   return name === "up";
@@ -196,7 +207,7 @@ function toDate(value: Date | string | number): Date {
   return asDate;
 }
 
-export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
+export function InputArea({ isFocused, onSubmit, onCancelPrompt }: InputAreaProps) {
   const { state, dispatch } = useApp();
   const conversations = useConversations();
   const { client: daemonClient, mode: daemonMode, isConnected } = useDaemon();
@@ -207,7 +218,22 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
   const [input, setInput] = useState("");
   const [validationError, setValidationError] = useState<string | null>(null);
   const [compactMode, setCompactMode] = useState(false);
+  const [cancelPromptArmed, setCancelPromptArmed] = useState(false);
   const [daemonUrl, setDaemonUrl] = useState(DEFAULT_DAEMON_HTTP_BASE_URL);
+  const cancelPromptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isPromptCancellable = isPromptCancellableLifecycle(state.streamingLifecycleStatus);
+
+  const clearCancelPromptTimer = () => {
+    if (cancelPromptTimerRef.current !== null) {
+      clearTimeout(cancelPromptTimerRef.current);
+      cancelPromptTimerRef.current = null;
+    }
+  };
+
+  const disarmCancelPrompt = () => {
+    clearCancelPromptTimer();
+    setCancelPromptArmed(false);
+  };
 
   // --- Command completion ---
   const completionProviderContext: CompletionProviderContext = useMemo(() => ({
@@ -267,6 +293,15 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
       cancelled = true;
     };
   }, [environmentClient, dispatch]);
+
+  useEffect(() => {
+    if (!isPromptCancellable || !isFocused) {
+      disarmCancelPrompt();
+    }
+    return () => {
+      clearCancelPromptTimer();
+    };
+  }, [isPromptCancellable, isFocused]);
 
   const appendCommandResponse = (text: string) => {
     dispatch({
@@ -414,10 +449,34 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
       return;
     }
 
+    const isEscapeKey = keyName === "escape" || keyName === "esc";
+
     // Escape: dismiss completion popup
-    if ((keyName === "escape" || keyName === "esc") && completionState.isOpen) {
+    if (isEscapeKey && completionState.isOpen) {
+      disarmCancelPrompt();
       completionActions.dismiss();
       return;
+    }
+
+    // Escape twice to cancel active prompt while model is working
+    if (isEscapeKey && isPromptCancellable) {
+      if (!cancelPromptArmed) {
+        setCancelPromptArmed(true);
+        clearCancelPromptTimer();
+        cancelPromptTimerRef.current = setTimeout(() => {
+          setCancelPromptArmed(false);
+          cancelPromptTimerRef.current = null;
+        }, ESCAPE_CANCEL_CONFIRM_TIMEOUT_MS);
+        return;
+      }
+
+      disarmCancelPrompt();
+      void onCancelPrompt?.();
+      return;
+    }
+
+    if (cancelPromptArmed) {
+      disarmCancelPrompt();
     }
 
     // --- Original history navigation (only when popup is NOT open) ---
@@ -452,6 +511,9 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
     }
 
     const next = clampText(normalizeInputValue(value));
+    if (cancelPromptArmed) {
+      disarmCancelPrompt();
+    }
     setInput(next);
     history.current.setDraft(next);
     completionActions.update(next);
@@ -479,6 +541,7 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
     }
 
     if (kind === "command") {
+      disarmCancelPrompt();
       void handleCommand(input);
       history.current.push(input);
       setInput("");
@@ -487,6 +550,7 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
     }
 
     onSubmit(input);
+    disarmCancelPrompt();
     history.current.push(input);
     setInput("");
     completionActions.update("");
@@ -506,7 +570,12 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
   if (completionState.isOpen) {
     completionHintParts.push("Tab complete · ↑↓ select · Esc dismiss");
   } else if (isFocused) {
-    completionHintParts.push("Enter to send · Ctrl+K palette");
+    const focusedHintParts = ["Enter to send"];
+    if (isPromptCancellable) {
+      focusedHintParts.push(getCancelPromptHint(cancelPromptArmed));
+    }
+    focusedHintParts.push("Ctrl+K palette");
+    completionHintParts.push(focusedHintParts.join(" · "));
   } else {
     completionHintParts.push("Tab to focus · Ctrl+K palette");
   }
@@ -520,6 +589,8 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
     ? tokens["status.error"]
     : daemonMode === "mock"
       ? tokens["status.warning"]
+      : cancelPromptArmed
+        ? tokens["status.success"]
       : tokens["text.muted"];
 
   return (

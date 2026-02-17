@@ -78,6 +78,7 @@ export interface LayoutProps {
   connectionStatus: DaemonConnectionStatus;
   daemonMode?: DaemonMode;
   onSubmitMessage(text: string): void;
+  onCancelPrompt?(): void | Promise<void>;
 }
 
 /**
@@ -141,6 +142,7 @@ export function Layout({
   connectionStatus,
   daemonMode,
   onSubmitMessage,
+  onCancelPrompt,
 }: LayoutProps) {
   const { state, dispatch } = useApp();
   const { tokens } = useThemeTokens();
@@ -177,6 +179,7 @@ export function Layout({
           showExpandedPanel={false}
           breakpoint={breakpoint}
           onSubmitMessage={onSubmitMessage}
+          onCancelPrompt={onCancelPrompt}
         />
       </ZoneShell>
 

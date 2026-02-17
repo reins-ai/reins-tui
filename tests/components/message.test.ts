@@ -16,6 +16,7 @@ import {
   GLYPH_TOOL_RUNNING,
   GLYPH_TOOL_DONE,
   GLYPH_TOOL_ERROR,
+  CANCELLED_INTERACTION_TEXT,
 } from "../../src/components";
 import { SUBTLE_BORDER_CHARS } from "../../src/ui/primitives";
 import type { ThemeTokens } from "../../src/theme/theme-schema";
@@ -74,6 +75,10 @@ describe("message rendering helpers", () => {
   test("streaming cursor appears only when streaming", () => {
     expect(buildStreamingText("partial", true)).toBe("partial▊");
     expect(buildStreamingText("final", false)).toBe("final");
+  });
+
+  test("cancelled interaction text is stable", () => {
+    expect(CANCELLED_INTERACTION_TEXT).toBe("This interaction has been cancelled");
   });
 });
 

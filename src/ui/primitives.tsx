@@ -16,7 +16,9 @@ export interface BaseProps {
   children?: ReactNode;
 }
 
-export interface BoxProps extends BaseProps {}
+export interface BoxProps extends BaseProps {
+  onMouseUp?: (event: unknown) => void;
+}
 
 export interface TextProps extends BaseProps {
   content?: string;
@@ -60,8 +62,8 @@ export interface DividerProps {
   color?: string;
 }
 
-export function Box({ children, ...props }: BoxProps): ReactElement {
-  return createElement("box", props, children);
+export function Box({ children, onMouseUp, ...props }: BoxProps): ReactElement {
+  return createElement("box", { ...props, onMouseUp }, children);
 }
 
 export function Text({ content, children, variant, ...props }: TextProps): ReactElement {

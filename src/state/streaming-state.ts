@@ -28,9 +28,10 @@ export interface TurnContentBlock {
 export interface MultiToolTurnState {
   contentBlocks: TurnContentBlock[];
   thinkingContent: string;
-  synthesisContent: string;
   hasToolCalls: boolean;
-  textBeforeTools: string;
+  /** Text + tool-call blocks in event-arrival order (excludes thinking). */
+  bodyBlocks: TurnContentBlock[];
+  wasCancelled: boolean;
 }
 
 export type StreamingEvent =
@@ -68,6 +69,13 @@ export type StreamingEvent =
   | {
       type: "complete-timeout";
       timestamp: string;
+    }
+  | {
+      type: "cancelled-complete";
+      timestamp: string;
+      conversationId: string;
+      messageId: string;
+      content: string;
     }
   | {
       type: "dismiss-error";
@@ -144,9 +152,9 @@ export function createInitialTurnState(): MultiToolTurnState {
   return {
     contentBlocks: [],
     thinkingContent: "",
-    synthesisContent: "",
     hasToolCalls: false,
-    textBeforeTools: "",
+    bodyBlocks: [],
+    wasCancelled: false,
   };
 }
 
@@ -198,6 +206,7 @@ function toStatusMachineEvent(event: StreamingEvent): StatusMachineEvent {
         assistantMessageId: event.messageId,
       };
     case "complete":
+    case "cancelled-complete":
       return {
         type: "stream-complete",
         timestamp: event.timestamp,
@@ -323,63 +332,164 @@ function applyToolCallComplete(toolCalls: StreamToolCall[], event: Extract<Strea
   return next;
 }
 
-function buildTurnState(
-  toolCalls: StreamToolCall[],
-  partialContent: string,
-  thinkingContent: string,
-  previousTurnState: MultiToolTurnState,
-): MultiToolTurnState {
-  const hasToolCalls = toolCalls.length > 0;
+/**
+ * Append a text delta to body blocks. If the last body block is a text block,
+ * append the delta to it. Otherwise create a new text block. This ensures
+ * text arriving after a tool-call block becomes a separate block.
+ */
+function appendTextToBody(bodyBlocks: readonly TurnContentBlock[], delta: string): TurnContentBlock[] {
+  const next = [...bodyBlocks];
+  const last = next.length > 0 ? next[next.length - 1] : null;
 
-  if (!hasToolCalls) {
-    const contentBlocks: TurnContentBlock[] = [];
-    if (thinkingContent.length > 0) {
-      contentBlocks.push({ type: "thinking", text: thinkingContent });
+  if (last && last.type === "text") {
+    next[next.length - 1] = { type: "text", text: (last.text ?? "") + delta };
+  } else {
+    next.push({ type: "text", text: delta });
+  }
+
+  return next;
+}
+
+/**
+ * Append a thinking delta to body blocks. If the last body block is a thinking
+ * block, append the delta to it. Otherwise create a new thinking block.
+ * This preserves interleaving order for thinking -> tool -> thinking flows.
+ */
+function appendThinkingToBody(bodyBlocks: readonly TurnContentBlock[], delta: string): TurnContentBlock[] {
+  const next = [...bodyBlocks];
+  const last = next.length > 0 ? next[next.length - 1] : null;
+
+  if (last && last.type === "thinking") {
+    next[next.length - 1] = { type: "thinking", text: (last.text ?? "") + delta };
+  } else {
+    next.push({ type: "thinking", text: delta });
+  }
+
+  return next;
+}
+
+/**
+ * Add a tool-call block to body blocks if not already present.
+ * Prevents duplicate blocks for the same tool call ID.
+ */
+function addToolBlockToBody(bodyBlocks: readonly TurnContentBlock[], toolCallId: string): TurnContentBlock[] {
+  if (bodyBlocks.some((b) => b.type === "tool-call" && b.toolCallId === toolCallId)) {
+    return bodyBlocks as TurnContentBlock[];
+  }
+
+  return [...bodyBlocks, { type: "tool-call", toolCallId }];
+}
+
+/**
+ * Compose the final contentBlocks by prepending thinking (if any) to body blocks.
+ */
+function composeContentBlocks(thinkingContent: string, bodyBlocks: readonly TurnContentBlock[]): TurnContentBlock[] {
+  // Backward compatibility: if no explicit thinking blocks were appended to
+  // body, fall back to a single synthetic thinking block.
+  const hasThinkingBlocks = bodyBlocks.some((block) => block.type === "thinking");
+  if (!hasThinkingBlocks && thinkingContent.length > 0) {
+    return [{ type: "thinking", text: thinkingContent }, ...bodyBlocks];
+  }
+
+  return [...bodyBlocks];
+}
+
+/**
+ * Reconcile body blocks with authoritative final content from a complete event.
+ * The block structure (ordering of text and tool-call blocks) is preserved.
+ * Text content is reconciled against the authoritative `finalContent`.
+ */
+function reconcileBodyWithFinalContent(
+  bodyBlocks: readonly TurnContentBlock[],
+  finalContent: string,
+  streamedContent: string,
+): TurnContentBlock[] {
+  // If content matches what we streamed, blocks are already accurate
+  if (streamedContent === finalContent) {
+    return bodyBlocks as TurnContentBlock[];
+  }
+
+  // If final content extends streamed content (common: complete has extra text not seen via deltas)
+  if (finalContent.startsWith(streamedContent) && streamedContent.length > 0) {
+    const suffix = finalContent.slice(streamedContent.length);
+    const next = [...bodyBlocks];
+    const lastIndex = findLastTextBlockIndex(next);
+
+    if (lastIndex >= 0) {
+      next[lastIndex] = { type: "text", text: (next[lastIndex].text ?? "") + suffix };
+    } else {
+      next.push({ type: "text", text: suffix });
     }
-    if (partialContent.length > 0) {
-      contentBlocks.push({ type: "text", text: partialContent });
+    return next;
+  }
+
+  // If we have no text blocks but final content has text, add a trailing text block
+  const textBlocks = bodyBlocks.filter((b) => b.type === "text");
+  if (textBlocks.length === 0 && finalContent.length > 0) {
+    return [...bodyBlocks, { type: "text", text: finalContent }];
+  }
+
+  // General mismatch: redistribute final content across existing text block slots
+  // preserving tool block positions
+  if (finalContent.length > 0) {
+    return redistributeTextContent(bodyBlocks, finalContent);
+  }
+
+  // Final content is empty — strip text blocks
+  return bodyBlocks.filter((b) => b.type !== "text");
+}
+
+/**
+ * Find the index of the last text block in the body blocks array.
+ */
+function findLastTextBlockIndex(blocks: readonly TurnContentBlock[]): number {
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    if (blocks[i].type === "text") return i;
+  }
+  return -1;
+}
+
+/**
+ * Redistribute authoritative text content across existing text block slots,
+ * preserving tool block positions. Allocates text proportionally to each slot
+ * based on original lengths, with any remainder going to the last text slot.
+ */
+function redistributeTextContent(
+  bodyBlocks: readonly TurnContentBlock[],
+  finalContent: string,
+): TurnContentBlock[] {
+  const textSlots: { index: number; length: number }[] = [];
+  for (let i = 0; i < bodyBlocks.length; i++) {
+    if (bodyBlocks[i].type === "text") {
+      textSlots.push({ index: i, length: (bodyBlocks[i].text ?? "").length });
     }
-
-    return {
-      contentBlocks,
-      thinkingContent,
-      synthesisContent: "",
-      hasToolCalls: false,
-      textBeforeTools: partialContent,
-    };
   }
 
-  const textBeforeTools = previousTurnState.textBeforeTools;
-  const blocks: TurnContentBlock[] = [];
-
-  if (thinkingContent.length > 0) {
-    blocks.push({ type: "thinking", text: thinkingContent });
+  if (textSlots.length === 0) {
+    return [...bodyBlocks, { type: "text", text: finalContent }];
   }
 
-  if (textBeforeTools.length > 0) {
-    blocks.push({ type: "text", text: textBeforeTools });
+  const totalStreamedLength = textSlots.reduce((sum, s) => sum + s.length, 0);
+  const next = [...bodyBlocks];
+  let consumed = 0;
+
+  for (let i = 0; i < textSlots.length; i++) {
+    const slot = textSlots[i];
+    const isLast = i === textSlots.length - 1;
+
+    if (isLast) {
+      // Last slot gets all remaining content
+      next[slot.index] = { type: "text", text: finalContent.slice(consumed) };
+    } else {
+      // Proportional allocation
+      const proportion = totalStreamedLength > 0 ? slot.length / totalStreamedLength : 1 / textSlots.length;
+      const sliceLength = Math.round(proportion * finalContent.length);
+      next[slot.index] = { type: "text", text: finalContent.slice(consumed, consumed + sliceLength) };
+      consumed += sliceLength;
+    }
   }
 
-  const sorted = [...toolCalls].sort((a, b) => a.sequenceIndex - b.sequenceIndex);
-  for (const toolCall of sorted) {
-    blocks.push({ type: "tool-call", toolCallId: toolCall.id });
-  }
-
-  const synthesisContent = partialContent.length > textBeforeTools.length
-    ? partialContent.slice(textBeforeTools.length)
-    : previousTurnState.synthesisContent;
-
-  if (synthesisContent.length > 0) {
-    blocks.push({ type: "text", text: synthesisContent });
-  }
-
-  return {
-    contentBlocks: blocks,
-    thinkingContent,
-    synthesisContent,
-    hasToolCalls: true,
-    textBeforeTools,
-  };
+  return next;
 }
 
 export function reduceStreamingState(state: StreamingState, event: StreamingEvent): StreamingState {
@@ -458,13 +568,15 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
       const currentPartial =
         state.status === "streaming" || state.status === "thinking" || state.status === "error" ? state.partialContent : "";
       const partialContent = `${currentPartial}${event.delta}`;
-      const nextToolCalls = state.toolCalls;
-      const nextTurnState = buildTurnState(
-        nextToolCalls,
-        partialContent,
-        state.turnState.thinkingContent,
-        state.turnState,
-      );
+      const nextBodyBlocks = appendTextToBody(state.turnState.bodyBlocks, event.delta);
+      const nextContentBlocks = composeContentBlocks(state.turnState.thinkingContent, nextBodyBlocks);
+      const nextTurnState: MultiToolTurnState = {
+        contentBlocks: nextContentBlocks,
+        thinkingContent: state.turnState.thinkingContent,
+        hasToolCalls: state.turnState.hasToolCalls,
+        bodyBlocks: nextBodyBlocks,
+        wasCancelled: false,
+      };
       return {
         status: "streaming",
         lifecycle,
@@ -472,7 +584,7 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
         messages: upsertAssistantMessage(state.messages, event.messageId, partialContent, event.timestamp),
         assistantMessageId: event.messageId,
         partialContent,
-        toolCalls: nextToolCalls,
+        toolCalls: state.toolCalls,
         turnState: nextTurnState,
       };
     }
@@ -484,8 +596,15 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
       const partialContent =
         state.status === "streaming" || state.status === "thinking" || state.status === "error" ? state.partialContent : "";
       const thinkingContent = `${state.turnState.thinkingContent}${event.delta}`;
-      const nextToolCalls = state.toolCalls;
-      const nextTurnState = buildTurnState(nextToolCalls, partialContent, thinkingContent, state.turnState);
+      const nextBodyBlocks = appendThinkingToBody(state.turnState.bodyBlocks, event.delta);
+      const nextContentBlocks = composeContentBlocks(thinkingContent, nextBodyBlocks);
+      const nextTurnState: MultiToolTurnState = {
+        contentBlocks: nextContentBlocks,
+        thinkingContent,
+        hasToolCalls: state.turnState.hasToolCalls,
+        bodyBlocks: nextBodyBlocks,
+        wasCancelled: false,
+      };
       const nextStatus = lifecycle.status === "thinking" ? "thinking" : "streaming";
 
       return {
@@ -495,7 +614,7 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
         messages: upsertAssistantMessage(state.messages, event.messageId, partialContent, event.timestamp),
         assistantMessageId: event.messageId,
         partialContent,
-        toolCalls: nextToolCalls,
+        toolCalls: state.toolCalls,
         turnState: nextTurnState,
       };
     }
@@ -504,12 +623,53 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
         return state;
       }
 
-      const finalTurnState = buildTurnState(
-        state.toolCalls,
+      const streamedContent =
+        state.status === "streaming" || state.status === "thinking" || state.status === "error" ? state.partialContent : "";
+      const reconciledBody = reconcileBodyWithFinalContent(
+        state.turnState.bodyBlocks,
         event.content,
-        state.turnState.thinkingContent,
-        state.turnState,
+        streamedContent,
       );
+      const finalContentBlocks = composeContentBlocks(state.turnState.thinkingContent, reconciledBody);
+      const finalTurnState: MultiToolTurnState = {
+        contentBlocks: finalContentBlocks,
+        thinkingContent: state.turnState.thinkingContent,
+        hasToolCalls: state.turnState.hasToolCalls,
+        bodyBlocks: reconciledBody,
+        wasCancelled: false,
+      };
+      return {
+        status: "complete",
+        lifecycle,
+        conversationId: event.conversationId,
+        messages: upsertAssistantMessage(state.messages, event.messageId, event.content, event.timestamp),
+        assistantMessageId: event.messageId,
+        content: event.content,
+        toolCalls: state.toolCalls,
+        turnState: finalTurnState,
+        completedAt: event.timestamp,
+      };
+    }
+    case "cancelled-complete": {
+      if (lifecycle.status !== "complete") {
+        return state;
+      }
+
+      const streamedContent =
+        state.status === "streaming" || state.status === "thinking" || state.status === "error" ? state.partialContent : "";
+      const reconciledBody = reconcileBodyWithFinalContent(
+        state.turnState.bodyBlocks,
+        event.content,
+        streamedContent,
+      );
+      const finalContentBlocks = composeContentBlocks(state.turnState.thinkingContent, reconciledBody);
+      const finalTurnState: MultiToolTurnState = {
+        contentBlocks: finalContentBlocks,
+        thinkingContent: state.turnState.thinkingContent,
+        hasToolCalls: state.turnState.hasToolCalls,
+        bodyBlocks: reconciledBody,
+        wasCancelled: true,
+      };
       return {
         status: "complete",
         lifecycle,
@@ -551,15 +711,15 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
       const basePartial =
         state.status === "streaming" || state.status === "thinking" || state.status === "error" ? state.partialContent : "";
       const nextToolCalls = applyToolCallStart(state.toolCalls, event);
-      const prevTurnState: MultiToolTurnState = state.turnState.hasToolCalls
-        ? state.turnState
-        : { ...state.turnState, textBeforeTools: basePartial };
-      const nextTurnState = buildTurnState(
-        nextToolCalls,
-        basePartial,
-        prevTurnState.thinkingContent,
-        prevTurnState,
-      );
+      const nextBodyBlocks = addToolBlockToBody(state.turnState.bodyBlocks, event.toolCallId);
+      const nextContentBlocks = composeContentBlocks(state.turnState.thinkingContent, nextBodyBlocks);
+      const nextTurnState: MultiToolTurnState = {
+        contentBlocks: nextContentBlocks,
+        thinkingContent: state.turnState.thinkingContent,
+        hasToolCalls: true,
+        bodyBlocks: nextBodyBlocks,
+        wasCancelled: false,
+      };
 
       return {
         status: "streaming",
@@ -580,12 +740,16 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
       const basePartial =
         state.status === "streaming" || state.status === "thinking" || state.status === "error" ? state.partialContent : "";
       const nextToolCalls = applyToolCallComplete(state.toolCalls, event);
-      const nextTurnState = buildTurnState(
-        nextToolCalls,
-        basePartial,
-        state.turnState.thinkingContent,
-        state.turnState,
-      );
+      // Ensure a tool block exists for orphan completes (complete without prior start)
+      const nextBodyBlocks = addToolBlockToBody(state.turnState.bodyBlocks, event.toolCallId);
+      const nextContentBlocks = composeContentBlocks(state.turnState.thinkingContent, nextBodyBlocks);
+      const nextTurnState: MultiToolTurnState = {
+        contentBlocks: nextContentBlocks,
+        thinkingContent: state.turnState.thinkingContent,
+        hasToolCalls: true,
+        bodyBlocks: nextBodyBlocks,
+        wasCancelled: false,
+      };
 
       return {
         status: "streaming",

@@ -18,6 +18,7 @@ export interface ChatScreenProps {
   showExpandedPanel: boolean;
   breakpoint: BreakpointState;
   onSubmitMessage: (text: string) => void;
+  onCancelPrompt?: () => void | Promise<void>;
 }
 
 export function resolveMainWindowFocusedPanel(
@@ -36,6 +37,7 @@ export function ChatScreen({
   showExpandedPanel,
   breakpoint,
   onSubmitMessage,
+  onCancelPrompt,
 }: ChatScreenProps) {
   const { tokens } = useThemeTokens();
   const mainWindowFocusedPanel = resolveMainWindowFocusedPanel(focusedPanel, suppressMainInput);
@@ -65,6 +67,7 @@ export function ChatScreen({
           <InputArea
             isFocused={mainWindowFocusedPanel === "input"}
             onSubmit={onSubmitMessage}
+            onCancelPrompt={onCancelPrompt}
           />
         </ZoneShell>
       </Box>

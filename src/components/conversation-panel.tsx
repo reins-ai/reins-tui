@@ -10,7 +10,7 @@ import type { FramedBlockStyle } from "../ui/types";
 import { Box, ScrollBox, Text } from "../ui";
 import { FramedBlock, SUBTLE_BORDER_CHARS } from "../ui/primitives";
 import { LogoAscii } from "./logo-ascii";
-import { Message } from "./message";
+import { getMessageBlockStyle, getMessageBorderChars, Message } from "./message";
 import { ThinkingBlock } from "./thinking-block";
 import { ToolBlock } from "./tool-inline";
 
@@ -268,6 +268,7 @@ export function ConversationPanel({ isFocused, borderColor: _borderColor, versio
                       content: block.text ?? "",
                       toolCalls: undefined,
                       contentBlocks: undefined,
+                      wasCancelled: false,
                       isStreaming: message.isStreaming === true && blockIndex === lastTextBlockIndex,
                     };
 
@@ -306,13 +307,17 @@ export function ConversationPanel({ isFocused, borderColor: _borderColor, versio
                   if (block.type === "thinking" && thinkingVisible && block.text) {
                     const marginTop = renderedBlockCount === 0 ? 0 : adjustedBlockGap(MESSAGE_GAP);
                     renderedBlockCount += 1;
+                    const thinkingBlockStyle = getMessageBlockStyle("assistant", tokens, getRoleBorder);
+                    const thinkingBorderChars = getMessageBorderChars("assistant");
 
                     return (
                       <Box key={`${message.id}-thinking-${blockIndex}`} style={{ flexDirection: "column", marginTop }}>
-                        <ThinkingBlock
-                          content={block.text}
-                          isStreaming={message.isStreaming}
-                        />
+                        <FramedBlock style={thinkingBlockStyle} borderChars={thinkingBorderChars}>
+                          <ThinkingBlock
+                            content={block.text}
+                            isStreaming={message.isStreaming && lifecycleStatus === "thinking"}
+                          />
+                        </FramedBlock>
                       </Box>
                     );
                   }
@@ -338,6 +343,20 @@ export function ConversationPanel({ isFocused, borderColor: _borderColor, versio
                     <ToolBlockList
                       toolCalls={remainingToolCalls}
                       expandedSet={expandedToolCalls}
+                    />
+                  </Box>
+                ) : null}
+                {useOrderedBlocks && message.wasCancelled ? (
+                  <Box style={{ marginTop: adjustedBlockGap(MESSAGE_GAP) }}>
+                    <Message
+                      message={{
+                        ...message,
+                        content: "",
+                        toolCalls: undefined,
+                        contentBlocks: undefined,
+                        isStreaming: false,
+                      }}
+                      lifecycleStatus={undefined}
                     />
                   </Box>
                 ) : null}

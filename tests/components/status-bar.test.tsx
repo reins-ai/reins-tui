@@ -35,6 +35,7 @@ import {
   getConnectionLabel,
   groupSegments,
   buildGroupText,
+  estimateTokenCount,
   type HeartbeatPhase,
   type LifecycleDisplay,
   type StatusBarSegments,
@@ -208,6 +209,25 @@ describe("resolveLifecycleDisplay", () => {
       const display = resolveLifecycleDisplay(sequence[i], i * 10, null);
       expect(display.glyph).toBe(expectedGlyphs[i]);
     }
+  });
+});
+
+describe("estimateTokenCount", () => {
+  test("returns 0 for empty content", () => {
+    expect(estimateTokenCount("")).toBe(0);
+    expect(estimateTokenCount("   ")).toBe(0);
+  });
+
+  test("returns at least 1 for non-empty content", () => {
+    expect(estimateTokenCount("a")).toBe(1);
+    expect(estimateTokenCount("abc")).toBe(1);
+  });
+
+  test("scales with content length", () => {
+    expect(estimateTokenCount("1234")).toBe(1);
+    expect(estimateTokenCount("12345")).toBe(2);
+    expect(estimateTokenCount("12345678")).toBe(2);
+    expect(estimateTokenCount("123456789")).toBe(3);
   });
 });
 

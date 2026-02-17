@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+
 import { DaemonRuntime, ServiceInstaller } from "@reins/core";
 import type {
   DaemonError,
@@ -30,6 +32,34 @@ interface ServiceCommandDependencies {
 }
 
 const DEFAULT_SERVICE_NAME = "reins-daemon";
+
+function buildServiceEnv(): Record<string, string> {
+  const home = process.env.HOME && process.env.HOME.trim().length > 0
+    ? process.env.HOME
+    : homedir();
+  const path = process.env.PATH && process.env.PATH.trim().length > 0
+    ? process.env.PATH
+    : "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
+
+  return {
+    REINS_DAEMON_MODE: "service",
+    HOME: home,
+    USERPROFILE: process.env.USERPROFILE && process.env.USERPROFILE.trim().length > 0
+      ? process.env.USERPROFILE
+      : home,
+    PATH: path,
+    XDG_CONFIG_HOME: process.env.XDG_CONFIG_HOME && process.env.XDG_CONFIG_HOME.trim().length > 0
+      ? process.env.XDG_CONFIG_HOME
+      : `${home}/.config`,
+    XDG_CACHE_HOME: process.env.XDG_CACHE_HOME && process.env.XDG_CACHE_HOME.trim().length > 0
+      ? process.env.XDG_CACHE_HOME
+      : `${home}/.cache`,
+    XDG_DATA_HOME: process.env.XDG_DATA_HOME && process.env.XDG_DATA_HOME.trim().length > 0
+      ? process.env.XDG_DATA_HOME
+      : `${home}/.local/share`,
+  };
+}
+
 const DEFAULT_SERVICE_DEFINITION: ServiceDefinition = {
   serviceName: DEFAULT_SERVICE_NAME,
   displayName: "Reins Daemon",
@@ -37,9 +67,7 @@ const DEFAULT_SERVICE_DEFINITION: ServiceDefinition = {
   command: process.execPath,
   args: ["run", "daemon"],
   workingDirectory: process.cwd(),
-  env: {
-    REINS_DAEMON_MODE: "service",
-  },
+  env: buildServiceEnv(),
   autoRestart: true,
 };
 

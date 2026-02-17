@@ -19,6 +19,7 @@ export const GLYPH_USER = "User";
 export const GLYPH_TOOL_RUNNING = "Running";
 export const GLYPH_TOOL_DONE = "Done";
 export const GLYPH_TOOL_ERROR = "Failed";
+export const CANCELLED_INTERACTION_TEXT = "This interaction has been cancelled";
 
 const TOOL_GLYPH_MAP: Record<DisplayToolCall["status"], string> = {
   pending: GLYPH_TOOL_RUNNING,
@@ -297,6 +298,9 @@ export function Message({ message, lifecycleStatus, renderToolBlocks, thinkingVi
   const thinkingBlocks = thinkingVisible && message.contentBlocks
     ? message.contentBlocks.filter((block) => block.type === "thinking" && block.text)
     : [];
+  const isThinkingStreaming = message.isStreaming && lifecycleStatus === "thinking";
+  const hasPrimaryContent = message.content.trim().length > 0 || message.isStreaming;
+  const showCancelledLine = message.role === "assistant" && message.wasCancelled === true;
 
   return (
     <FramedBlock style={blockStyle} borderChars={borderChars}>
@@ -306,10 +310,10 @@ export function Message({ message, lifecycleStatus, renderToolBlocks, thinkingVi
           <ThinkingBlock
             key={`thinking-${index}`}
             content={block.text ?? ""}
-            isStreaming={message.isStreaming}
+            isStreaming={isThinkingStreaming}
           />
         ))}
-        {message.content.trim().length > 0 || message.isStreaming ? (
+        {hasPrimaryContent ? (
           <Box style={{ marginTop: 0 }}>
             {message.role === "assistant" ? (
               message.isStreaming ? (
@@ -325,6 +329,9 @@ export function Message({ message, lifecycleStatus, renderToolBlocks, thinkingVi
               <Text style={{ color: contentColor }}>{message.content}</Text>
             )}
           </Box>
+        ) : null}
+        {showCancelledLine ? (
+          <Text style={{ color: tokens["status.error"] }}>{CANCELLED_INTERACTION_TEXT}</Text>
         ) : null}
       </Box>
 

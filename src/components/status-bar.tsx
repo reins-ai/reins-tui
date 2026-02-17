@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { DaemonConnectionStatus } from "../daemon/contracts";
 import type { DaemonMode } from "../daemon/daemon-context";
@@ -84,6 +84,20 @@ export interface LifecycleDisplay {
   glyph: string;
   label: string;
   colorToken: string;
+}
+
+/**
+ * Lightweight token estimate for status display.
+ * Uses a character-based heuristic so the count updates continuously during
+ * streaming even before whitespace-delimited words are complete.
+ */
+export function estimateTokenCount(content: string): number {
+  const trimmed = content.trim();
+  if (trimmed.length === 0) {
+    return 0;
+  }
+
+  return Math.max(1, Math.ceil(trimmed.length / 4));
 }
 
 export function resolveLifecycleDisplay(
@@ -348,12 +362,28 @@ export interface StatusBarProps {
 export function StatusBar({
   dimensions,
   connectionStatus = "disconnected",
-  tokenCount = 0,
+  tokenCount,
   cost = null,
   compactionActive: compactionProp,
 }: StatusBarProps) {
   const { state } = useApp();
   const { tokens } = useThemeTokens();
+
+  const resolvedTokenCount = useMemo(() => {
+    if (typeof tokenCount === "number") {
+      return tokenCount;
+    }
+
+    if (state.streamingLifecycleStatus !== "streaming") {
+      return 0;
+    }
+
+    const streamingMessage = state.streamingMessageId
+      ? state.messages.find((message) => message.id === state.streamingMessageId)
+      : [...state.messages].reverse().find((message) => message.role === "assistant" && message.isStreaming);
+
+    return estimateTokenCount(streamingMessage?.content ?? "");
+  }, [tokenCount, state.messages, state.streamingLifecycleStatus, state.streamingMessageId]);
 
   // Compaction auto-dismiss: if compactionProp goes true, show for COMPACTION_INDICATOR_DURATION_MS
   const [compactionVisible, setCompactionVisible] = useState(false);
@@ -388,7 +418,7 @@ export function StatusBar({
     activeEnvironment: state.activeEnvironment,
     lifecycleStatus: state.streamingLifecycleStatus,
     activeToolName: state.activeToolName,
-    tokenCount,
+    tokenCount: resolvedTokenCount,
     cost,
     compactionActive: compactionVisible,
     thinkingLevel: state.thinkingLevel,

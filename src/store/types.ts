@@ -117,6 +117,7 @@ export interface DisplayMessage {
   content: string;
   toolCalls?: DisplayToolCall[];
   contentBlocks?: DisplayContentBlock[];
+  wasCancelled?: boolean;
   isStreaming?: boolean;
   createdAt: Date;
 }

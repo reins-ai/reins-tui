@@ -300,6 +300,202 @@ describe("daemon ws transport", () => {
     expect(heartbeatTimestamp).toBe("2026-01-01T00:00:00.000Z");
   });
 
+  test("cancelStream sends stream.unsubscribe and closes local queue", async () => {
+    FakeWebSocket.reset();
+
+    const transport = new DaemonWsTransport({
+      baseUrl: "ws://localhost:7433",
+      connectTimeoutMs: 100,
+      webSocketFactory: (url) => new FakeWebSocket(url),
+    });
+
+    const connected = await transport.connect();
+    expect(connected.ok).toBe(true);
+
+    const streamResult = await transport.streamResponse({
+      conversationId: "c1",
+      assistantMessageId: "a1",
+    });
+    expect(streamResult.ok).toBe(true);
+    if (!streamResult.ok) {
+      throw new Error("Expected streamResponse to succeed");
+    }
+
+    const socket = FakeWebSocket.instances[0];
+    const cancelResult = transport.cancelStream({
+      conversationId: "c1",
+      assistantMessageId: "a1",
+    });
+    expect(cancelResult.ok).toBe(true);
+
+    const unsubscribeMessage = socket?.sent.find((msg) => msg.includes("stream.unsubscribe"));
+    expect(unsubscribeMessage).toBeDefined();
+
+    // Local queue should be closed immediately so iteration ends.
+    const events = await collectEventTypes(streamResult.value);
+    expect(events).toEqual([]);
+  });
+
+  test("responds with heartbeat.pong when receiving heartbeat.ping", async () => {
+    FakeWebSocket.reset();
+
+    const fixedNow = new Date("2026-06-15T12:00:00.000Z");
+    const transport = new DaemonWsTransport({
+      baseUrl: "ws://localhost:7433",
+      connectTimeoutMs: 100,
+      webSocketFactory: (url) => new FakeWebSocket(url),
+      now: () => fixedNow,
+    });
+
+    let heartbeatTimestamp = "";
+    transport.setHeartbeatHandler((timestamp) => {
+      heartbeatTimestamp = timestamp;
+    });
+
+    const connected = await transport.connect();
+    expect(connected.ok).toBe(true);
+
+    const socket = FakeWebSocket.instances[0];
+
+    // Daemon sends heartbeat.ping
+    socket?.serverMessage({ type: "heartbeat.ping", timestamp: "2026-06-15T12:00:05.000Z" });
+
+    // Transport should auto-reply with heartbeat.pong
+    const pongMessage = socket?.sent.find((msg) => msg.includes("heartbeat.pong"));
+    expect(pongMessage).toBeDefined();
+
+    const parsed = JSON.parse(pongMessage!);
+    expect(parsed.type).toBe("heartbeat.pong");
+    expect(parsed.timestamp).toBe("2026-06-15T12:00:00.000Z");
+
+    // Heartbeat handler should still be invoked with the ping timestamp
+    expect(heartbeatTimestamp).toBe("2026-06-15T12:00:05.000Z");
+  });
+
+  test("does not send pong for legacy heartbeat type", async () => {
+    FakeWebSocket.reset();
+
+    const transport = new DaemonWsTransport({
+      baseUrl: "ws://localhost:7433",
+      connectTimeoutMs: 100,
+      webSocketFactory: (url) => new FakeWebSocket(url),
+    });
+
+    let heartbeatTimestamp = "";
+    transport.setHeartbeatHandler((timestamp) => {
+      heartbeatTimestamp = timestamp;
+    });
+
+    const connected = await transport.connect();
+    expect(connected.ok).toBe(true);
+
+    const socket = FakeWebSocket.instances[0];
+
+    // Legacy heartbeat — should NOT trigger a pong reply
+    socket?.serverMessage({ type: "heartbeat", timestamp: "2026-01-01T00:00:00.000Z" });
+
+    // No pong sent (sent array should be empty — no subscribe or pong)
+    const pongMessages = socket?.sent.filter((msg) => msg.includes("heartbeat.pong")) ?? [];
+    expect(pongMessages).toHaveLength(0);
+
+    // But heartbeat handler should still fire
+    expect(heartbeatTimestamp).toBe("2026-01-01T00:00:00.000Z");
+  });
+
+  test("does not send pong for heartbeat.pong type", async () => {
+    FakeWebSocket.reset();
+
+    const transport = new DaemonWsTransport({
+      baseUrl: "ws://localhost:7433",
+      connectTimeoutMs: 100,
+      webSocketFactory: (url) => new FakeWebSocket(url),
+    });
+
+    let heartbeatTimestamp = "";
+    transport.setHeartbeatHandler((timestamp) => {
+      heartbeatTimestamp = timestamp;
+    });
+
+    const connected = await transport.connect();
+    expect(connected.ok).toBe(true);
+
+    const socket = FakeWebSocket.instances[0];
+
+    // Receiving a pong (e.g. echo from server) should NOT trigger another pong
+    socket?.serverMessage({ type: "heartbeat.pong", timestamp: "2026-01-01T00:00:00.000Z" });
+
+    const pongMessages = socket?.sent.filter((msg) => msg.includes("heartbeat.pong")) ?? [];
+    expect(pongMessages).toHaveLength(0);
+
+    // Heartbeat handler should still fire
+    expect(heartbeatTimestamp).toBe("2026-01-01T00:00:00.000Z");
+  });
+
+  test("heartbeat.ping does not interfere with active stream events", async () => {
+    FakeWebSocket.reset();
+
+    const transport = new DaemonWsTransport({
+      baseUrl: "ws://localhost:7433",
+      connectTimeoutMs: 100,
+      webSocketFactory: (url) => new FakeWebSocket(url),
+    });
+
+    const connected = await transport.connect();
+    expect(connected.ok).toBe(true);
+
+    const streamResult = await transport.streamResponse({
+      conversationId: "c1",
+      assistantMessageId: "a1",
+    });
+    expect(streamResult.ok).toBe(true);
+    if (!streamResult.ok) {
+      throw new Error("Expected streamResponse to succeed");
+    }
+
+    const socket = FakeWebSocket.instances[0];
+
+    // Interleave heartbeat.ping with stream events
+    socket?.serverMessage({
+      type: "stream-event",
+      event: {
+        type: "start",
+        conversationId: "c1",
+        messageId: "a1",
+        timestamp: "2026-01-01T00:00:01.000Z",
+      },
+    });
+    socket?.serverMessage({ type: "heartbeat.ping", timestamp: "2026-01-01T00:00:02.000Z" });
+    socket?.serverMessage({
+      type: "stream-event",
+      event: {
+        type: "delta",
+        conversationId: "c1",
+        messageId: "a1",
+        delta: "world",
+        timestamp: "2026-01-01T00:00:03.000Z",
+      },
+    });
+    socket?.serverMessage({ type: "heartbeat.ping", timestamp: "2026-01-01T00:00:04.000Z" });
+    socket?.serverMessage({
+      type: "stream-event",
+      event: {
+        type: "complete",
+        conversationId: "c1",
+        messageId: "a1",
+        content: "world",
+        timestamp: "2026-01-01T00:00:05.000Z",
+      },
+    });
+
+    // Stream should complete normally despite interleaved pings
+    const chunks = await collectStream(streamResult.value);
+    expect(chunks).toEqual(["world", "world"]);
+
+    // Two pong replies should have been sent (one per ping)
+    const pongMessages = socket?.sent.filter((msg) => msg.includes("heartbeat.pong")) ?? [];
+    expect(pongMessages).toHaveLength(2);
+  });
+
   test("maps daemon tool_call_start/tool_call_end events into daemon stream events", async () => {
     FakeWebSocket.reset();
 
