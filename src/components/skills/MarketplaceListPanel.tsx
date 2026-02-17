@@ -271,19 +271,23 @@ function normalizeInlineText(value: string): string {
     .trim();
 }
 
-function padTo(str: string, len: number): string {
-  if (str.length >= len) return str.slice(0, len);
-  return str + " ".repeat(len - str.length);
-}
-
 function padLeft(str: string, len: number): string {
   if (str.length >= len) return str.slice(0, len);
   return " ".repeat(len - str.length) + str;
 }
 
-const NAME_COL_WIDTH = 18;
+function truncateForRow(value: string, maxLen: number): string {
+  if (maxLen <= 0) return "";
+  if (value.length <= maxLen) return value;
+  if (maxLen <= 3) return ".".repeat(maxLen);
+  return value.slice(0, maxLen - 3) + "...";
+}
+
+const INDICATOR_WIDTH = 2;
+const NAME_COL_WIDTH = 20;
+const SEP_WIDTH = 3;
 const INSTALL_COL_WIDTH = 8;
-const DESCRIPTION_COL_WIDTH = 38;
+const DESCRIPTION_COL_WIDTH = 72 - INDICATOR_WIDTH - NAME_COL_WIDTH - SEP_WIDTH - INSTALL_COL_WIDTH;
 
 function MarketplaceSkillRow({
   skill,
@@ -295,16 +299,8 @@ function MarketplaceSkillRow({
   tokens: Record<string, string>;
 }) {
   const installs = formatInstallCount(skill.installCount);
-  const indicator = isSelected ? "▸" : " ";
-  const name = padTo(
-    truncateDescription(normalizeInlineText(skill.name), NAME_COL_WIDTH),
-    NAME_COL_WIDTH,
-  );
-  const description = padTo(
-    truncateDescription(normalizeInlineText(skill.description), DESCRIPTION_COL_WIDTH),
-    DESCRIPTION_COL_WIDTH,
-  );
-  const installsLabel = padLeft(`↓ ${installs}`, INSTALL_COL_WIDTH);
+  const name = truncateForRow(normalizeInlineText(skill.name), NAME_COL_WIDTH);
+  const desc = truncateForRow(normalizeInlineText(skill.description), DESCRIPTION_COL_WIDTH);
 
   return (
     <Box
@@ -314,30 +310,46 @@ function MarketplaceSkillRow({
         backgroundColor: isSelected ? tokens["surface.elevated"] : "transparent",
       }}
     >
-      <Text
-        content={`${indicator} `}
-        style={{ color: tokens["accent.primary"] }}
-      />
-      <Text
-        content={name}
-        style={{
-          color: tokens["status.warning"],
-        }}
-      />
-      <Text
-        content="  "
-        style={{ color: tokens["text.muted"] }}
-      />
-      <Text
-        content={description}
-        style={{
-          color: isSelected ? tokens["text.secondary"] : tokens["text.muted"],
-        }}
-      />
-      <Text
-        content={`  ${installsLabel}`}
-        style={{ color: tokens["status.info"] }}
-      />
+      {/* Indicator column */}
+      <Box style={{ width: INDICATOR_WIDTH }}>
+        <Text
+          content={isSelected ? "> " : "  "}
+          style={{ color: tokens["accent.primary"] }}
+        />
+      </Box>
+      {/* Name column — yellow, bold */}
+      <Box style={{ width: NAME_COL_WIDTH }}>
+        <Text
+          content={name}
+          style={{
+            color: tokens["status.warning"],
+            fontWeight: "bold",
+          }}
+        />
+      </Box>
+      {/* Separator */}
+      <Box style={{ width: SEP_WIDTH }}>
+        <Text
+          content=" | "
+          style={{ color: tokens["text.muted"] }}
+        />
+      </Box>
+      {/* Description column */}
+      <Box style={{ width: DESCRIPTION_COL_WIDTH }}>
+        <Text
+          content={desc}
+          style={{
+            color: isSelected ? tokens["text.secondary"] : tokens["text.muted"],
+          }}
+        />
+      </Box>
+      {/* Installs column — right-aligned */}
+      <Box style={{ width: INSTALL_COL_WIDTH }}>
+        <Text
+          content={padLeft(`v ${installs}`, INSTALL_COL_WIDTH)}
+          style={{ color: tokens["status.info"] }}
+        />
+      </Box>
     </Box>
   );
 }
