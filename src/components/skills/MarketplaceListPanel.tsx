@@ -234,7 +234,8 @@ function SortModeSelector({
   tokens: Record<string, string>;
 }) {
   return (
-    <Box style={{ flexDirection: "row" }}>
+    <Box style={{ flexDirection: "row", paddingLeft: 2 }}>
+      <Text content="Sort: " style={{ color: tokens["text.muted"] }} />
       {SORT_MODES.map((mode, index) => {
         const isActive = mode === activeMode;
         const label = SORT_LABELS[mode];
@@ -245,7 +246,7 @@ function SortModeSelector({
               <Text content="  " style={{ color: tokens["text.muted"] }} />
             ) : null}
             <Text
-              content={isActive ? `[${label}]` : label}
+              content={isActive ? `[${label}]` : ` ${label} `}
               style={{
                 color: isActive
                   ? tokens["accent.primary"]
@@ -259,6 +260,17 @@ function SortModeSelector({
   );
 }
 
+/** Maximum content width inside the modal panel (76 panel - 2 padding). */
+const ROW_CONTENT_WIDTH = 72;
+
+/**
+ * Pads or truncates a string to exactly `len` characters.
+ */
+function padTo(str: string, len: number): string {
+  if (str.length >= len) return str.slice(0, len);
+  return str + " ".repeat(len - str.length);
+}
+
 function MarketplaceSkillRow({
   skill,
   isSelected,
@@ -268,42 +280,50 @@ function MarketplaceSkillRow({
   isSelected: boolean;
   tokens: Record<string, string>;
 }) {
-  const trustGlyph = getMarketplaceTrustGlyph(skill.trustLevel);
-  const trustColor = tokens[getMarketplaceTrustColorToken(skill.trustLevel)];
-  const desc = truncateDescription(skill.description, 36);
   const installs = formatInstallCount(skill.installCount);
+  const indicator = isSelected ? "▸ " : "  ";
+
+  // Line 1: indicator + name (left) ... downloads (right)
+  const suffix = `  ↓ ${installs}`;
+  const nameMaxLen = ROW_CONTENT_WIDTH - indicator.length - suffix.length;
+  const paddedName = padTo(skill.name, nameMaxLen);
+
+  // Line 2: indented description
+  const descIndent = "    ";
+  const descMaxLen = ROW_CONTENT_WIDTH - descIndent.length;
+  const desc = truncateDescription(skill.description, descMaxLen);
 
   return (
     <Box
       style={{
-        flexDirection: "row",
-        paddingLeft: 1,
+        flexDirection: "column",
         backgroundColor: isSelected ? tokens["surface.elevated"] : "transparent",
       }}
     >
-      <Text
-        content={isSelected ? "> " : "  "}
-        style={{ color: tokens["accent.primary"] }}
-      />
-      <Text
-        content={skill.name}
-        style={{
-          color: isSelected ? tokens["text.primary"] : tokens["text.secondary"],
-        }}
-      />
-      <Text content={`  ${trustGlyph}`} style={{ color: trustColor }} />
-      <Text
-        content={`  ${desc}`}
-        style={{ color: tokens["text.muted"] }}
-      />
-      <Text
-        content={`  ${skill.author}`}
-        style={{ color: tokens["text.muted"] }}
-      />
-      <Text
-        content={`  ↓${installs}`}
-        style={{ color: tokens["text.muted"] }}
-      />
+      {/* Line 1: name + downloads */}
+      <Box style={{ flexDirection: "row", paddingLeft: 1 }}>
+        <Text
+          content={indicator}
+          style={{ color: tokens["accent.primary"] }}
+        />
+        <Text
+          content={paddedName}
+          style={{
+            color: isSelected ? tokens["text.primary"] : tokens["text.secondary"],
+          }}
+        />
+        <Text
+          content={suffix}
+          style={{ color: tokens["text.muted"] }}
+        />
+      </Box>
+      {/* Line 2: description */}
+      <Box style={{ flexDirection: "row", paddingLeft: 1 }}>
+        <Text
+          content={descIndent + desc}
+          style={{ color: tokens["text.muted"] }}
+        />
+      </Box>
     </Box>
   );
 }
