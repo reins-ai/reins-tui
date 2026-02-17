@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  buildPromptReinsSetupMessage,
   getHelpActions,
   INITIAL_PANEL_STATE,
   skillPanelReducer,
@@ -422,6 +423,7 @@ describe("SkillPanel getHelpActions", () => {
     const keys = actions.map((a) => a.key);
 
     expect(keys).toContain("e");
+    expect(keys).toContain("r");
     expect(keys).toContain("Esc");
   });
 
@@ -429,8 +431,8 @@ describe("SkillPanel getHelpActions", () => {
     expect(getHelpActions("list", 0).length).toBe(6);
   });
 
-  test("detail view has 2 actions", () => {
-    expect(getHelpActions("detail").length).toBe(2);
+  test("detail view has 3 actions", () => {
+    expect(getHelpActions("detail").length).toBe(3);
   });
 
   test("list view Esc label is Close", () => {
@@ -452,6 +454,13 @@ describe("SkillPanel getHelpActions", () => {
     const toggleAction = actions.find((a) => a.key === "e");
     expect(toggleAction).toBeDefined();
     expect(toggleAction!.label).toBe("Toggle");
+  });
+
+  test("detail view r label is Remove", () => {
+    const actions = getHelpActions("detail");
+    const removeAction = actions.find((a) => a.key === "r");
+    expect(removeAction).toBeDefined();
+    expect(removeAction!.label).toBe("Remove");
   });
 
   test("reins marketplace tab shows only tab switch and close", () => {
@@ -907,5 +916,112 @@ describe("SkillPanel reducer install flow", () => {
 
     const state4 = skillPanelReducer(INITIAL_PANEL_STATE, { type: "INSTALL_RESET" });
     expect(state4).toEqual(INITIAL_PANEL_STATE);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildPromptReinsSetupMessage
+// ---------------------------------------------------------------------------
+
+describe("buildPromptReinsSetupMessage", () => {
+  const INSTALL_DETAIL = {
+    slug: "summarize",
+    name: "Summarize",
+    author: "author",
+    description: "Summarize web pages",
+    installCount: 100,
+    trustLevel: "community" as const,
+    categories: ["productivity"],
+    version: "1.0.0",
+    updatedAt: "2026-01-01",
+    fullDescription: "Summarize content with a local CLI",
+    requiredTools: [],
+    versions: ["1.0.0"],
+  };
+
+  test("returns a prompt when integration setup is required", () => {
+    const prompt = buildPromptReinsSetupMessage({
+      slug: "summarize",
+      version: "1.0.0",
+      detail: INSTALL_DETAIL,
+      progress: "complete",
+      error: null,
+      result: {
+        slug: "summarize",
+        version: "1.0.0",
+        installedPath: "/home/user/.reins/skills/summarize",
+        migrated: false,
+        integration: {
+          setupRequired: true,
+          guidePath: "/home/user/.reins/skills/summarize/INTEGRATION.md",
+          sections: [
+            { title: "Setup", content: "1. Install summarize CLI", level: 2 },
+            { title: "Configuration", content: "Set API key", level: 2 },
+          ],
+        },
+      },
+    });
+
+    expect(prompt).not.toBeNull();
+    expect(prompt!).toContain("I just installed the skill \"Summarize\"");
+    expect(prompt!).toContain("Integration guide path:");
+    expect(prompt!).toContain("## Setup");
+  });
+
+  test("returns a prompt when setup is not required but integration exists", () => {
+    const prompt = buildPromptReinsSetupMessage({
+      slug: "summarize",
+      version: "1.0.0",
+      detail: INSTALL_DETAIL,
+      progress: "complete",
+      error: null,
+      result: {
+        slug: "summarize",
+        version: "1.0.0",
+        installedPath: "/home/user/.reins/skills/summarize",
+        migrated: false,
+        integration: {
+          setupRequired: false,
+          guidePath: "/home/user/.reins/skills/summarize/INTEGRATION.md",
+          sections: [],
+        },
+      },
+    });
+
+    expect(prompt).not.toBeNull();
+    expect(prompt!).toContain("Integration guide path:");
+  });
+
+  test("returns a prompt when no integration info exists", () => {
+    const prompt = buildPromptReinsSetupMessage({
+      slug: "summarize",
+      version: "1.0.0",
+      detail: INSTALL_DETAIL,
+      progress: "complete",
+      error: null,
+      result: {
+        slug: "summarize",
+        version: "1.0.0",
+        installedPath: "/home/user/.reins/skills/summarize",
+        migrated: false,
+      },
+    });
+
+    expect(prompt).not.toBeNull();
+    expect(prompt!).toContain("No INTEGRATION.md guide was found");
+    expect(prompt!).toContain("First call `load_skill`");
+  });
+
+  test("returns null when install has no result yet", () => {
+    const prompt = buildPromptReinsSetupMessage({
+      slug: "summarize",
+      version: "1.0.0",
+      detail: INSTALL_DETAIL,
+      progress: "installing",
+      error: null,
+      result: null,
+    });
+
+    expect(prompt).toBeNull();
   });
 });

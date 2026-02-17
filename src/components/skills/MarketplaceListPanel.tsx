@@ -228,8 +228,10 @@ export interface VisibleSkillWindow {
 }
 
 const SUMMARY_VIEW_WIDTH = 58;
+const SUMMARY_SCROLL_START_DELAY_MS = 500;
 const SUMMARY_SCROLL_INTERVAL_MS = 110;
 const SUMMARY_SCROLL_GAP = "   •   ";
+const SEARCH_REQUEST_DEBOUNCE_MS = 250;
 
 /**
  * Returns a stable visible window that keeps the selected row on-screen.
@@ -470,20 +472,25 @@ export function MarketplaceListPanel({
     let cancelled = false;
     dispatch({ type: "SET_LOADING", isLoading: true });
 
-    source.search(state.searchQuery).then((result) => {
-      if (cancelled) return;
-      if (result.ok) {
-        dispatch({ type: "SET_SKILLS", skills: result.value.skills });
-      } else {
-        dispatch({ type: "SET_ERROR", error: result.error.message });
-      }
-    }).catch((err: unknown) => {
-      if (cancelled) return;
-      const message = err instanceof Error ? err.message : "Unknown error";
-      dispatch({ type: "SET_ERROR", error: message });
-    });
+    const timerId = setTimeout(() => {
+      source.search(state.searchQuery).then((result) => {
+        if (cancelled) return;
+        if (result.ok) {
+          dispatch({ type: "SET_SKILLS", skills: result.value.skills });
+        } else {
+          dispatch({ type: "SET_ERROR", error: result.error.message });
+        }
+      }).catch((err: unknown) => {
+        if (cancelled) return;
+        const message = err instanceof Error ? err.message : "Unknown error";
+        dispatch({ type: "SET_ERROR", error: message });
+      });
+    }, SEARCH_REQUEST_DEBOUNCE_MS);
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      clearTimeout(timerId);
+    };
   }, [source, state.searchMode, state.searchQuery]);
 
   // --- Retry handler ---
@@ -531,12 +538,20 @@ export function MarketplaceListPanel({
       return;
     }
 
-    const timer = setInterval(() => {
-      setSummaryOffset((prev) => prev + 1);
-    }, SUMMARY_SCROLL_INTERVAL_MS);
+    let intervalId: ReturnType<typeof setInterval> | null = null;
+    const delayId = setTimeout(() => {
+      intervalId = setInterval(() => {
+        setSummaryOffset((prev) => prev + 1);
+      }, SUMMARY_SCROLL_INTERVAL_MS);
+    }, SUMMARY_SCROLL_START_DELAY_MS);
 
-    return () => clearInterval(timer);
-  }, [selectedSummary]);
+    return () => {
+      clearTimeout(delayId);
+      if (intervalId !== null) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [selectedSkill?.slug, selectedSummary]);
 
   // --- Keyboard handling ---
   useKeyboard(useCallback((event) => {

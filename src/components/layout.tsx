@@ -74,6 +74,7 @@ export interface LayoutProps {
   version: string;
   dimensions: TerminalDimensions;
   showHelp: boolean;
+  suppressMainInput?: boolean;
   connectionStatus: DaemonConnectionStatus;
   daemonMode?: DaemonMode;
   onSubmitMessage(text: string): void;
@@ -132,7 +133,15 @@ function useBreakpointConstraints(columns: number): BreakpointState {
 const DRAWER_WIDTH = SIDEBAR_CONTEXT_WIDTH;
 const TODAY_PANEL_WIDTH = 34;
 
-export function Layout({ version, dimensions, showHelp, connectionStatus, daemonMode, onSubmitMessage }: LayoutProps) {
+export function Layout({
+  version,
+  dimensions,
+  showHelp,
+  suppressMainInput = false,
+  connectionStatus,
+  daemonMode,
+  onSubmitMessage,
+}: LayoutProps) {
   const { state, dispatch } = useApp();
   const { tokens } = useThemeTokens();
 
@@ -163,6 +172,7 @@ export function Layout({ version, dimensions, showHelp, connectionStatus, daemon
           version={version}
           panelBorders={panelBorders}
           focusedPanel={state.focusedPanel}
+          suppressMainInput={suppressMainInput}
           showActivityPanel={false}
           showExpandedPanel={false}
           breakpoint={breakpoint}

@@ -11,6 +11,7 @@ import {
   formatCharCount,
   type InputFrameState,
 } from "../../src/components";
+import { resolveMainWindowFocusedPanel } from "../../src/screens/chat-screen";
 import { ACCENT_BORDER_CHARS, SUBTLE_BORDER_CHARS } from "../../src/ui/primitives";
 
 const TEST_FOCUS_COLOR = "#e8976c";
@@ -189,5 +190,18 @@ describe("character count formatting", () => {
 
   test("shows count for single character", () => {
     expect(formatCharCount(1, 4000)).toBe("1/4000");
+  });
+});
+
+describe("main window input suppression", () => {
+  test("preserves focused panel when suppression is disabled", () => {
+    expect(resolveMainWindowFocusedPanel("input", false)).toBe("input");
+    expect(resolveMainWindowFocusedPanel("conversation", false)).toBe("conversation");
+  });
+
+  test("clears focused panel when suppression is enabled", () => {
+    expect(resolveMainWindowFocusedPanel("input", true)).toBe("");
+    expect(resolveMainWindowFocusedPanel("conversation", true)).toBe("");
+    expect(resolveMainWindowFocusedPanel("sidebar", true)).toBe("");
   });
 });

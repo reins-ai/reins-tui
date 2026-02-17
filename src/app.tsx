@@ -1,3 +1,4 @@
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
@@ -453,6 +454,26 @@ function AppView({ version, dimensions }: AppViewProps) {
     setSkills(registered.map(skillToListItem));
   }, []);
 
+  const removeInstalledSkill = useCallback(async (name: string): Promise<boolean> => {
+    const registry = skillRegistryRef.current;
+    const skill = registry.get(name);
+    if (!skill) {
+      return false;
+    }
+
+    try {
+      await rm(skill.config.path, { recursive: true, force: true });
+    } catch {
+      dispatch({ type: "SET_STATUS", payload: `Failed to remove ${name}` });
+      return false;
+    }
+
+    registry.remove(name);
+    setSkills(registry.list().map(skillToListItem));
+    dispatch({ type: "SET_STATUS", payload: `Removed ${name}` });
+    return true;
+  }, [dispatch]);
+
   const [startupContent, setStartupContent] = useState<StartupContent | null>(null);
   const renderer = useRenderer();
   const isExitingRef = useRef(false);
@@ -882,6 +903,11 @@ function AppView({ version, dimensions }: AppViewProps) {
     if (listResult.ok) {
       dispatch({ type: "SET_CONVERSATIONS", payload: listResult.value.map(toStoreConversationSummary) });
     }
+  };
+
+  const handlePromptReinsSkillSetup = (prompt: string) => {
+    void handleMessageSubmit(prompt);
+    dispatch({ type: "SET_STATUS", payload: "Prompted Reins to help with skill setup" });
   };
 
   const setCommandPaletteOpen = (isOpen: boolean) => {
@@ -1377,12 +1403,27 @@ function AppView({ version, dimensions }: AppViewProps) {
   }
 
   // Normal app render (onboardingStatus === "complete")
+  const suppressMainInput = showHelp
+    || state.isCommandPaletteOpen
+    || state.isConnectFlowOpen
+    || state.isEmbeddingSetupOpen
+    || state.isModelSelectorOpen
+    || state.isSearchSettingsOpen
+    || state.isDaemonPanelOpen
+    || state.isIntegrationPanelOpen
+    || state.isSkillPanelOpen
+    || state.isChannelTokenPromptOpen
+    || state.panels.modal.visible
+    || state.panels.drawer.visible
+    || state.panels.today.visible;
+
   return (
     <>
       <Layout
         version={version}
         dimensions={dimensions}
         showHelp={showHelp}
+        suppressMainInput={suppressMainInput}
         connectionStatus={connectionStatus}
         daemonMode={daemonMode}
         onSubmitMessage={handleMessageSubmit}
@@ -1433,7 +1474,9 @@ function AppView({ version, dimensions }: AppViewProps) {
         skills={skills}
         onLoadSkillDetail={loadSkillDetail}
         onToggleEnabled={toggleSkillEnabled}
+        onRemoveSkill={removeInstalledSkill}
         onClose={closeSkillPanel}
+        onPromptReinsSetup={handlePromptReinsSkillSetup}
         marketplaceSource={marketplaceSource}
       />
       {state.isChannelTokenPromptOpen && state.channelTokenPromptPlatform ? (

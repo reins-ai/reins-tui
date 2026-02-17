@@ -3,11 +3,13 @@ import { describe, expect, test } from "bun:test";
 import type {
   InstallResult,
   InstallStep,
+  IntegrationInfo,
   MarketplaceTrustLevel,
 } from "@reins/core";
 
 import {
   buildChecklist,
+  extractSetupHints,
   getChecklistSymbol,
   getInstallFlowHelpActions,
   INITIAL_FLOW_STATE,
@@ -60,6 +62,59 @@ const MOCK_MIGRATED_RESULT: InstallResult = {
   version: "1.0.0",
   installedPath: "/home/user/.reins/skills/openclaw-skill",
   migrated: true,
+};
+
+const MOCK_INTEGRATION_SETUP_REQUIRED: IntegrationInfo = {
+  setupRequired: true,
+  guidePath: "/home/user/.reins/skills/ffmpeg-tool/INTEGRATION.md",
+  sections: [
+    {
+      title: "Prerequisites",
+      content: "1. Install ffmpeg via your package manager\n2. Ensure `ffmpeg` is on your PATH\n3. Verify with `ffmpeg -version`",
+      level: 2,
+    },
+    {
+      title: "Configuration",
+      content: "Set the output directory in your config:\n`export FFMPEG_OUTPUT=~/videos`",
+      level: 2,
+    },
+  ],
+};
+
+const MOCK_INTEGRATION_NO_SETUP: IntegrationInfo = {
+  setupRequired: false,
+  guidePath: "/home/user/.reins/skills/simple-tool/INTEGRATION.md",
+  sections: [
+    {
+      title: "Overview",
+      content: "This skill works out of the box with no additional setup.",
+      level: 2,
+    },
+  ],
+};
+
+const MOCK_RESULT_WITH_INTEGRATION: InstallResult = {
+  slug: "ffmpeg-tool",
+  version: "1.0.0",
+  installedPath: "/home/user/.reins/skills/ffmpeg-tool",
+  migrated: false,
+  integration: MOCK_INTEGRATION_SETUP_REQUIRED,
+};
+
+const MOCK_RESULT_WITH_OPTIONAL_INTEGRATION: InstallResult = {
+  slug: "simple-tool",
+  version: "1.0.0",
+  installedPath: "/home/user/.reins/skills/simple-tool",
+  migrated: false,
+  integration: MOCK_INTEGRATION_NO_SETUP,
+};
+
+const MOCK_RESULT_MIGRATED_WITH_INTEGRATION: InstallResult = {
+  slug: "openclaw-ffmpeg",
+  version: "2.0.0",
+  installedPath: "/home/user/.reins/skills/openclaw-ffmpeg",
+  migrated: true,
+  integration: MOCK_INTEGRATION_SETUP_REQUIRED,
 };
 
 // ---------------------------------------------------------------------------
@@ -459,6 +514,23 @@ describe("InstallFlow getInstallFlowHelpActions", () => {
     expect(actions.length).toBe(1);
     expect(actions[0].key).toBe("Esc");
     expect(actions[0].label).toBe("Back");
+  });
+
+  test("done step shows prompt action when setup prompting is available", () => {
+    const actions = getInstallFlowHelpActions("done", { canPromptSetup: true });
+    const keys = actions.map((a) => a.key);
+    expect(keys).toContain("p");
+    expect(keys).toContain("Esc");
+
+    const promptAction = actions.find((a) => a.key === "p");
+    expect(promptAction).toBeDefined();
+    expect(promptAction!.label).toBe("Prompt Reins to setup");
+  });
+
+  test("done step omits prompt action when setup prompting is unavailable", () => {
+    const actions = getInstallFlowHelpActions("done", { canPromptSetup: false });
+    expect(actions.length).toBe(1);
+    expect(actions[0].key).toBe("Esc");
   });
 
   test("error step shows r/Retry and Esc/Cancel", () => {
@@ -868,5 +940,194 @@ describe("SkillPanel getHelpActions for install view", () => {
     const { getHelpActions } = await import("../../../src/components/skills/SkillPanel");
     const actions = getHelpActions("install");
     expect(actions.length).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// extractSetupHints
+// ---------------------------------------------------------------------------
+
+describe("extractSetupHints", () => {
+  test("extracts numbered list items from setup-related sections", () => {
+    const hints = extractSetupHints(MOCK_INTEGRATION_SETUP_REQUIRED.sections);
+    expect(hints.length).toBeGreaterThan(0);
+    expect(hints[0]).toBe("Install ffmpeg via your package manager");
+    expect(hints[1]).toBe("Ensure `ffmpeg` is on your PATH");
+    expect(hints[2]).toBe("Verify with `ffmpeg -version`");
+  });
+
+  test("extracts inline code commands from setup sections", () => {
+    const sections = [
+      {
+        title: "Setup",
+        content: "Run the following:\n`brew install ffmpeg`\n`npm install -g tool`",
+        level: 2,
+      },
+    ];
+    const hints = extractSetupHints(sections);
+    expect(hints).toContain("brew install ffmpeg");
+    expect(hints).toContain("npm install -g tool");
+  });
+
+  test("returns empty array when no setup-related sections exist", () => {
+    const sections = [
+      {
+        title: "Overview",
+        content: "This skill does cool things.",
+        level: 2,
+      },
+      {
+        title: "Usage",
+        content: "Just use it.",
+        level: 2,
+      },
+    ];
+    const hints = extractSetupHints(sections);
+    expect(hints.length).toBe(0);
+  });
+
+  test("returns empty array for empty sections", () => {
+    const hints = extractSetupHints([]);
+    expect(hints.length).toBe(0);
+  });
+
+  test("limits output to 4 hints maximum", () => {
+    const sections = [
+      {
+        title: "Setup",
+        content: "1. Step one\n2. Step two\n3. Step three\n4. Step four\n5. Step five\n6. Step six",
+        level: 2,
+      },
+    ];
+    const hints = extractSetupHints(sections);
+    expect(hints.length).toBe(4);
+  });
+
+  test("matches setup headings case-insensitively", () => {
+    const sections = [
+      {
+        title: "PREREQUISITES",
+        content: "1. Install Node.js",
+        level: 2,
+      },
+    ];
+    const hints = extractSetupHints(sections);
+    expect(hints.length).toBe(1);
+    expect(hints[0]).toBe("Install Node.js");
+  });
+
+  test("collects hints across multiple setup sections", () => {
+    const sections = [
+      {
+        title: "Prerequisites",
+        content: "1. Install Docker",
+        level: 2,
+      },
+      {
+        title: "Configuration",
+        content: "`docker login`",
+        level: 2,
+      },
+    ];
+    const hints = extractSetupHints(sections);
+    expect(hints.length).toBe(2);
+    expect(hints[0]).toBe("Install Docker");
+    expect(hints[1]).toBe("docker login");
+  });
+
+  test("skips non-setup sections even if they contain numbered items", () => {
+    const sections = [
+      {
+        title: "Usage",
+        content: "1. Run the command\n2. Check the output",
+        level: 2,
+      },
+      {
+        title: "Setup",
+        content: "1. Install the CLI",
+        level: 2,
+      },
+    ];
+    const hints = extractSetupHints(sections);
+    expect(hints.length).toBe(1);
+    expect(hints[0]).toBe("Install the CLI");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SkillPanel reducer: INSTALL_COMPLETE with integration payload
+// ---------------------------------------------------------------------------
+
+describe("SkillPanel reducer INSTALL_COMPLETE with integration", () => {
+  test("stores integration info in install result", () => {
+    let state = skillPanelReducer(INITIAL_PANEL_STATE, {
+      type: "START_INSTALL",
+      slug: "ffmpeg-tool",
+      version: "1.0.0",
+      detail: MOCK_DETAIL,
+    });
+
+    state = skillPanelReducer(state, {
+      type: "INSTALL_COMPLETE",
+      result: MOCK_RESULT_WITH_INTEGRATION,
+    });
+
+    expect(state.installState!.result).toBe(MOCK_RESULT_WITH_INTEGRATION);
+    expect(state.installState!.result!.integration).toBeDefined();
+    expect(state.installState!.result!.integration!.setupRequired).toBe(true);
+    expect(state.installState!.result!.integration!.guidePath).toBe(
+      "/home/user/.reins/skills/ffmpeg-tool/INTEGRATION.md",
+    );
+  });
+
+  test("stores optional integration (no setup required)", () => {
+    let state = skillPanelReducer(INITIAL_PANEL_STATE, {
+      type: "START_INSTALL",
+      slug: "simple-tool",
+      version: "1.0.0",
+      detail: MOCK_DETAIL,
+    });
+
+    state = skillPanelReducer(state, {
+      type: "INSTALL_COMPLETE",
+      result: MOCK_RESULT_WITH_OPTIONAL_INTEGRATION,
+    });
+
+    expect(state.installState!.result!.integration).toBeDefined();
+    expect(state.installState!.result!.integration!.setupRequired).toBe(false);
+  });
+
+  test("result without integration has undefined integration field", () => {
+    let state = skillPanelReducer(INITIAL_PANEL_STATE, {
+      type: "START_INSTALL",
+      slug: "git-workflow",
+      version: "2.1.0",
+      detail: MOCK_DETAIL,
+    });
+
+    state = skillPanelReducer(state, {
+      type: "INSTALL_COMPLETE",
+      result: MOCK_INSTALL_RESULT,
+    });
+
+    expect(state.installState!.result!.integration).toBeUndefined();
+  });
+
+  test("migrated result with integration preserves both flags", () => {
+    let state = skillPanelReducer(INITIAL_PANEL_STATE, {
+      type: "START_INSTALL",
+      slug: "openclaw-ffmpeg",
+      version: "2.0.0",
+      detail: MOCK_DETAIL,
+    });
+
+    state = skillPanelReducer(state, {
+      type: "INSTALL_COMPLETE",
+      result: MOCK_RESULT_MIGRATED_WITH_INTEGRATION,
+    });
+
+    expect(state.installState!.result!.migrated).toBe(true);
+    expect(state.installState!.result!.integration).toBeDefined();
+    expect(state.installState!.result!.integration!.setupRequired).toBe(true);
   });
 });

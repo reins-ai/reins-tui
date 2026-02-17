@@ -302,27 +302,6 @@ function BodySection({
   );
 }
 
-function HelpBar({ tokens }: { tokens: Record<string, string> }) {
-  const hints = [
-    { key: "e", label: "Toggle" },
-    { key: "Esc", label: "Back" },
-  ];
-
-  return (
-    <Box style={{ flexDirection: "row" }}>
-      {hints.map((hint, index) => (
-        <Box key={hint.key} style={{ flexDirection: "row" }}>
-          {index > 0 ? (
-            <Text content="  " style={{ color: tokens["text.muted"] }} />
-          ) : null}
-          <Text content={`[${hint.key}]`} style={{ color: tokens["accent.primary"] }} />
-          <Text content={` ${hint.label}`} style={{ color: tokens["text.secondary"] }} />
-        </Box>
-      ))}
-    </Box>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -347,7 +326,6 @@ export function SkillDetailView({ skill, onBack, onToggleEnabled }: SkillDetailV
       <ScriptsSection scripts={skill.scripts} tokens={tokens} />
       <IntegrationSection status={skill.integrationStatus} tokens={tokens} />
       <BodySection body={skill.body} tokens={tokens} />
-      <HelpBar tokens={tokens} />
     </Box>
   );
 }

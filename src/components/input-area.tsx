@@ -447,6 +447,10 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
   });
 
   const handleInput = (value: string) => {
+    if (!isFocused) {
+      return;
+    }
+
     const next = clampText(normalizeInputValue(value));
     setInput(next);
     history.current.setDraft(next);
@@ -458,6 +462,10 @@ export function InputArea({ isFocused, onSubmit }: InputAreaProps) {
   };
 
   const handleSubmit = () => {
+    if (!isFocused) {
+      return;
+    }
+
     const kind = classifyInputSubmission(input);
     if (kind === "empty") {
       setValidationError("Message cannot be empty");

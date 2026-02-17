@@ -1,5 +1,13 @@
+import { join } from "node:path";
+
 import { useCallback, useReducer } from "react";
 
+import {
+  getDataRoot,
+  MigrationPipeline,
+  MigrationService,
+  SkillInstaller,
+} from "@reins/core";
 import type {
   InstallResult,
   InstallStep,
@@ -36,7 +44,9 @@ export interface SkillPanelProps {
   skills: readonly SkillListItem[];
   onLoadSkillDetail: (name: string) => SkillDetailData | null;
   onToggleEnabled: (name: string) => void;
+  onRemoveSkill?: (name: string) => Promise<boolean> | boolean;
   onClose: () => void;
+  onPromptReinsSetup?: (prompt: string) => void;
   /** Marketplace source for the ClawHub tab. Null when not configured. */
   marketplaceSource?: MarketplaceSource | null;
 }
@@ -84,6 +94,37 @@ export const INITIAL_PANEL_STATE: PanelState = {
   selectedMarketplaceSkill: null,
   installState: null,
 };
+
+export function buildPromptReinsSetupMessage(installState: InstallState): string | null {
+  const result = installState.result;
+  if (!result) {
+    return null;
+  }
+
+  const integration = result.integration;
+  const requiredTools = installState.detail.requiredTools.length > 0
+    ? installState.detail.requiredTools.join(", ")
+    : "unknown";
+
+  const sections = integration
+    ? integration.sections
+      .slice(0, 3)
+      .map((section) => `## ${section.title}\n${section.content}`)
+      .join("\n\n")
+    : "";
+
+  return [
+    `I just installed the skill \"${installState.detail.name}\" (${installState.slug}@${installState.version}).`,
+    "Please help me complete setup now before first use.",
+    `Installed path: ${result.installedPath}`,
+    `Marketplace required tools: ${requiredTools}`,
+    integration ? `Integration guide path: ${integration.guidePath}` : "No INTEGRATION.md guide was found in this package.",
+    sections.length > 0 ? `Integration guide excerpts:\n\n${sections}` : "",
+    "First call `load_skill` for this skill to inspect its content and detect any CLI/system dependencies. Then provide step-by-step setup commands for this environment and finish with a quick validation command.",
+  ]
+    .filter((line) => line.length > 0)
+    .join("\n\n");
+}
 
 export function skillPanelReducer(state: PanelState, action: PanelAction): PanelState {
   switch (action.type) {
@@ -207,6 +248,7 @@ export function getHelpActions(view: PanelView, activeTabIndex?: number): readon
   if (view === "detail") {
     return [
       { key: "e", label: "Toggle" },
+      { key: "r", label: "Remove" },
       { key: "Esc", label: "Back" },
     ];
   }
@@ -280,7 +322,9 @@ export function SkillPanel({
   skills,
   onLoadSkillDetail,
   onToggleEnabled,
+  onRemoveSkill,
   onClose,
+  onPromptReinsSetup,
   marketplaceSource = null,
 }: SkillPanelProps) {
   const { tokens } = useThemeTokens();
@@ -311,6 +355,27 @@ export function SkillPanel({
     [onToggleEnabled, onLoadSkillDetail],
   );
 
+  // Handle installed skill removal
+  const handleRemove = useCallback(
+    (name: string) => {
+      if (!onRemoveSkill) {
+        return;
+      }
+
+      void Promise.resolve(onRemoveSkill(name))
+        .then((removed) => {
+          if (removed === false) {
+            return;
+          }
+          dispatch({ type: "GO_BACK" });
+        })
+        .catch(() => {
+          // Keep detail view open on remove failures
+        });
+    },
+    [onRemoveSkill],
+  );
+
   // Handle panel close — reset state and call parent
   const handleClose = useCallback(() => {
     dispatch({ type: "CLOSE" });
@@ -328,8 +393,6 @@ export function SkillPanel({
   }, []);
 
   // Handle marketplace skill install — transitions to install flow view.
-  // The actual SkillInstaller.install() call will be wired in Task 5.5;
-  // for now this sets up the UI flow with the detail data from the source.
   const handleMarketplaceInstall = useCallback((slug: string, version: string) => {
     if (!marketplaceSource) return;
 
@@ -342,11 +405,54 @@ export function SkillPanel({
     });
   }, [marketplaceSource]);
 
+  const runInstaller = useCallback(async (
+    source: MarketplaceSource,
+    slug: string,
+    version: string,
+  ): Promise<void> => {
+    // Use deterministic fallback migration path in TUI to avoid requiring
+    // any external LLM credentials for install.
+    const migrationService: MigrationService = new MigrationService({
+      chatFn: async () => "invalid payload without tagged sections",
+    });
+    const migrationPipeline: MigrationPipeline = new MigrationPipeline({
+      migrationService,
+    });
+    const installer: SkillInstaller = new SkillInstaller({
+      source,
+      migrationPipeline,
+      skillsDir: join(getDataRoot(), "skills"),
+      onProgress: (step, message) => {
+        if (step === "failed") {
+          dispatch({ type: "INSTALL_ERROR", error: message });
+          return;
+        }
+        dispatch({ type: "INSTALL_PROGRESS", step });
+      },
+    });
+
+    const result = await installer.install(slug, version);
+    if (!result.ok) {
+      dispatch({ type: "INSTALL_ERROR", error: result.error.message });
+      return;
+    }
+
+    dispatch({ type: "INSTALL_PROGRESS", step: "complete" });
+    dispatch({ type: "INSTALL_COMPLETE", result: result.value });
+  }, []);
+
   // Install flow callbacks
   const handleInstallConfirm = useCallback(() => {
-    // Actual SkillInstaller.install() call will be wired in Task 5.5.
-    // The InstallFlow component transitions to "progress" step on confirm.
-  }, []);
+    if (!marketplaceSource || !state.installState) {
+      return;
+    }
+
+    const { slug, version } = state.installState;
+    void runInstaller(marketplaceSource, slug, version).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      dispatch({ type: "INSTALL_ERROR", error: message });
+    });
+  }, [marketplaceSource, runInstaller, state.installState]);
 
   const handleInstallCancel = useCallback(() => {
     dispatch({ type: "GO_BACK" });
@@ -360,6 +466,20 @@ export function SkillPanel({
     dispatch({ type: "INSTALL_RESET" });
   }, []);
 
+  const handleInstallPromptSetup = useCallback(() => {
+    if (!onPromptReinsSetup || !state.installState) {
+      return;
+    }
+
+    const prompt = buildPromptReinsSetupMessage(state.installState);
+    if (!prompt) {
+      return;
+    }
+
+    onPromptReinsSetup(prompt);
+    handleClose();
+  }, [onPromptReinsSetup, state.installState, handleClose]);
+
   // Keyboard handler for panel-level shortcuts
   useKeyboard(
     useCallback(
@@ -372,6 +492,11 @@ export function SkillPanel({
         if (state.view === "detail") {
           if (keyName === "e" && state.selectedSkillName) {
             handleToggle(state.selectedSkillName);
+            return;
+          }
+
+          if ((keyName === "r" || event.sequence === "r") && state.selectedSkillName) {
+            handleRemove(state.selectedSkillName);
             return;
           }
 
@@ -392,7 +517,7 @@ export function SkillPanel({
           return;
         }
       },
-      [visible, state.view, state.activeTabIndex, state.selectedSkillName, handleToggle, handleBack, handleTabChange],
+      [visible, state.view, state.activeTabIndex, state.selectedSkillName, handleToggle, handleRemove, handleBack, handleTabChange],
     ),
   );
 
@@ -419,6 +544,7 @@ export function SkillPanel({
           onCancel={handleInstallCancel}
           onComplete={handleInstallComplete}
           onRetry={handleInstallRetry}
+          onPromptSetup={handleInstallPromptSetup}
           installProgress={inst.progress}
           installError={inst.error}
           installResult={inst.result}
@@ -455,7 +581,6 @@ export function SkillPanel({
       <ModalPanel
         visible={visible}
         title={state.selectedSkillName ?? "Skill Detail"}
-        hint="e toggle · Esc back"
         width={76}
         height={24}
         closeOnEscape={false}

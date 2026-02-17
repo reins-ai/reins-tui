@@ -3,6 +3,7 @@ import { useCallback, useEffect, useReducer } from "react";
 import type {
   InstallResult,
   InstallStep,
+  IntegrationInfo,
   MarketplaceTrustLevel,
 } from "@reins/core";
 
@@ -24,6 +25,7 @@ export interface InstallFlowProps {
   readonly onCancel: () => void;
   readonly onComplete: () => void;
   readonly onRetry: () => void;
+  readonly onPromptSetup?: () => void;
   readonly installProgress: InstallStep | null;
   readonly installError: string | null;
   readonly installResult: InstallResult | null;
@@ -187,7 +189,12 @@ export interface HelpAction {
   readonly label: string;
 }
 
-export function getInstallFlowHelpActions(step: FlowStep): readonly HelpAction[] {
+export function getInstallFlowHelpActions(
+  step: FlowStep,
+  options?: { canPromptSetup?: boolean },
+): readonly HelpAction[] {
+  const canPromptSetup = options?.canPromptSetup === true;
+
   switch (step) {
     case "preview":
       return [
@@ -205,9 +212,14 @@ export function getInstallFlowHelpActions(step: FlowStep): readonly HelpAction[]
       return [];
 
     case "done":
-      return [
-        { key: "Esc", label: "Back" },
-      ];
+      return canPromptSetup
+        ? [
+            { key: "p", label: "Prompt Reins to setup" },
+            { key: "Esc", label: "Back" },
+          ]
+        : [
+            { key: "Esc", label: "Back" },
+          ];
 
     case "error":
       return [
@@ -355,15 +367,102 @@ function ProgressStep({
   );
 }
 
+/**
+ * Extract concise setup commands/steps from integration sections.
+ * Pulls the first few numbered-list or code-fence items from setup-related
+ * sections to keep the TUI output compact.
+ */
+export function extractSetupHints(sections: IntegrationInfo["sections"]): string[] {
+  const SETUP_TITLES = ["setup", "installation", "getting started", "prerequisites", "configuration"];
+  const hints: string[] = [];
+
+  for (const section of sections) {
+    if (!SETUP_TITLES.includes(section.title.toLowerCase())) continue;
+
+    const lines = section.content.split("\n");
+    for (const line of lines) {
+      const trimmed = line.trim();
+      // Numbered list items (e.g. "1. Install ffmpeg")
+      const numberedMatch = trimmed.match(/^\d+\.\s+(.+)/);
+      if (numberedMatch) {
+        hints.push(numberedMatch[1]);
+        if (hints.length >= 4) return hints;
+        continue;
+      }
+      // Inline code commands (e.g. "  `brew install ffmpeg`")
+      const codeMatch = trimmed.match(/^`([^`]+)`$/);
+      if (codeMatch) {
+        hints.push(codeMatch[1]);
+        if (hints.length >= 4) return hints;
+        continue;
+      }
+    }
+  }
+
+  return hints;
+}
+
+function IntegrationBlock({
+  integration,
+  tokens,
+}: {
+  integration: IntegrationInfo;
+  tokens: Record<string, string>;
+}) {
+  if (integration.setupRequired) {
+    const hints = extractSetupHints(integration.sections);
+    return (
+      <Box style={{ flexDirection: "column", marginTop: 1 }}>
+        <Text
+          content="⚠ Setup required"
+          style={{ color: tokens["status.warning"], fontWeight: "bold" }}
+        />
+        {hints.length > 0 ? (
+          <Box style={{ flexDirection: "column", paddingLeft: 2 }}>
+            {hints.map((hint, i) => (
+              <Box key={`hint-${i}`} style={{ flexDirection: "row" }}>
+                <Text content={`${i + 1}. `} style={{ color: tokens["text.muted"] }} />
+                <Text content={hint} style={{ color: tokens["text.primary"] }} />
+              </Box>
+            ))}
+          </Box>
+        ) : null}
+        <Box style={{ flexDirection: "row", marginTop: 1, paddingLeft: 2 }}>
+          <Text content="Guide: " style={{ color: tokens["text.muted"] }} />
+          <Text content={integration.guidePath} style={{ color: tokens["accent.primary"] }} />
+        </Box>
+      </Box>
+    );
+  }
+
+  // setupRequired=false but integration guide exists — light note
+  return (
+    <Box style={{ flexDirection: "row", marginTop: 1 }}>
+      <Text
+        content="ℹ Integration guide available: "
+        style={{ color: tokens["text.muted"] }}
+      />
+      <Text
+        content={integration.guidePath}
+        style={{ color: tokens["accent.primary"] }}
+      />
+    </Box>
+  );
+}
+
 function DoneStep({
   skillName,
   skillVersion,
   migrated,
+  integration,
+  canPromptSetup,
   tokens,
 }: {
   skillName: string;
   skillVersion: string;
   migrated: boolean;
+  integration?: IntegrationInfo;
+  canPromptSetup: boolean;
   tokens: Record<string, string>;
 }) {
   return (
@@ -378,6 +477,15 @@ function DoneStep({
             content="Note: This skill was migrated from OpenClaw format"
             style={{ color: tokens["text.muted"] }}
           />
+        </Box>
+      ) : null}
+      {integration ? (
+        <IntegrationBlock integration={integration} tokens={tokens} />
+      ) : null}
+      {canPromptSetup ? (
+        <Box style={{ flexDirection: "row", marginTop: 1 }}>
+          <Text content="[p]" style={{ color: tokens["accent.primary"] }} />
+          <Text content=" Prompt Reins to setup" style={{ color: tokens["text.secondary"] }} />
         </Box>
       ) : null}
     </Box>
@@ -409,12 +517,14 @@ function ErrorStep({
 
 function InstallFlowHelpBar({
   step,
+  canPromptSetup,
   tokens,
 }: {
   step: FlowStep;
+  canPromptSetup: boolean;
   tokens: Record<string, string>;
 }) {
-  const actions = getInstallFlowHelpActions(step);
+  const actions = getInstallFlowHelpActions(step, { canPromptSetup });
   if (actions.length === 0) return null;
 
   return (
@@ -452,12 +562,14 @@ export function InstallFlow({
   onCancel,
   onComplete,
   onRetry,
+  onPromptSetup,
   installProgress,
   installError,
   installResult,
 }: InstallFlowProps) {
   const { tokens } = useThemeTokens();
   const [state, dispatch] = useReducer(installFlowReducer, INITIAL_FLOW_STATE);
+  const canPromptSetup = installResult !== null;
 
   // --- React to external progress/error/result changes ---
   useEffect(() => {
@@ -507,7 +619,12 @@ export function InstallFlow({
       onRetry();
       return;
     }
-  }, [state.step, onConfirm, onCancel, onComplete, onRetry]));
+
+    if ((keyName === "p" || sequence === "p") && state.step === "done" && canPromptSetup) {
+      onPromptSetup?.();
+      return;
+    }
+  }, [state.step, onConfirm, onCancel, onComplete, onRetry, onPromptSetup, canPromptSetup]));
 
   // --- Build checklist for progress step ---
   const checklist = buildChecklist(installProgress);
@@ -543,6 +660,8 @@ export function InstallFlow({
             skillName={skillName}
             skillVersion={skillVersion}
             migrated={installResult?.migrated ?? false}
+            integration={installResult?.integration}
+            canPromptSetup={canPromptSetup}
             tokens={tokens}
           />
         ) : null}
@@ -556,7 +675,7 @@ export function InstallFlow({
       </Box>
 
       <Box style={{ marginTop: 1 }}>
-        <InstallFlowHelpBar step={state.step} tokens={tokens} />
+        <InstallFlowHelpBar step={state.step} canPromptSetup={canPromptSetup} tokens={tokens} />
       </Box>
     </Box>
   );
