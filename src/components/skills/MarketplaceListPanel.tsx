@@ -271,22 +271,6 @@ function normalizeInlineText(value: string): string {
     .trim();
 }
 
-/**
- * Pads a string to exactly `len` characters (right-padded with spaces).
- */
-function padRight(str: string, len: number): string {
-  if (str.length >= len) return str.slice(0, len);
-  return str + " ".repeat(len - str.length);
-}
-
-/**
- * Pads a string to exactly `len` characters (left-padded with spaces).
- */
-function padLeft(str: string, len: number): string {
-  if (str.length >= len) return str.slice(0, len);
-  return " ".repeat(len - str.length) + str;
-}
-
 function truncateForRow(value: string, maxLen: number): string {
   if (maxLen <= 0) return "";
   if (value.length <= maxLen) return value;
@@ -294,22 +278,7 @@ function truncateForRow(value: string, maxLen: number): string {
   return value.slice(0, maxLen - 3) + "...";
 }
 
-const NAME_WIDTH = 20;
-const DESC_WIDTH = 36;
-const INSTALLS_WIDTH = 8;
-
-/**
- * Formats the right portion of a row as a single pre-built string:
- * " | <description padded to DESC_WIDTH>  <installs padded to INSTALLS_WIDTH>"
- *
- * Using a single string prevents the TUI renderer from overlapping
- * adjacent Text nodes.
- */
-function formatRowSuffix(description: string, installs: string): string {
-  const desc = padRight(truncateForRow(description, DESC_WIDTH), DESC_WIDTH);
-  const inst = padLeft(`v ${installs}`, INSTALLS_WIDTH);
-  return ` | ${desc}${inst}`;
-}
+const NAME_WIDTH = 28;
 
 function MarketplaceSkillRow({
   skill,
@@ -322,10 +291,6 @@ function MarketplaceSkillRow({
 }) {
   const installs = formatInstallCount(skill.installCount);
   const name = truncateForRow(normalizeInlineText(skill.name), NAME_WIDTH);
-  const suffix = formatRowSuffix(
-    normalizeInlineText(skill.description),
-    installs,
-  );
 
   return (
     <Box
@@ -340,7 +305,7 @@ function MarketplaceSkillRow({
         content={isSelected ? "> " : "  "}
         style={{ color: tokens["accent.primary"] }}
       />
-      {/* Name — yellow, bold, in a fixed-width Box */}
+      {/* Name — yellow, bold */}
       <Box style={{ width: NAME_WIDTH }}>
         <Text
           content={name}
@@ -350,11 +315,13 @@ function MarketplaceSkillRow({
           }}
         />
       </Box>
-      {/* Description + installs as ONE string to prevent text overlap */}
+      {/* Spacer pushes installs to the right edge */}
+      <Box style={{ flexGrow: 1 }} />
+      {/* Installs */}
       <Text
-        content={suffix}
+        content={`v ${installs}`}
         style={{
-          color: isSelected ? tokens["text.secondary"] : tokens["text.muted"],
+          color: tokens["status.info"],
         }}
       />
     </Box>
@@ -634,17 +601,34 @@ export function MarketplaceListPanel({
               />
             </Box>
           ) : (
-            state.skills.map((skill, index) => {
-              const clampedIndex = Math.min(state.selectedIndex, state.skills.length - 1);
-              return (
-                <MarketplaceSkillRow
-                  key={skill.slug}
-                  skill={skill}
-                  isSelected={index === clampedIndex}
-                  tokens={tokens}
+            <>
+              {state.skills.map((skill, index) => {
+                const clampedIndex = Math.min(state.selectedIndex, state.skills.length - 1);
+                return (
+                  <MarketplaceSkillRow
+                    key={skill.slug}
+                    skill={skill}
+                    isSelected={index === clampedIndex}
+                    tokens={tokens}
+                  />
+                );
+              })}
+              <Box style={{ flexDirection: "row", paddingLeft: 2, marginTop: 1 }}>
+                <Text
+                  content="Summary: "
+                  style={{ color: tokens["text.muted"] }}
                 />
-              );
-            })
+                <Text
+                  content={truncateForRow(
+                    normalizeInlineText(
+                      state.skills[Math.min(state.selectedIndex, state.skills.length - 1)]?.description ?? "",
+                    ),
+                    56,
+                  )}
+                  style={{ color: tokens["text.secondary"] }}
+                />
+              </Box>
+            </>
           )}
         </Box>
       ) : null}
