@@ -2,7 +2,8 @@ import { join } from "node:path";
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
-import { writeUserConfig, getDataRoot } from "@reins/core";
+import { writeUserConfig, getDataRoot, MarketplaceRegistry, ClawHubSource } from "@reins/core";
+import type { MarketplaceSource } from "@reins/core";
 import { FileSkillStateStore, SkillRegistry, SkillScanner } from "@reins/core/skills";
 import type { Skill } from "@reins/core/skills";
 
@@ -365,6 +366,10 @@ function AppView({ version, dimensions }: AppViewProps) {
   const skillStateLoadedRef = useRef(false);
   const [skills, setSkills] = useState<SkillListItem[]>([]);
 
+  // Marketplace registry and ClawHub source — lazily initialized on first panel open
+  const marketplaceRegistryRef = useRef<MarketplaceRegistry | null>(null);
+  const [marketplaceSource, setMarketplaceSource] = useState<MarketplaceSource | null>(null);
+
   // Scan skills directory on mount and when panel becomes visible
   useEffect(() => {
     if (!state.isSkillPanelOpen) return;
@@ -393,6 +398,15 @@ function AppView({ version, dimensions }: AppViewProps) {
       const registered = skillRegistryRef.current.list();
       setSkills(registered.map(skillToListItem));
     };
+
+    // Initialize marketplace registry and ClawHub source lazily on first panel open
+    if (!marketplaceRegistryRef.current) {
+      const registry = new MarketplaceRegistry();
+      const clawhubSource = new ClawHubSource();
+      registry.register(clawhubSource);
+      marketplaceRegistryRef.current = registry;
+      setMarketplaceSource(clawhubSource);
+    }
 
     void scanSkills();
 
@@ -1420,6 +1434,7 @@ function AppView({ version, dimensions }: AppViewProps) {
         onLoadSkillDetail={loadSkillDetail}
         onToggleEnabled={toggleSkillEnabled}
         onClose={closeSkillPanel}
+        marketplaceSource={marketplaceSource}
       />
       {state.isChannelTokenPromptOpen && state.channelTokenPromptPlatform ? (
         <ChannelTokenPrompt

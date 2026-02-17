@@ -416,8 +416,8 @@ describe("getHelpActions with tab support", () => {
     expect(keys).not.toContain("Tab");
   });
 
-  test("list view has 5 actions (with Tab)", () => {
+  test("list view has 6 actions for installed tab (with Tab)", () => {
     const { getHelpActions } = require("../../../src/components/skills/SkillPanel");
-    expect(getHelpActions("list").length).toBe(5);
+    expect(getHelpActions("list", 0).length).toBe(6);
   });
 });

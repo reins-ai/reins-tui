@@ -13,6 +13,7 @@ import { ModalPanel } from "../modal-panel";
 import { InstallFlow } from "./InstallFlow";
 import { MarketplaceDetailView } from "./MarketplaceDetailView";
 import { MarketplaceListPanel } from "./MarketplaceListPanel";
+import { MarketplacePlaceholder } from "./MarketplacePlaceholder";
 import { SkillDetailView, type SkillDetailData } from "./SkillDetailView";
 import {
   SkillListPanel,
@@ -202,7 +203,7 @@ interface HelpAction {
   readonly label: string;
 }
 
-export function getHelpActions(view: PanelView): readonly HelpAction[] {
+export function getHelpActions(view: PanelView, activeTabIndex?: number): readonly HelpAction[] {
   if (view === "detail") {
     return [
       { key: "e", label: "Toggle" },
@@ -215,17 +216,39 @@ export function getHelpActions(view: PanelView): readonly HelpAction[] {
     return [];
   }
 
+  // Reins Marketplace placeholder tab — minimal actions
+  if (activeTabIndex === 2) {
+    return [
+      { key: "Tab", label: "Switch Tab" },
+      { key: "Esc", label: "Close" },
+    ];
+  }
+
+  // ClawHub tab — includes sort action
+  if (activeTabIndex === 1) {
+    return [
+      { key: "Tab", label: "Switch Tab" },
+      { key: "j/k", label: "Navigate" },
+      { key: "Enter", label: "Select" },
+      { key: "/", label: "Search" },
+      { key: "s", label: "Sort" },
+      { key: "Esc", label: "Close" },
+    ];
+  }
+
+  // Installed tab (default)
   return [
     { key: "Tab", label: "Switch Tab" },
     { key: "j/k", label: "Navigate" },
     { key: "Enter", label: "Select" },
     { key: "/", label: "Search" },
+    { key: "e", label: "Toggle" },
     { key: "Esc", label: "Close" },
   ];
 }
 
-function HelpBar({ view, tokens }: { view: PanelView; tokens: Record<string, string> }) {
-  const actions = getHelpActions(view);
+function HelpBar({ view, activeTabIndex, tokens }: { view: PanelView; activeTabIndex?: number; tokens: Record<string, string> }) {
+  const actions = getHelpActions(view, activeTabIndex);
 
   return (
     <Box style={{ flexDirection: "row" }}>
@@ -244,24 +267,6 @@ function HelpBar({ view, tokens }: { view: PanelView; tokens: Record<string, str
           />
         </Box>
       ))}
-    </Box>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Placeholder content for non-Installed tabs
-// ---------------------------------------------------------------------------
-
-function PlaceholderContent({
-  message,
-  tokens,
-}: {
-  message: string;
-  tokens: Record<string, string>;
-}) {
-  return (
-    <Box style={{ flexDirection: "column", flexGrow: 1, paddingLeft: 2, paddingTop: 1 }}>
-      <Text content={message} style={{ color: tokens["text.muted"] }} />
     </Box>
   );
 }
@@ -527,17 +532,17 @@ export function SkillPanel({
       closeOnEscape={false}
       onClose={handleClose}
     >
-      <TabBar
-        tabs={SKILL_PANEL_TABS}
-        activeIndex={state.activeTabIndex}
-        onTabChange={handleTabChange}
-      />
-      <PlaceholderContent
-        message="Reins Marketplace - coming in Task 5.5"
-        tokens={tokens}
+      <MarketplacePlaceholder
+        tabBar={
+          <TabBar
+            tabs={SKILL_PANEL_TABS}
+            activeIndex={state.activeTabIndex}
+            onTabChange={handleTabChange}
+          />
+        }
       />
       <Box style={{ marginTop: 1 }}>
-        <HelpBar view="list" tokens={tokens} />
+        <HelpBar view="list" activeTabIndex={state.activeTabIndex} tokens={tokens} />
       </Box>
     </ModalPanel>
   );
