@@ -454,8 +454,19 @@ describe("SkillPanel getHelpActions", () => {
     expect(toggleAction!.label).toBe("Toggle");
   });
 
-  test("clawhub tab list view includes sort action", () => {
+  test("reins marketplace tab shows only tab switch and close", () => {
     const actions = getHelpActions("list", 1);
+    const keys = actions.map((a) => a.key);
+
+    expect(keys).toEqual(["Tab", "Esc"]);
+  });
+
+  test("reins marketplace tab has 2 actions", () => {
+    expect(getHelpActions("list", 1).length).toBe(2);
+  });
+
+  test("clawhub tab list view includes sort action", () => {
+    const actions = getHelpActions("list", 2);
     const keys = actions.map((a) => a.key);
 
     expect(keys).toContain("Tab");
@@ -467,18 +478,7 @@ describe("SkillPanel getHelpActions", () => {
   });
 
   test("clawhub tab list view has 6 actions", () => {
-    expect(getHelpActions("list", 1).length).toBe(6);
-  });
-
-  test("reins marketplace tab shows only tab switch and close", () => {
-    const actions = getHelpActions("list", 2);
-    const keys = actions.map((a) => a.key);
-
-    expect(keys).toEqual(["Tab", "Esc"]);
-  });
-
-  test("reins marketplace tab has 2 actions", () => {
-    expect(getHelpActions("list", 2).length).toBe(2);
+    expect(getHelpActions("list", 2).length).toBe(6);
   });
 
   test("install view returns empty actions (InstallFlow manages its own)", () => {
@@ -561,7 +561,7 @@ describe("SkillPanel edge cases", () => {
 // ---------------------------------------------------------------------------
 
 describe("SkillPanel reducer SWITCH_TAB", () => {
-  test("switches from installed tab (0) to clawhub tab (1)", () => {
+  test("switches from installed tab (0) to reins marketplace tab (1)", () => {
     const state = skillPanelReducer(INITIAL_PANEL_STATE, {
       type: "SWITCH_TAB",
       index: 1,
@@ -571,7 +571,7 @@ describe("SkillPanel reducer SWITCH_TAB", () => {
     expect(state.view).toBe("list");
   });
 
-  test("switches from installed tab (0) to reins marketplace tab (2)", () => {
+  test("switches from installed tab (0) to clawhub tab (2)", () => {
     const state = skillPanelReducer(INITIAL_PANEL_STATE, {
       type: "SWITCH_TAB",
       index: 2,
@@ -700,8 +700,8 @@ describe("SkillPanel tab state isolation", () => {
     expect(state.view).toBe("list");
 
     // Switch to ClawHub tab
-    state = skillPanelReducer(state, { type: "SWITCH_TAB", index: 1 });
-    expect(state.activeTabIndex).toBe(1);
+    state = skillPanelReducer(state, { type: "SWITCH_TAB", index: 2 });
+    expect(state.activeTabIndex).toBe(2);
     expect(state.view).toBe("list");
     expect(state.selectedSkillName).toBeNull();
 
@@ -715,7 +715,7 @@ describe("SkillPanel tab state isolation", () => {
     // Switch to ClawHub tab and select a marketplace skill
     let state = skillPanelReducer(INITIAL_PANEL_STATE, {
       type: "SWITCH_TAB",
-      index: 1,
+      index: 2,
     });
     state = skillPanelReducer(state, {
       type: "SELECT_MARKETPLACE_SKILL",
@@ -735,10 +735,10 @@ describe("SkillPanel tab state isolation", () => {
     // Switch to Reins Marketplace tab
     const state = skillPanelReducer(INITIAL_PANEL_STATE, {
       type: "SWITCH_TAB",
-      index: 2,
+      index: 1,
     });
 
-    expect(state.activeTabIndex).toBe(2);
+    expect(state.activeTabIndex).toBe(1);
     expect(state.view).toBe("list");
     expect(state.selectedSkillName).toBeNull();
     expect(state.selectedMarketplaceSkill).toBeNull();

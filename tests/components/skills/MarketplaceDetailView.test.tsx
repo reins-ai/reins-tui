@@ -465,7 +465,7 @@ describe("SkillPanel reducer SELECT_MARKETPLACE_SKILL", () => {
   test("preserves active tab index", () => {
     const clawHubState: PanelState = {
       ...INITIAL_PANEL_STATE,
-      activeTabIndex: 1,
+      activeTabIndex: 2,
     };
 
     const state = skillPanelReducer(clawHubState, {
@@ -473,7 +473,7 @@ describe("SkillPanel reducer SELECT_MARKETPLACE_SKILL", () => {
       slug: "docker-compose",
     });
 
-    expect(state.activeTabIndex).toBe(1);
+    expect(state.activeTabIndex).toBe(2);
     expect(state.selectedMarketplaceSkill).toBe("docker-compose");
   });
 
@@ -496,7 +496,7 @@ describe("SkillPanel reducer GO_BACK clears marketplace selection", () => {
   test("clears selectedMarketplaceSkill on GO_BACK", () => {
     const detailState: PanelState = {
       view: "detail",
-      activeTabIndex: 1,
+      activeTabIndex: 2,
       selectedSkillName: null,
       selectedDetail: null,
       selectedMarketplaceSkill: "git-workflow",
@@ -517,7 +517,7 @@ describe("SkillPanel reducer SWITCH_TAB clears marketplace selection", () => {
   test("clears selectedMarketplaceSkill on tab switch", () => {
     const detailState: PanelState = {
       view: "detail",
-      activeTabIndex: 1,
+      activeTabIndex: 2,
       selectedSkillName: null,
       selectedDetail: null,
       selectedMarketplaceSkill: "git-workflow",
@@ -539,7 +539,7 @@ describe("SkillPanel reducer CLOSE clears marketplace selection", () => {
   test("resets selectedMarketplaceSkill on CLOSE", () => {
     const detailState: PanelState = {
       view: "detail",
-      activeTabIndex: 1,
+      activeTabIndex: 2,
       selectedSkillName: null,
       selectedDetail: null,
       selectedMarketplaceSkill: "git-workflow",
@@ -558,7 +558,7 @@ describe("SkillPanel reducer CLOSE clears marketplace selection", () => {
 
 describe("SkillPanel marketplace navigation flow", () => {
   test("list → select marketplace skill → detail → back → list", () => {
-    let state: PanelState = { ...INITIAL_PANEL_STATE, activeTabIndex: 1 };
+    let state: PanelState = { ...INITIAL_PANEL_STATE, activeTabIndex: 2 };
 
     // Select a marketplace skill
     state = skillPanelReducer(state, {
@@ -575,7 +575,7 @@ describe("SkillPanel marketplace navigation flow", () => {
   });
 
   test("select marketplace skill → switch tab → clears selection", () => {
-    let state: PanelState = { ...INITIAL_PANEL_STATE, activeTabIndex: 1 };
+    let state: PanelState = { ...INITIAL_PANEL_STATE, activeTabIndex: 2 };
 
     state = skillPanelReducer(state, {
       type: "SELECT_MARKETPLACE_SKILL",
@@ -589,7 +589,7 @@ describe("SkillPanel marketplace navigation flow", () => {
   });
 
   test("select marketplace skill → close → resets everything", () => {
-    let state: PanelState = { ...INITIAL_PANEL_STATE, activeTabIndex: 1 };
+    let state: PanelState = { ...INITIAL_PANEL_STATE, activeTabIndex: 2 };
 
     state = skillPanelReducer(state, {
       type: "SELECT_MARKETPLACE_SKILL",

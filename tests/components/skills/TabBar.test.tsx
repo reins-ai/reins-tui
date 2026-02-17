@@ -112,14 +112,14 @@ describe("SKILL_PANEL_TABS", () => {
     expect(SKILL_PANEL_TABS[0].id).toBe("installed");
   });
 
-  test("second tab is ClawHub", () => {
-    expect(SKILL_PANEL_TABS[1].label).toBe("ClawHub");
-    expect(SKILL_PANEL_TABS[1].id).toBe("clawhub");
+  test("second tab is Reins Marketplace", () => {
+    expect(SKILL_PANEL_TABS[1].label).toBe("Reins Marketplace");
+    expect(SKILL_PANEL_TABS[1].id).toBe("reins");
   });
 
-  test("third tab is Reins Marketplace", () => {
-    expect(SKILL_PANEL_TABS[2].label).toBe("Reins Marketplace");
-    expect(SKILL_PANEL_TABS[2].id).toBe("reins");
+  test("third tab is ClawHub", () => {
+    expect(SKILL_PANEL_TABS[2].label).toBe("ClawHub");
+    expect(SKILL_PANEL_TABS[2].id).toBe("clawhub");
   });
 
   test("all tabs have unique ids", () => {
@@ -155,15 +155,15 @@ describe("tab cycling sequence", () => {
     const count = SKILL_PANEL_TABS.length;
     let index = 0;
 
-    // Installed -> ClawHub
+    // Installed -> Reins Marketplace
     index = getNextTabIndex(index, count);
     expect(index).toBe(1);
 
-    // ClawHub -> Reins Marketplace
+    // Reins Marketplace -> ClawHub
     index = getNextTabIndex(index, count);
     expect(index).toBe(2);
 
-    // Reins Marketplace -> Installed (wrap)
+    // ClawHub -> Installed (wrap)
     index = getNextTabIndex(index, count);
     expect(index).toBe(0);
   });
@@ -172,15 +172,15 @@ describe("tab cycling sequence", () => {
     const count = SKILL_PANEL_TABS.length;
     let index = 0;
 
-    // Installed -> Reins Marketplace (wrap backward)
+    // Installed -> ClawHub (wrap backward)
     index = getPrevTabIndex(index, count);
     expect(index).toBe(2);
 
-    // Reins Marketplace -> ClawHub
+    // ClawHub -> Reins Marketplace
     index = getPrevTabIndex(index, count);
     expect(index).toBe(1);
 
-    // ClawHub -> Installed
+    // Reins Marketplace -> Installed
     index = getPrevTabIndex(index, count);
     expect(index).toBe(0);
   });
@@ -191,7 +191,7 @@ describe("tab cycling sequence", () => {
 // ---------------------------------------------------------------------------
 
 describe("SkillPanel reducer SWITCH_TAB", () => {
-  test("switches from Installed to ClawHub tab", () => {
+  test("switches from Installed to Reins Marketplace tab", () => {
     const state = skillPanelReducer(INITIAL_PANEL_STATE, {
       type: "SWITCH_TAB",
       index: 1,
@@ -201,13 +201,13 @@ describe("SkillPanel reducer SWITCH_TAB", () => {
     expect(state.view).toBe("list");
   });
 
-  test("switches from ClawHub to Reins tab", () => {
-    const clawHubState: PanelState = {
+  test("switches from Reins Marketplace to ClawHub tab", () => {
+    const reinsState: PanelState = {
       ...INITIAL_PANEL_STATE,
       activeTabIndex: 1,
     };
 
-    const state = skillPanelReducer(clawHubState, {
+    const state = skillPanelReducer(reinsState, {
       type: "SWITCH_TAB",
       index: 2,
     });
@@ -216,13 +216,13 @@ describe("SkillPanel reducer SWITCH_TAB", () => {
     expect(state.view).toBe("list");
   });
 
-  test("wraps from Reins back to Installed", () => {
-    const reinsState: PanelState = {
+  test("wraps from ClawHub back to Installed", () => {
+    const clawHubState: PanelState = {
       ...INITIAL_PANEL_STATE,
       activeTabIndex: 2,
     };
 
-    const state = skillPanelReducer(reinsState, {
+    const state = skillPanelReducer(clawHubState, {
       type: "SWITCH_TAB",
       index: 0,
     });
@@ -339,7 +339,7 @@ describe("tab navigation flow", () => {
     expect(state.view).toBe("detail");
     expect(state.activeTabIndex).toBe(0);
 
-    // Switch to ClawHub tab — should reset detail
+    // Switch to Reins Marketplace tab — should reset detail
     state = skillPanelReducer(state, { type: "SWITCH_TAB", index: 1 });
     expect(state.view).toBe("list");
     expect(state.activeTabIndex).toBe(1);
@@ -361,7 +361,7 @@ describe("tab navigation flow", () => {
   });
 
   test("GO_BACK preserves active tab index", () => {
-    // Start on ClawHub tab
+    // Start on Reins Marketplace tab
     let state: PanelState = {
       ...INITIAL_PANEL_STATE,
       activeTabIndex: 1,
@@ -376,7 +376,7 @@ describe("tab navigation flow", () => {
     expect(state.view).toBe("detail");
     expect(state.activeTabIndex).toBe(1);
 
-    // Go back — should stay on ClawHub tab
+    // Go back — should stay on Reins Marketplace tab
     state = skillPanelReducer(state, { type: "GO_BACK" });
     expect(state.view).toBe("list");
     expect(state.activeTabIndex).toBe(1);

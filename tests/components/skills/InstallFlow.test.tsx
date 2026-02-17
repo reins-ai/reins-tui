@@ -512,7 +512,7 @@ describe("SkillPanel reducer START_INSTALL", () => {
   test("preserves active tab index", () => {
     const clawHubState: PanelState = {
       ...INITIAL_PANEL_STATE,
-      activeTabIndex: 1,
+      activeTabIndex: 2,
     };
 
     const state = skillPanelReducer(clawHubState, {
@@ -522,7 +522,7 @@ describe("SkillPanel reducer START_INSTALL", () => {
       detail: MOCK_DETAIL,
     });
 
-    expect(state.activeTabIndex).toBe(1);
+    expect(state.activeTabIndex).toBe(2);
     expect(state.view).toBe("install");
   });
 });
@@ -706,7 +706,7 @@ describe("SkillPanel reducer GO_BACK clears install state", () => {
 describe("SkillPanel reducer SWITCH_TAB clears install state", () => {
   test("clears installState on tab switch", () => {
     let state = skillPanelReducer(
-      { ...INITIAL_PANEL_STATE, activeTabIndex: 1 },
+      { ...INITIAL_PANEL_STATE, activeTabIndex: 2 },
       {
         type: "START_INSTALL",
         slug: "git-workflow",
@@ -748,7 +748,7 @@ describe("SkillPanel reducer CLOSE clears install state", () => {
 
 describe("SkillPanel install navigation flow", () => {
   test("detail → start install → go back → list", () => {
-    let state: PanelState = { ...INITIAL_PANEL_STATE, activeTabIndex: 1 };
+    let state: PanelState = { ...INITIAL_PANEL_STATE, activeTabIndex: 2 };
 
     // Select a marketplace skill
     state = skillPanelReducer(state, {
@@ -774,7 +774,7 @@ describe("SkillPanel install navigation flow", () => {
   });
 
   test("start install → progress → complete → go back", () => {
-    let state: PanelState = { ...INITIAL_PANEL_STATE, activeTabIndex: 1 };
+    let state: PanelState = { ...INITIAL_PANEL_STATE, activeTabIndex: 2 };
 
     state = skillPanelReducer(state, {
       type: "START_INSTALL",
@@ -806,7 +806,7 @@ describe("SkillPanel install navigation flow", () => {
   });
 
   test("start install → error → reset → progress → complete", () => {
-    let state: PanelState = { ...INITIAL_PANEL_STATE, activeTabIndex: 1 };
+    let state: PanelState = { ...INITIAL_PANEL_STATE, activeTabIndex: 2 };
 
     state = skillPanelReducer(state, {
       type: "START_INSTALL",
