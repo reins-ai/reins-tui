@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useReducer, type ReactNode } from "react";
+import { useCallback, useEffect, useReducer, useState, type ReactNode } from "react";
 
 import type {
   MarketplaceSkill,
@@ -222,6 +222,64 @@ export function getMarketplaceHelpActions(
   ];
 }
 
+export interface VisibleSkillWindow {
+  readonly start: number;
+  readonly end: number;
+}
+
+const SUMMARY_VIEW_WIDTH = 58;
+const SUMMARY_SCROLL_INTERVAL_MS = 110;
+const SUMMARY_SCROLL_GAP = "   •   ";
+
+/**
+ * Returns a stable visible window that keeps the selected row on-screen.
+ */
+export function getVisibleSkillWindow(
+  selectedIndex: number,
+  totalRows: number,
+  maxRows: number,
+): VisibleSkillWindow {
+  if (totalRows <= 0 || maxRows <= 0) {
+    return { start: 0, end: 0 };
+  }
+
+  if (totalRows <= maxRows) {
+    return { start: 0, end: totalRows };
+  }
+
+  const clampedSelected = Math.max(0, Math.min(selectedIndex, totalRows - 1));
+  const half = Math.floor(maxRows / 2);
+  let start = clampedSelected - half;
+
+  if (start < 0) {
+    start = 0;
+  }
+
+  const maxStart = totalRows - maxRows;
+  if (start > maxStart) {
+    start = maxStart;
+  }
+
+  return {
+    start,
+    end: start + maxRows,
+  };
+}
+
+/**
+ * Returns a horizontally sliding window for marquee-style text display.
+ */
+export function getSlidingTextWindow(text: string, width: number, offset: number): string {
+  if (width <= 0) return "";
+  if (text.length <= width) return text;
+
+  const loop = text + SUMMARY_SCROLL_GAP;
+  const start = ((offset % loop.length) + loop.length) % loop.length;
+  const doubled = loop + loop;
+
+  return doubled.slice(start, start + width);
+}
+
 // ---------------------------------------------------------------------------
 // Sub-components
 // ---------------------------------------------------------------------------
@@ -278,7 +336,8 @@ function truncateForRow(value: string, maxLen: number): string {
   return value.slice(0, maxLen - 3) + "...";
 }
 
-const NAME_WIDTH = 28;
+const NAME_WIDTH = 20;
+const DESCRIPTION_WIDTH = 40;
 
 function MarketplaceSkillRow({
   skill,
@@ -291,38 +350,44 @@ function MarketplaceSkillRow({
 }) {
   const installs = formatInstallCount(skill.installCount);
   const name = truncateForRow(normalizeInlineText(skill.name), NAME_WIDTH);
+  const description = truncateForRow(
+    normalizeInlineText(skill.description),
+    DESCRIPTION_WIDTH,
+  );
 
   return (
     <Box
       style={{
         flexDirection: "row",
+        width: "100%",
         paddingLeft: 1,
-        backgroundColor: isSelected ? tokens["surface.elevated"] : "transparent",
+        overflow: "hidden",
+        backgroundColor: isSelected ? tokens["surface.elevated"] : tokens["surface.primary"],
       }}
     >
-      {/* Indicator */}
       <Text
         content={isSelected ? "> " : "  "}
         style={{ color: tokens["accent.primary"] }}
       />
-      {/* Name — yellow, bold */}
-      <Box style={{ width: NAME_WIDTH }}>
+      <Text
+        content={name}
+        style={{
+          color: tokens["status.warning"],
+          fontWeight: "bold",
+        }}
+      />
+      <Text content="  " style={{ color: tokens["text.muted"] }} />
+      <Box style={{ flexGrow: 1, overflow: "hidden" }}>
         <Text
-          content={name}
+          content={description}
           style={{
-            color: tokens["status.warning"],
-            fontWeight: "bold",
+            color: isSelected ? tokens["text.secondary"] : tokens["text.muted"],
           }}
         />
       </Box>
-      {/* Spacer pushes installs to the right edge */}
-      <Box style={{ flexGrow: 1 }} />
-      {/* Installs */}
       <Text
-        content={`v ${installs}`}
-        style={{
-          color: tokens["status.info"],
-        }}
+        content={`  v ${installs}`}
+        style={{ color: tokens["status.info"] }}
       />
     </Box>
   );
@@ -371,6 +436,7 @@ export function MarketplaceListPanel({
 }: MarketplaceListPanelProps) {
   const { tokens } = useThemeTokens();
   const [state, dispatch] = useReducer(marketplaceListReducer, INITIAL_MARKETPLACE_STATE);
+  const [summaryOffset, setSummaryOffset] = useState(0);
 
   // --- Data fetching: browse ---
   useEffect(() => {
@@ -452,6 +518,25 @@ export function MarketplaceListPanel({
       });
     }
   }, [source, state.searchMode, state.searchQuery, state.sortMode]);
+
+  const selectedSkill = state.skills.length > 0
+    ? state.skills[Math.min(state.selectedIndex, state.skills.length - 1)]
+    : null;
+  const selectedSummary = normalizeInlineText(selectedSkill?.description ?? "");
+
+  useEffect(() => {
+    setSummaryOffset(0);
+
+    if (selectedSummary.length <= SUMMARY_VIEW_WIDTH) {
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setSummaryOffset((prev) => prev + 1);
+    }, SUMMARY_SCROLL_INTERVAL_MS);
+
+    return () => clearInterval(timer);
+  }, [selectedSummary]);
 
   // --- Keyboard handling ---
   useKeyboard(useCallback((event) => {
@@ -592,7 +677,14 @@ export function MarketplaceListPanel({
 
       {/* Skill list or empty state */}
       {!state.isLoading && !state.error ? (
-        <Box style={{ flexDirection: "column", flexGrow: 1, minHeight: 0 }}>
+        <Box
+          style={{
+            flexDirection: "column",
+            flexGrow: 1,
+            minHeight: 0,
+            backgroundColor: tokens["surface.primary"],
+          }}
+        >
           {state.skills.length === 0 ? (
             <Box style={{ paddingLeft: 2 }}>
               <Text
@@ -602,29 +694,31 @@ export function MarketplaceListPanel({
             </Box>
           ) : (
             <>
-              {state.skills.map((skill, index) => {
+              {(() => {
                 const clampedIndex = Math.min(state.selectedIndex, state.skills.length - 1);
-                return (
-                  <MarketplaceSkillRow
-                    key={skill.slug}
-                    skill={skill}
-                    isSelected={index === clampedIndex}
-                    tokens={tokens}
-                  />
-                );
-              })}
+                const maxVisibleRows = state.searchMode ? 11 : 12;
+                const window = getVisibleSkillWindow(clampedIndex, state.skills.length, maxVisibleRows);
+                const visibleSkills = state.skills.slice(window.start, window.end);
+
+                return visibleSkills.map((skill, idx) => {
+                  const actualIndex = window.start + idx;
+                  return (
+                    <MarketplaceSkillRow
+                      key={skill.slug}
+                      skill={skill}
+                      isSelected={actualIndex === clampedIndex}
+                      tokens={tokens}
+                    />
+                  );
+                });
+              })()}
               <Box style={{ flexDirection: "row", paddingLeft: 2, marginTop: 1 }}>
                 <Text
                   content="Summary: "
                   style={{ color: tokens["text.muted"] }}
                 />
                 <Text
-                  content={truncateForRow(
-                    normalizeInlineText(
-                      state.skills[Math.min(state.selectedIndex, state.skills.length - 1)]?.description ?? "",
-                    ),
-                    56,
-                  )}
+                  content={getSlidingTextWindow(selectedSummary, SUMMARY_VIEW_WIDTH, summaryOffset)}
                   style={{ color: tokens["text.secondary"] }}
                 />
               </Box>
