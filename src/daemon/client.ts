@@ -37,6 +37,7 @@ export interface DaemonClient {
 
   sendMessage(request: SendMessageRequest): Promise<DaemonResult<SendMessageResponse>>;
   streamResponse(request: StreamResponseRequest): Promise<DaemonResult<AsyncIterable<DaemonStreamEvent>>>;
+  cancelStream(request: StreamResponseRequest): Promise<DaemonResult<void>>;
 
   listConversations(): Promise<DaemonResult<ConversationSummary[]>>;
   getConversation(conversationId: string): Promise<DaemonResult<ConversationRecord>>;

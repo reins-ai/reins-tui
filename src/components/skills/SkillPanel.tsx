@@ -1,49 +1,130 @@
+import { join } from "node:path";
+
 import { useCallback, useReducer } from "react";
+
+import {
+  getDataRoot,
+  MigrationPipeline,
+  MigrationService,
+  SkillInstaller,
+} from "@reins/core";
+import type {
+  InstallResult,
+  InstallStep,
+  MarketplaceSkillDetail,
+  MarketplaceSource,
+} from "@reins/core";
 
 import { useThemeTokens } from "../../theme";
 import { Box, Text, useKeyboard } from "../../ui";
 import { ModalPanel } from "../modal-panel";
+import { InstallFlow } from "./InstallFlow";
+import { MarketplaceDetailView } from "./MarketplaceDetailView";
+import { MarketplaceListPanel } from "./MarketplaceListPanel";
+import { MarketplacePlaceholder } from "./MarketplacePlaceholder";
 import { SkillDetailView, type SkillDetailData } from "./SkillDetailView";
 import {
   SkillListPanel,
   type SkillListItem,
 } from "./SkillListPanel";
+import {
+  TabBar,
+  SKILL_PANEL_TABS,
+  getNextTabIndex,
+} from "./TabBar";
 
 // ---------------------------------------------------------------------------
 // Public types
 // ---------------------------------------------------------------------------
 
-export type PanelView = "list" | "detail";
+export type PanelView = "list" | "detail" | "install";
 
 export interface SkillPanelProps {
   visible: boolean;
   skills: readonly SkillListItem[];
   onLoadSkillDetail: (name: string) => SkillDetailData | null;
   onToggleEnabled: (name: string) => void;
+  onRemoveSkill?: (name: string) => Promise<boolean> | boolean;
   onClose: () => void;
+  onPromptReinsSetup?: (prompt: string) => void;
+  /** Marketplace source for the ClawHub tab. Null when not configured. */
+  marketplaceSource?: MarketplaceSource | null;
 }
 
 // ---------------------------------------------------------------------------
 // State machine
 // ---------------------------------------------------------------------------
 
+export interface InstallState {
+  readonly slug: string;
+  readonly version: string;
+  readonly detail: MarketplaceSkillDetail;
+  readonly progress: InstallStep | null;
+  readonly error: string | null;
+  readonly result: InstallResult | null;
+}
+
 export interface PanelState {
   readonly view: PanelView;
+  readonly activeTabIndex: number;
   readonly selectedSkillName: string | null;
   readonly selectedDetail: SkillDetailData | null;
+  readonly selectedMarketplaceSkill: string | null;
+  readonly installState: InstallState | null;
 }
 
 export type PanelAction =
   | { type: "SELECT_SKILL"; name: string; detail: SkillDetailData | null }
+  | { type: "SELECT_MARKETPLACE_SKILL"; slug: string }
   | { type: "GO_BACK" }
   | { type: "TOGGLE_ENABLED"; updatedDetail: SkillDetailData | null }
-  | { type: "CLOSE" };
+  | { type: "SWITCH_TAB"; index: number }
+  | { type: "CLOSE" }
+  | { type: "START_INSTALL"; slug: string; version: string; detail: MarketplaceSkillDetail }
+  | { type: "INSTALL_PROGRESS"; step: InstallStep }
+  | { type: "INSTALL_ERROR"; error: string }
+  | { type: "INSTALL_COMPLETE"; result: InstallResult }
+  | { type: "INSTALL_RESET" };
 
 export const INITIAL_PANEL_STATE: PanelState = {
   view: "list",
+  activeTabIndex: 0,
   selectedSkillName: null,
   selectedDetail: null,
+  selectedMarketplaceSkill: null,
+  installState: null,
 };
+
+export function buildPromptReinsSetupMessage(installState: InstallState): string | null {
+  const result = installState.result;
+  if (!result) {
+    return null;
+  }
+
+  const integration = result.integration;
+  const requiredTools = installState.detail.requiredTools.length > 0
+    ? installState.detail.requiredTools.join(", ")
+    : "unknown";
+
+  const sections = integration
+    ? integration.sections
+      .slice(0, 3)
+      .map((section) => `## ${section.title}\n${section.content}`)
+      .join("\n\n")
+    : "";
+
+  return [
+    `I just installed the skill \"${installState.detail.name}\" (${installState.slug}@${installState.version}).`,
+    "Please help me complete setup now before first use.",
+    `Installed path: ${result.installedPath}`,
+    `Marketplace required tools: ${requiredTools}`,
+    integration ? `Integration guide path: ${integration.guidePath}` : "No INTEGRATION.md guide was found in this package.",
+    sections.length > 0 ? `Integration guide excerpts:\n\n${sections}` : "",
+    "First call `load_skill` for this skill to inspect its content and detect any CLI/system dependencies. Then provide step-by-step setup commands for this environment and finish with a quick validation command.",
+  ]
+    .filter((line) => line.length > 0)
+    .join("\n\n");
+}
 
 export function skillPanelReducer(state: PanelState, action: PanelAction): PanelState {
   switch (action.type) {
@@ -55,12 +136,21 @@ export function skillPanelReducer(state: PanelState, action: PanelAction): Panel
         selectedDetail: action.detail,
       };
 
+    case "SELECT_MARKETPLACE_SKILL":
+      return {
+        ...state,
+        view: "detail",
+        selectedMarketplaceSkill: action.slug,
+      };
+
     case "GO_BACK":
       return {
         ...state,
         view: "list",
         selectedSkillName: null,
         selectedDetail: null,
+        selectedMarketplaceSkill: null,
+        installState: null,
       };
 
     case "TOGGLE_ENABLED":
@@ -69,8 +159,76 @@ export function skillPanelReducer(state: PanelState, action: PanelAction): Panel
         selectedDetail: action.updatedDetail,
       };
 
+    case "SWITCH_TAB":
+      return {
+        ...state,
+        activeTabIndex: action.index,
+        // Reset detail view when switching tabs
+        view: "list",
+        selectedSkillName: null,
+        selectedDetail: null,
+        selectedMarketplaceSkill: null,
+        installState: null,
+      };
+
     case "CLOSE":
       return INITIAL_PANEL_STATE;
+
+    case "START_INSTALL":
+      return {
+        ...state,
+        view: "install",
+        installState: {
+          slug: action.slug,
+          version: action.version,
+          detail: action.detail,
+          progress: null,
+          error: null,
+          result: null,
+        },
+      };
+
+    case "INSTALL_PROGRESS":
+      if (!state.installState) return state;
+      return {
+        ...state,
+        installState: {
+          ...state.installState,
+          progress: action.step,
+        },
+      };
+
+    case "INSTALL_ERROR":
+      if (!state.installState) return state;
+      return {
+        ...state,
+        installState: {
+          ...state.installState,
+          error: action.error,
+        },
+      };
+
+    case "INSTALL_COMPLETE":
+      if (!state.installState) return state;
+      return {
+        ...state,
+        installState: {
+          ...state.installState,
+          result: action.result,
+        },
+      };
+
+    case "INSTALL_RESET":
+      if (!state.installState) return state;
+      return {
+        ...state,
+        installState: {
+          ...state.installState,
+          progress: null,
+          error: null,
+          result: null,
+        },
+      };
 
     default:
       return state;
@@ -86,24 +244,53 @@ interface HelpAction {
   readonly label: string;
 }
 
-export function getHelpActions(view: PanelView): readonly HelpAction[] {
+export function getHelpActions(view: PanelView, activeTabIndex?: number): readonly HelpAction[] {
   if (view === "detail") {
     return [
       { key: "e", label: "Toggle" },
+      { key: "r", label: "Remove" },
       { key: "Esc", label: "Back" },
     ];
   }
 
+  if (view === "install") {
+    // InstallFlow manages its own help bar
+    return [];
+  }
+
+  // Reins Marketplace placeholder tab — minimal actions
+  if (activeTabIndex === 1) {
+    return [
+      { key: "Tab", label: "Switch Tab" },
+      { key: "Esc", label: "Close" },
+    ];
+  }
+
+  // ClawHub tab — includes sort action
+  if (activeTabIndex === 2) {
+    return [
+      { key: "Tab", label: "Switch Tab" },
+      { key: "j/k", label: "Navigate" },
+      { key: "Enter", label: "Select" },
+      { key: "/", label: "Search" },
+      { key: "s", label: "Sort" },
+      { key: "Esc", label: "Close" },
+    ];
+  }
+
+  // Installed tab (default)
   return [
+    { key: "Tab", label: "Switch Tab" },
     { key: "j/k", label: "Navigate" },
     { key: "Enter", label: "Select" },
     { key: "/", label: "Search" },
+    { key: "e", label: "Toggle" },
     { key: "Esc", label: "Close" },
   ];
 }
 
-function HelpBar({ view, tokens }: { view: PanelView; tokens: Record<string, string> }) {
-  const actions = getHelpActions(view);
+function HelpBar({ view, activeTabIndex, tokens }: { view: PanelView; activeTabIndex?: number; tokens: Record<string, string> }) {
+  const actions = getHelpActions(view, activeTabIndex);
 
   return (
     <Box style={{ flexDirection: "row" }}>
@@ -135,7 +322,10 @@ export function SkillPanel({
   skills,
   onLoadSkillDetail,
   onToggleEnabled,
+  onRemoveSkill,
   onClose,
+  onPromptReinsSetup,
+  marketplaceSource = null,
 }: SkillPanelProps) {
   const { tokens } = useThemeTokens();
   const [state, dispatch] = useReducer(skillPanelReducer, INITIAL_PANEL_STATE);
@@ -165,41 +355,232 @@ export function SkillPanel({
     [onToggleEnabled, onLoadSkillDetail],
   );
 
+  // Handle installed skill removal
+  const handleRemove = useCallback(
+    (name: string) => {
+      if (!onRemoveSkill) {
+        return;
+      }
+
+      void Promise.resolve(onRemoveSkill(name))
+        .then((removed) => {
+          if (removed === false) {
+            return;
+          }
+          dispatch({ type: "GO_BACK" });
+        })
+        .catch(() => {
+          // Keep detail view open on remove failures
+        });
+    },
+    [onRemoveSkill],
+  );
+
   // Handle panel close — reset state and call parent
   const handleClose = useCallback(() => {
     dispatch({ type: "CLOSE" });
     onClose();
   }, [onClose]);
 
-  // Keyboard handler for detail view shortcuts
+  // Handle tab change
+  const handleTabChange = useCallback((index: number) => {
+    dispatch({ type: "SWITCH_TAB", index });
+  }, []);
+
+  // Handle marketplace skill selection (ClawHub tab)
+  const handleMarketplaceSelect = useCallback((slug: string) => {
+    dispatch({ type: "SELECT_MARKETPLACE_SKILL", slug });
+  }, []);
+
+  // Handle marketplace skill install — transitions to install flow view.
+  const handleMarketplaceInstall = useCallback((slug: string, version: string) => {
+    if (!marketplaceSource) return;
+
+    marketplaceSource.getDetail(slug).then((result) => {
+      if (result.ok) {
+        dispatch({ type: "START_INSTALL", slug, version, detail: result.value });
+      }
+    }).catch(() => {
+      // Silently ignore — detail view already handles errors
+    });
+  }, [marketplaceSource]);
+
+  const runInstaller = useCallback(async (
+    source: MarketplaceSource,
+    slug: string,
+    version: string,
+  ): Promise<void> => {
+    // Use deterministic fallback migration path in TUI to avoid requiring
+    // any external LLM credentials for install.
+    const migrationService: MigrationService = new MigrationService({
+      chatFn: async () => "invalid payload without tagged sections",
+    });
+    const migrationPipeline: MigrationPipeline = new MigrationPipeline({
+      migrationService,
+    });
+    const installer: SkillInstaller = new SkillInstaller({
+      source,
+      migrationPipeline,
+      skillsDir: join(getDataRoot(), "skills"),
+      onProgress: (step, message) => {
+        if (step === "failed") {
+          dispatch({ type: "INSTALL_ERROR", error: message });
+          return;
+        }
+        dispatch({ type: "INSTALL_PROGRESS", step });
+      },
+    });
+
+    const result = await installer.install(slug, version);
+    if (!result.ok) {
+      dispatch({ type: "INSTALL_ERROR", error: result.error.message });
+      return;
+    }
+
+    dispatch({ type: "INSTALL_PROGRESS", step: "complete" });
+    dispatch({ type: "INSTALL_COMPLETE", result: result.value });
+  }, []);
+
+  // Install flow callbacks
+  const handleInstallConfirm = useCallback(() => {
+    if (!marketplaceSource || !state.installState) {
+      return;
+    }
+
+    const { slug, version } = state.installState;
+    void runInstaller(marketplaceSource, slug, version).catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      dispatch({ type: "INSTALL_ERROR", error: message });
+    });
+  }, [marketplaceSource, runInstaller, state.installState]);
+
+  const handleInstallCancel = useCallback(() => {
+    dispatch({ type: "GO_BACK" });
+  }, []);
+
+  const handleInstallComplete = useCallback(() => {
+    dispatch({ type: "GO_BACK" });
+  }, []);
+
+  const handleInstallRetry = useCallback(() => {
+    dispatch({ type: "INSTALL_RESET" });
+  }, []);
+
+  const handleInstallPromptSetup = useCallback(() => {
+    if (!onPromptReinsSetup || !state.installState) {
+      return;
+    }
+
+    const prompt = buildPromptReinsSetupMessage(state.installState);
+    if (!prompt) {
+      return;
+    }
+
+    onPromptReinsSetup(prompt);
+    handleClose();
+  }, [onPromptReinsSetup, state.installState, handleClose]);
+
+  // Keyboard handler for panel-level shortcuts
   useKeyboard(
     useCallback(
       (event) => {
         if (!visible) return;
-        if (state.view !== "detail") return;
 
         const keyName = event.name ?? "";
 
-        if (keyName === "e" && state.selectedSkillName) {
-          handleToggle(state.selectedSkillName);
+        // Detail view shortcuts
+        if (state.view === "detail") {
+          if (keyName === "e" && state.selectedSkillName) {
+            handleToggle(state.selectedSkillName);
+            return;
+          }
+
+          if ((keyName === "r" || event.sequence === "r") && state.selectedSkillName) {
+            handleRemove(state.selectedSkillName);
+            return;
+          }
+
+          if (keyName === "escape" || keyName === "esc") {
+            handleBack();
+            return;
+          }
           return;
         }
 
-        if (keyName === "escape" || keyName === "esc") {
-          handleBack();
+        // Tab key cycles tabs (only in list view)
+        if (keyName === "tab") {
+          const nextIndex = getNextTabIndex(
+            state.activeTabIndex,
+            SKILL_PANEL_TABS.length,
+          );
+          handleTabChange(nextIndex);
           return;
         }
       },
-      [visible, state.view, state.selectedSkillName, handleToggle, handleBack],
+      [visible, state.view, state.activeTabIndex, state.selectedSkillName, handleToggle, handleRemove, handleBack, handleTabChange],
     ),
   );
 
+  // Install flow view — shown when user triggers install from detail view
+  if (state.view === "install" && state.installState) {
+    const inst = state.installState;
+    return (
+      <ModalPanel
+        visible={visible}
+        title={`Install ${inst.detail.name}`}
+        hint="Installing skill"
+        width={76}
+        height={24}
+        closeOnEscape={false}
+        onClose={handleClose}
+      >
+        <InstallFlow
+          skillName={inst.detail.name}
+          skillVersion={inst.version}
+          skillAuthor={inst.detail.author}
+          trustLevel={inst.detail.trustLevel}
+          requiredTools={inst.detail.requiredTools}
+          onConfirm={handleInstallConfirm}
+          onCancel={handleInstallCancel}
+          onComplete={handleInstallComplete}
+          onRetry={handleInstallRetry}
+          onPromptSetup={handleInstallPromptSetup}
+          installProgress={inst.progress}
+          installError={inst.error}
+          installResult={inst.result}
+        />
+      </ModalPanel>
+    );
+  }
+
+  // Marketplace detail view — shown when a marketplace skill is selected on ClawHub tab
+  if (state.view === "detail" && state.selectedMarketplaceSkill && marketplaceSource) {
+    return (
+      <ModalPanel
+        visible={visible}
+        title={state.selectedMarketplaceSkill}
+        hint="Enter install · Esc back"
+        width={76}
+        height={24}
+        closeOnEscape={false}
+        onClose={handleClose}
+      >
+        <MarketplaceDetailView
+          slug={state.selectedMarketplaceSkill}
+          source={marketplaceSource}
+          onBack={handleBack}
+          onInstall={handleMarketplaceInstall}
+        />
+      </ModalPanel>
+    );
+  }
+
+  // Installed skill detail view — shown when an installed skill is selected
   if (state.view === "detail") {
     return (
       <ModalPanel
         visible={visible}
         title={state.selectedSkillName ?? "Skill Detail"}
-        hint="e toggle · Esc back"
         width={76}
         height={24}
         closeOnEscape={false}
@@ -219,13 +600,75 @@ export function SkillPanel({
     );
   }
 
-  // List view — delegate entirely to SkillListPanel
+  // Installed tab — delegate entirely to SkillListPanel
+  if (state.activeTabIndex === 0) {
+    return (
+      <SkillListPanel
+        visible={visible}
+        skills={[...skills]}
+        onSelect={handleSelect}
+        onClose={handleClose}
+        tabBar={
+          <TabBar
+            tabs={SKILL_PANEL_TABS}
+            activeIndex={state.activeTabIndex}
+            onTabChange={handleTabChange}
+          />
+        }
+      />
+    );
+  }
+
+  // Reins Marketplace tab — placeholder
+  if (state.activeTabIndex === 1) {
+    return (
+      <ModalPanel
+        visible={visible}
+        title="Skills"
+        hint="Tab switch · Esc close"
+        width={76}
+        height={24}
+        closeOnEscape={false}
+        onClose={handleClose}
+      >
+        <MarketplacePlaceholder
+          tabBar={
+            <TabBar
+              tabs={SKILL_PANEL_TABS}
+              activeIndex={state.activeTabIndex}
+              onTabChange={handleTabChange}
+            />
+          }
+        />
+        <Box style={{ marginTop: 1 }}>
+          <HelpBar view="list" activeTabIndex={state.activeTabIndex} tokens={tokens} />
+        </Box>
+      </ModalPanel>
+    );
+  }
+
+  // ClawHub tab — marketplace skill list
   return (
-    <SkillListPanel
+    <ModalPanel
       visible={visible}
-      skills={[...skills]}
-      onSelect={handleSelect}
+      title="Skills"
+      hint="Tab switch · s sort · / search · Esc close"
+      width={76}
+      height={24}
+      closeOnEscape={false}
       onClose={handleClose}
-    />
+    >
+      <MarketplaceListPanel
+        source={marketplaceSource}
+        onSelectSkill={handleMarketplaceSelect}
+        tabBar={
+          <TabBar
+            tabs={SKILL_PANEL_TABS}
+            activeIndex={state.activeTabIndex}
+            onTabChange={handleTabChange}
+          />
+        }
+      />
+    </ModalPanel>
   );
 }

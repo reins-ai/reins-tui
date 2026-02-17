@@ -218,9 +218,10 @@ describe("Message component with thinking blocks", () => {
     expect(messageSource).toContain("<ThinkingBlock");
   });
 
-  test("passes isStreaming to ThinkingBlock during streaming", () => {
-    // ThinkingBlock receives the message's streaming state
-    expect(messageSource).toContain("isStreaming={message.isStreaming}");
+  test("shows thinking cursor only while lifecycle is thinking", () => {
+    // ThinkingBlock streaming cursor is scoped to active thinking phase.
+    expect(messageSource).toContain("const isThinkingStreaming = message.isStreaming && lifecycleStatus === \"thinking\"");
+    expect(messageSource).toContain("isStreaming={isThinkingStreaming}");
   });
 
   test("thinking blocks hidden when thinkingVisible is false but data preserved", () => {
@@ -817,6 +818,13 @@ describe("provider-specific thinking block rendering", () => {
     expect(conversationPanelSource).toContain(
       'import { ThinkingBlock } from "./thinking-block"',
     );
+  });
+
+  test("ordered thinking blocks render in a framed standalone area", () => {
+    expect(conversationPanelSource).toContain('block.type === "thinking" && thinkingVisible');
+    expect(conversationPanelSource).toContain('getMessageBlockStyle("assistant"');
+    expect(conversationPanelSource).toContain('<FramedBlock style={thinkingBlockStyle} borderChars={thinkingBorderChars}>');
+    expect(conversationPanelSource).toContain('isStreaming={message.isStreaming && lifecycleStatus === "thinking"}');
   });
 
   test("DisplayContentBlock type union includes thinking", () => {

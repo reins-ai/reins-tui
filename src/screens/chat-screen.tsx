@@ -13,22 +13,34 @@ export interface ChatScreenProps {
   version: string;
   panelBorders: PanelBorderColors;
   focusedPanel: string;
+  suppressMainInput?: boolean;
   showActivityPanel: boolean;
   showExpandedPanel: boolean;
   breakpoint: BreakpointState;
   onSubmitMessage: (text: string) => void;
+  onCancelPrompt?: () => void | Promise<void>;
+}
+
+export function resolveMainWindowFocusedPanel(
+  focusedPanel: string,
+  suppressMainInput: boolean,
+): string {
+  return suppressMainInput ? "" : focusedPanel;
 }
 
 export function ChatScreen({
   version,
   panelBorders,
   focusedPanel,
+  suppressMainInput = false,
   showActivityPanel,
   showExpandedPanel,
   breakpoint,
   onSubmitMessage,
+  onCancelPrompt,
 }: ChatScreenProps) {
   const { tokens } = useThemeTokens();
+  const mainWindowFocusedPanel = resolveMainWindowFocusedPanel(focusedPanel, suppressMainInput);
 
   return (
     <Box style={{ flexDirection: "row", flexGrow: 1 }}>
@@ -39,7 +51,7 @@ export function ChatScreen({
           style={{ flexGrow: 1 }}
         >
           <ConversationPanel
-            isFocused={focusedPanel === "conversation"}
+            isFocused={mainWindowFocusedPanel === "conversation"}
             borderColor={panelBorders.conversation}
             version={version}
           />
@@ -53,8 +65,9 @@ export function ChatScreen({
           style={{ flexGrow: 0, flexShrink: 0 }}
         >
           <InputArea
-            isFocused={focusedPanel === "input"}
+            isFocused={mainWindowFocusedPanel === "input"}
             onSubmit={onSubmitMessage}
+            onCancelPrompt={onCancelPrompt}
           />
         </ZoneShell>
       </Box>

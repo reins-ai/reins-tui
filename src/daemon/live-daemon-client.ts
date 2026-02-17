@@ -230,6 +230,10 @@ export class LiveDaemonClient implements DaemonClient {
     return this.wsTransport.streamResponse(request);
   }
 
+  public async cancelStream(request: StreamResponseRequest): Promise<DaemonResult<void>> {
+    return this.wsTransport.cancelStream(request);
+  }
+
   public async listConversations(): Promise<DaemonResult<ConversationSummary[]>> {
     const connected = this.requireConnected();
     if (!connected.ok) {

@@ -1,4 +1,4 @@
-import { useCallback, useReducer } from "react";
+import { useCallback, useReducer, type ReactNode } from "react";
 
 import { useThemeTokens } from "../../theme";
 import { Box, Text, useKeyboard } from "../../ui";
@@ -13,6 +13,8 @@ export interface SkillListPanelProps {
   skills: readonly SkillListItem[];
   onSelect: (name: string) => void;
   onClose: () => void;
+  /** Optional slot rendered above the search bar (e.g. a TabBar). */
+  tabBar?: ReactNode;
 }
 
 export interface SkillListItem {
@@ -244,7 +246,7 @@ function ActionBar({ searchMode, tokens }: { searchMode: boolean; tokens: Record
 // Main component
 // ---------------------------------------------------------------------------
 
-export function SkillListPanel({ visible, skills, onSelect, onClose }: SkillListPanelProps) {
+export function SkillListPanel({ visible, skills, onSelect, onClose, tabBar }: SkillListPanelProps) {
   const { tokens } = useThemeTokens();
   const [state, dispatch] = useReducer(panelReducer, INITIAL_STATE);
 
@@ -332,6 +334,9 @@ export function SkillListPanel({ visible, skills, onSelect, onClose }: SkillList
       closeOnEscape={false}
       onClose={onClose}
     >
+      {/* Tab bar slot */}
+      {tabBar ?? null}
+
       {/* Search bar */}
       {state.searchMode ? (
         <Box style={{ flexDirection: "row", marginBottom: 1 }}>

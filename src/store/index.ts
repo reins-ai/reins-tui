@@ -364,6 +364,7 @@ function areDisplayMessagesEqual(previous: DisplayMessage, next: DisplayMessage)
   return previous.id === next.id
     && previous.role === next.role
     && previous.content === next.content
+    && previous.wasCancelled === next.wasCancelled
     && previous.isStreaming === next.isStreaming
     && getCreatedAtTimestamp(previous.createdAt) === getCreatedAtTimestamp(next.createdAt)
     && areDisplayToolCallsEqual(previous.toolCalls, next.toolCalls)
@@ -519,6 +520,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
           ...incoming,
           toolCalls: incoming.toolCalls ?? existing.toolCalls,
           contentBlocks: incoming.contentBlocks ?? existing.contentBlocks,
+          wasCancelled: incoming.wasCancelled ?? existing.wasCancelled,
           isStreaming: incoming.isStreaming ?? existing.isStreaming,
         };
 

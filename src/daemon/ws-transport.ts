@@ -48,12 +48,18 @@ interface StreamEnvelope {
 }
 
 interface HeartbeatEnvelope {
-  type: "heartbeat";
+  type: "heartbeat" | "heartbeat.ping" | "heartbeat.pong";
   timestamp?: string;
 }
 
 interface StreamSubscribeMessage {
   type: "stream.subscribe";
+  conversationId: string;
+  assistantMessageId: string;
+}
+
+interface StreamUnsubscribeMessage {
+  type: "stream.unsubscribe";
   conversationId: string;
   assistantMessageId: string;
 }
@@ -267,6 +273,29 @@ export class DaemonWsTransport {
     return ok(queue);
   }
 
+  public cancelStream(request: StreamResponseRequest): DaemonResult<void> {
+    const streamKey = this.streamKey(request.conversationId, request.assistantMessageId);
+    const queue = this.streams.get(streamKey);
+    if (queue) {
+      queue.close();
+      this.streams.delete(streamKey);
+    }
+
+    if (!this.socket || this.socket.readyState !== 1) {
+      // Local stream queue is already closed above. Treat cancellation as idempotent.
+      return ok(undefined);
+    }
+
+    const payload: StreamUnsubscribeMessage = {
+      type: "stream.unsubscribe",
+      conversationId: request.conversationId,
+      assistantMessageId: request.assistantMessageId,
+    };
+
+    this.socket.send(JSON.stringify(payload));
+    return ok(undefined);
+  }
+
   private handleMessage(event: WebSocketMessageLike): void {
     const text = this.asText(event.data);
     if (!text) {
@@ -281,6 +310,13 @@ export class DaemonWsTransport {
     }
 
     if (this.isHeartbeatEnvelope(payload)) {
+      if (payload.type === "heartbeat.ping" && this.socket && this.socket.readyState === 1) {
+        this.socket.send(JSON.stringify({
+          type: "heartbeat.pong",
+          timestamp: this.now().toISOString(),
+        }));
+      }
+
       this.onHeartbeatHandler?.(payload.timestamp ?? this.now().toISOString());
       return;
     }
@@ -560,7 +596,12 @@ export class DaemonWsTransport {
   }
 
   private isHeartbeatEnvelope(payload: unknown): payload is HeartbeatEnvelope {
-    return Boolean(payload && typeof payload === "object" && (payload as { type?: unknown }).type === "heartbeat");
+    if (!payload || typeof payload !== "object") {
+      return false;
+    }
+
+    const type = (payload as { type?: unknown }).type;
+    return type === "heartbeat" || type === "heartbeat.ping" || type === "heartbeat.pong";
   }
 }
 

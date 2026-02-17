@@ -49,6 +49,8 @@ class FakeDaemonClient implements DaemonClient {
   constructor(
     private readonly sendMessageResult: DaemonResult<{ conversationId: string; userMessageId: string; assistantMessageId: string }>,
     private readonly streamResult: DaemonResult<AsyncIterable<DaemonStreamEvent>>,
+    private readonly cancelStreamResult: DaemonResult<void> = ok(undefined),
+    private readonly onCancelStream?: () => void,
   ) {}
 
   public async connect(): Promise<DaemonResult<void>> {
@@ -89,6 +91,11 @@ class FakeDaemonClient implements DaemonClient {
 
   public async streamResponse(): Promise<DaemonResult<AsyncIterable<DaemonStreamEvent>>> {
     return this.streamResult;
+  }
+
+  public async cancelStream(): Promise<DaemonResult<void>> {
+    this.onCancelStream?.();
+    return this.cancelStreamResult;
   }
 
   public async listConversations(): Promise<DaemonResult<[]>> {
@@ -160,6 +167,58 @@ describe("streaming lifecycle reducer", () => {
       timestamp: "2026-02-11T00:00:05.000Z",
     });
     expect(idle.status).toBe("idle");
+  });
+
+  test("cancelled-complete marks turn as cancelled", () => {
+    const userMessage = {
+      id: "user-1",
+      role: "user" as const,
+      content: "hi",
+      createdAt: "2026-02-11T00:00:01.000Z",
+    };
+
+    const sending = reduceStreamingState(createState(), {
+      type: "user-send",
+      timestamp: "2026-02-11T00:00:01.000Z",
+      conversationId: "conv-1",
+      userMessage,
+    });
+
+    const thinking = reduceStreamingState(sending, {
+      type: "message-ack",
+      timestamp: "2026-02-11T00:00:02.000Z",
+      conversationId: "conv-1",
+      assistantMessageId: "assistant-1",
+    });
+
+    const streaming = reduceStreamingState(thinking, {
+      type: "start",
+      timestamp: "2026-02-11T00:00:03.000Z",
+      conversationId: "conv-1",
+      messageId: "assistant-1",
+    });
+
+    const withContent = reduceStreamingState(streaming, {
+      type: "delta",
+      timestamp: "2026-02-11T00:00:04.000Z",
+      conversationId: "conv-1",
+      messageId: "assistant-1",
+      delta: "Partial response",
+    });
+
+    const cancelled = reduceStreamingState(withContent, {
+      type: "cancelled-complete",
+      timestamp: "2026-02-11T00:00:05.000Z",
+      conversationId: "conv-1",
+      messageId: "assistant-1",
+      content: "Partial response",
+    });
+
+    expect(cancelled.status).toBe("complete");
+    if (cancelled.status === "complete") {
+      expect(cancelled.turnState.wasCancelled).toBe(true);
+      expect(cancelled.content).toBe("Partial response");
+    }
   });
 
   test("rejects invalid transition from idle on stream-complete", () => {
@@ -498,10 +557,9 @@ describe("multi-tool sequence rendering", () => {
     ]);
 
     expect(afterToolsAndSynthesis.turnState.hasToolCalls).toBe(true);
-    expect(afterToolsAndSynthesis.turnState.synthesisContent).toBe("I found 12 dependencies");
 
     const blocks = afterToolsAndSynthesis.turnState.contentBlocks;
-    expect(blocks).toHaveLength(3); // 2 tool-call blocks + 1 synthesis text
+    expect(blocks).toHaveLength(3); // 2 tool-call blocks + 1 text block after tools
     expect(blocks[0].type).toBe("tool-call");
     expect(blocks[0].toolCallId).toBe("tool-1");
     expect(blocks[1].type).toBe("tool-call");
@@ -638,7 +696,10 @@ describe("multi-tool sequence rendering", () => {
 
     expect(afterBurst.toolCalls).toHaveLength(3);
     expect(afterBurst.turnState.contentBlocks).toHaveLength(4);
-    expect(afterBurst.turnState.synthesisContent).toBe("Synthesis after burst");
+    // Verify synthesis text appears as last content block
+    const lastBlock = afterBurst.turnState.contentBlocks[3];
+    expect(lastBlock.type).toBe("text");
+    expect(lastBlock.text).toBe("Synthesis after burst");
 
     // All tool calls should be complete
     for (const tc of afterBurst.toolCalls) {
@@ -698,8 +759,7 @@ describe("multi-tool sequence rendering", () => {
       },
     ]);
 
-    expect(afterMixed.turnState.textBeforeTools).toBe("Checking...");
-    expect(afterMixed.turnState.synthesisContent).toBe("Found it!");
+    // Verify interleaved content blocks are in event-arrival order
     expect(afterMixed.turnState.contentBlocks).toHaveLength(4);
     expect(afterMixed.turnState.contentBlocks[0]).toEqual({ type: "text", text: "Checking..." });
     expect(afterMixed.turnState.contentBlocks[1]).toEqual({ type: "tool-call", toolCallId: "tool-1" });
@@ -1210,6 +1270,56 @@ describe("conversation store pipeline", () => {
     const snapshot = store.getState();
     expect(snapshot.streaming.status).toBe("error");
   });
+
+  test("cancelActiveResponse finalizes an active stream without entering error", async () => {
+    let cancelled = false;
+    const cancellableStream: AsyncIterable<DaemonStreamEvent> = {
+      async *[Symbol.asyncIterator]() {
+        yield {
+          type: "start",
+          conversationId: "conv-1",
+          messageId: "assistant-1",
+          timestamp: "2026-02-11T00:00:02.000Z",
+        };
+
+        while (!cancelled) {
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+      },
+    };
+
+    const store = createConversationStore({
+      daemonClient: new FakeDaemonClient(
+        ok({
+          conversationId: "conv-1",
+          userMessageId: "user-remote-1",
+          assistantMessageId: "assistant-1",
+        }),
+        ok(cancellableStream),
+        ok(undefined),
+        () => {
+          cancelled = true;
+        },
+      ),
+      completeDisplayMs: 1_000,
+    });
+
+    const sendPromise = store.sendUserMessage({
+      content: "Please stream",
+      conversationId: "conv-1",
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const cancelResult = await store.cancelActiveResponse();
+    expect(cancelResult.ok).toBe(true);
+
+    const sendResult = await sendPromise;
+    expect(sendResult.ok).toBe(true);
+
+    const snapshot = store.getState();
+    expect(snapshot.streaming.status).toBe("complete");
+  });
 });
 
 // --- Expand/collapse interaction tests ---
@@ -1699,5 +1809,388 @@ describe("ordering stability with expand/collapse", () => {
     // Error tool preserves diagnostics
     expect(afterMixed.toolCalls[1].status).toBe("error");
     expect(afterMixed.toolCalls[1].error).toBe("Permission denied");
+  });
+});
+
+describe("interleaved text and tool content blocks", () => {
+  test("text → tool → text → tool → text produces 5 interleaved blocks", () => {
+    const base = createStreamingBase();
+
+    const afterInterleaved = applyEvents(base, [
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:02.500Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "Let me check...",
+      },
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        name: "load_skill",
+      },
+      {
+        type: "tool-call-complete",
+        timestamp: "2026-02-11T00:00:03.500Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        result: "skill loaded",
+      },
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:04.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "CLI is installed.",
+      },
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:04.500Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-2",
+        name: "bash",
+      },
+      {
+        type: "tool-call-complete",
+        timestamp: "2026-02-11T00:00:05.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-2",
+        result: "0.28.2",
+      },
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:05.500Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "Running a test.",
+      },
+    ]);
+
+    const blocks = afterInterleaved.turnState.contentBlocks;
+    expect(blocks).toHaveLength(5);
+    expect(blocks[0]).toEqual({ type: "text", text: "Let me check..." });
+    expect(blocks[1]).toEqual({ type: "tool-call", toolCallId: "tool-1" });
+    expect(blocks[2]).toEqual({ type: "text", text: "CLI is installed." });
+    expect(blocks[3]).toEqual({ type: "tool-call", toolCallId: "tool-2" });
+    expect(blocks[4]).toEqual({ type: "text", text: "Running a test." });
+  });
+
+  test("tool-call-start before any deltas puts tool first, text after", () => {
+    const base = createStreamingBase();
+
+    const afterToolFirst = applyEvents(base, [
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        name: "bash",
+      },
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:03.500Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "I ran a command.",
+      },
+    ]);
+
+    const blocks = afterToolFirst.turnState.contentBlocks;
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]).toEqual({ type: "tool-call", toolCallId: "tool-1" });
+    expect(blocks[1]).toEqual({ type: "text", text: "I ran a command." });
+  });
+
+  test("consecutive text deltas are merged into single text block", () => {
+    const base = createStreamingBase();
+
+    const afterDeltas = applyEvents(base, [
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "Hello ",
+      },
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:03.100Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "world",
+      },
+    ]);
+
+    const blocks = afterDeltas.turnState.contentBlocks;
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]).toEqual({ type: "text", text: "Hello world" });
+  });
+
+  test("text after tool creates new block, not appended to pre-tool text", () => {
+    const base = createStreamingBase();
+
+    const afterTextToolText = applyEvents(base, [
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:02.500Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "Before tools.",
+      },
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        name: "bash",
+      },
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:04.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "After tools.",
+      },
+    ]);
+
+    const blocks = afterTextToolText.turnState.contentBlocks;
+    expect(blocks).toHaveLength(3);
+    // Text before tool is separate from text after tool
+    expect(blocks[0]).toEqual({ type: "text", text: "Before tools." });
+    expect(blocks[1]).toEqual({ type: "tool-call", toolCallId: "tool-1" });
+    expect(blocks[2]).toEqual({ type: "text", text: "After tools." });
+  });
+
+  test("duplicate tool-call-start for same ID does not create duplicate block", () => {
+    const base = createStreamingBase();
+
+    const afterDuplicate = applyEvents(base, [
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        name: "bash",
+      },
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.100Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        name: "bash",
+      },
+    ]);
+
+    const toolBlocks = afterDuplicate.turnState.contentBlocks.filter((b) => b.type === "tool-call");
+    expect(toolBlocks).toHaveLength(1);
+    expect(toolBlocks[0].toolCallId).toBe("tool-1");
+  });
+
+  test("complete event reconciles with extra text not seen in deltas", () => {
+    const base = createStreamingBase();
+
+    const afterComplete = applyEvents(base, [
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "Partial",
+      },
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.500Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        name: "bash",
+      },
+      {
+        type: "tool-call-complete",
+        timestamp: "2026-02-11T00:00:04.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        result: "ok",
+      },
+      {
+        type: "complete",
+        timestamp: "2026-02-11T00:00:05.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        content: "Partial result summary.",
+      },
+    ]);
+
+    expect(afterComplete.status).toBe("complete");
+    const blocks = afterComplete.turnState.contentBlocks;
+    // Should have text block, tool block, and reconciled text with extra content
+    const textBlocks = blocks.filter((b) => b.type === "text");
+    const toolBlocks = blocks.filter((b) => b.type === "tool-call");
+    expect(toolBlocks).toHaveLength(1);
+    // All text from complete event should be present in text blocks
+    const totalText = textBlocks.map((b) => b.text ?? "").join("");
+    expect(totalText).toBe("Partial result summary.");
+  });
+
+  test("complete event with no streamed text creates trailing text block", () => {
+    const base = createStreamingBase();
+
+    const afterComplete = applyEvents(base, [
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        name: "bash",
+      },
+      {
+        type: "tool-call-complete",
+        timestamp: "2026-02-11T00:00:04.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        result: "ok",
+      },
+      {
+        type: "complete",
+        timestamp: "2026-02-11T00:00:05.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        content: "The command succeeded.",
+      },
+    ]);
+
+    const blocks = afterComplete.turnState.contentBlocks;
+    expect(blocks).toHaveLength(2);
+    expect(blocks[0]).toEqual({ type: "tool-call", toolCallId: "tool-1" });
+    expect(blocks[1]).toEqual({ type: "text", text: "The command succeeded." });
+  });
+
+  test("thinking, text, and tools preserve arrival order", () => {
+    const base = createStreamingBase();
+
+    const afterThinkingAndTools = applyEvents(base, [
+      {
+        type: "thinking-delta",
+        timestamp: "2026-02-11T00:00:02.500Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "Let me think...",
+      },
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "Here is my answer.",
+      },
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.500Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        name: "bash",
+      },
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:04.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "Done!",
+      },
+    ]);
+
+    const blocks = afterThinkingAndTools.turnState.contentBlocks;
+    expect(blocks).toHaveLength(4);
+    expect(blocks[0]).toEqual({ type: "thinking", text: "Let me think..." });
+    expect(blocks[1]).toEqual({ type: "text", text: "Here is my answer." });
+    expect(blocks[2]).toEqual({ type: "tool-call", toolCallId: "tool-1" });
+    expect(blocks[3]).toEqual({ type: "text", text: "Done!" });
+  });
+
+  test("bodyBlocks includes thinking content in sequence", () => {
+    const base = createStreamingBase();
+
+    const afterThinking = applyEvents(base, [
+      {
+        type: "thinking-delta",
+        timestamp: "2026-02-11T00:00:02.500Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "Internal thought",
+      },
+      {
+        type: "delta",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "Visible text",
+      },
+    ]);
+
+    expect(afterThinking.turnState.bodyBlocks).toHaveLength(2);
+    expect(afterThinking.turnState.bodyBlocks[0]).toEqual({ type: "thinking", text: "Internal thought" });
+    expect(afterThinking.turnState.bodyBlocks[1]).toEqual({ type: "text", text: "Visible text" });
+
+    // contentBlocks should include thinking
+    expect(afterThinking.turnState.contentBlocks).toHaveLength(2);
+    expect(afterThinking.turnState.contentBlocks[0]).toEqual({ type: "thinking", text: "Internal thought" });
+    expect(afterThinking.turnState.contentBlocks[1]).toEqual({ type: "text", text: "Visible text" });
+  });
+
+  test("thinking before and after tools remains split into separate blocks", () => {
+    const base = createStreamingBase();
+
+    const afterInterleavedThinking = applyEvents(base, [
+      {
+        type: "thinking-delta",
+        timestamp: "2026-02-11T00:00:02.500Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "First thought.",
+      },
+      {
+        type: "tool-call-start",
+        timestamp: "2026-02-11T00:00:03.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        name: "bash",
+      },
+      {
+        type: "tool-call-complete",
+        timestamp: "2026-02-11T00:00:03.500Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        toolCallId: "tool-1",
+        result: "ok",
+      },
+      {
+        type: "thinking-delta",
+        timestamp: "2026-02-11T00:00:04.000Z",
+        conversationId: "conv-1",
+        messageId: "assistant-1",
+        delta: "Second thought.",
+      },
+    ]);
+
+    const blocks = afterInterleavedThinking.turnState.contentBlocks;
+    expect(blocks).toHaveLength(3);
+    expect(blocks[0]).toEqual({ type: "thinking", text: "First thought." });
+    expect(blocks[1]).toEqual({ type: "tool-call", toolCallId: "tool-1" });
+    expect(blocks[2]).toEqual({ type: "thinking", text: "Second thought." });
   });
 });

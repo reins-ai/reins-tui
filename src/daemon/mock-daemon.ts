@@ -347,6 +347,11 @@ export class MockDaemonClient implements DaemonClient {
     return ok(stream);
   }
 
+  public async cancelStream(_request: StreamResponseRequest): Promise<DaemonResult<void>> {
+    // Mock streams are local async generators. Treat cancellation as a no-op success.
+    return ok(undefined);
+  }
+
   public async listConversations(): Promise<DaemonResult<ConversationSummary[]>> {
     await this.wait(this.operation.operationDelayMs);
 
