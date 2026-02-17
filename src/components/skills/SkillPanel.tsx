@@ -1,8 +1,11 @@
 import { useCallback, useReducer } from "react";
 
+import type { MarketplaceSource } from "@reins/core";
+
 import { useThemeTokens } from "../../theme";
 import { Box, Text, useKeyboard } from "../../ui";
 import { ModalPanel } from "../modal-panel";
+import { MarketplaceListPanel } from "./MarketplaceListPanel";
 import { SkillDetailView, type SkillDetailData } from "./SkillDetailView";
 import {
   SkillListPanel,
@@ -26,6 +29,8 @@ export interface SkillPanelProps {
   onLoadSkillDetail: (name: string) => SkillDetailData | null;
   onToggleEnabled: (name: string) => void;
   onClose: () => void;
+  /** Marketplace source for the ClawHub tab. Null when not configured. */
+  marketplaceSource?: MarketplaceSource | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -173,6 +178,7 @@ export function SkillPanel({
   onLoadSkillDetail,
   onToggleEnabled,
   onClose,
+  marketplaceSource = null,
 }: SkillPanelProps) {
   const { tokens } = useThemeTokens();
   const [state, dispatch] = useReducer(skillPanelReducer, INITIAL_PANEL_STATE);
@@ -211,6 +217,12 @@ export function SkillPanel({
   // Handle tab change
   const handleTabChange = useCallback((index: number) => {
     dispatch({ type: "SWITCH_TAB", index });
+  }, []);
+
+  // Handle marketplace skill selection (ClawHub tab)
+  const handleMarketplaceSelect = useCallback((slug: string) => {
+    // Store the slug for detail view — detail view comes in Task 5.3
+    void slug;
   }, []);
 
   // Keyboard handler for panel-level shortcuts
@@ -294,30 +306,29 @@ export function SkillPanel({
     );
   }
 
-  // ClawHub tab — placeholder
+  // ClawHub tab — marketplace skill list
   if (state.activeTabIndex === 1) {
     return (
       <ModalPanel
         visible={visible}
         title="Skills"
-        hint="Tab switch · Esc close"
+        hint="Tab switch · s sort · / search · Esc close"
         width={76}
         height={24}
         closeOnEscape={false}
         onClose={handleClose}
       >
-        <TabBar
-          tabs={SKILL_PANEL_TABS}
-          activeIndex={state.activeTabIndex}
-          onTabChange={handleTabChange}
+        <MarketplaceListPanel
+          source={marketplaceSource}
+          onSelectSkill={handleMarketplaceSelect}
+          tabBar={
+            <TabBar
+              tabs={SKILL_PANEL_TABS}
+              activeIndex={state.activeTabIndex}
+              onTabChange={handleTabChange}
+            />
+          }
         />
-        <PlaceholderContent
-          message="ClawHub marketplace - coming in Task 5.2"
-          tokens={tokens}
-        />
-        <Box style={{ marginTop: 1 }}>
-          <HelpBar view="list" tokens={tokens} />
-        </Box>
       </ModalPanel>
     );
   }
