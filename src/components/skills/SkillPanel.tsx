@@ -1,10 +1,16 @@
 import { useCallback, useReducer } from "react";
 
-import type { MarketplaceSource } from "@reins/core";
+import type {
+  InstallResult,
+  InstallStep,
+  MarketplaceSkillDetail,
+  MarketplaceSource,
+} from "@reins/core";
 
 import { useThemeTokens } from "../../theme";
 import { Box, Text, useKeyboard } from "../../ui";
 import { ModalPanel } from "../modal-panel";
+import { InstallFlow } from "./InstallFlow";
 import { MarketplaceDetailView } from "./MarketplaceDetailView";
 import { MarketplaceListPanel } from "./MarketplaceListPanel";
 import { SkillDetailView, type SkillDetailData } from "./SkillDetailView";
@@ -22,7 +28,7 @@ import {
 // Public types
 // ---------------------------------------------------------------------------
 
-export type PanelView = "list" | "detail";
+export type PanelView = "list" | "detail" | "install";
 
 export interface SkillPanelProps {
   visible: boolean;
@@ -38,12 +44,22 @@ export interface SkillPanelProps {
 // State machine
 // ---------------------------------------------------------------------------
 
+export interface InstallState {
+  readonly slug: string;
+  readonly version: string;
+  readonly detail: MarketplaceSkillDetail;
+  readonly progress: InstallStep | null;
+  readonly error: string | null;
+  readonly result: InstallResult | null;
+}
+
 export interface PanelState {
   readonly view: PanelView;
   readonly activeTabIndex: number;
   readonly selectedSkillName: string | null;
   readonly selectedDetail: SkillDetailData | null;
   readonly selectedMarketplaceSkill: string | null;
+  readonly installState: InstallState | null;
 }
 
 export type PanelAction =
@@ -52,7 +68,12 @@ export type PanelAction =
   | { type: "GO_BACK" }
   | { type: "TOGGLE_ENABLED"; updatedDetail: SkillDetailData | null }
   | { type: "SWITCH_TAB"; index: number }
-  | { type: "CLOSE" };
+  | { type: "CLOSE" }
+  | { type: "START_INSTALL"; slug: string; version: string; detail: MarketplaceSkillDetail }
+  | { type: "INSTALL_PROGRESS"; step: InstallStep }
+  | { type: "INSTALL_ERROR"; error: string }
+  | { type: "INSTALL_COMPLETE"; result: InstallResult }
+  | { type: "INSTALL_RESET" };
 
 export const INITIAL_PANEL_STATE: PanelState = {
   view: "list",
@@ -60,6 +81,7 @@ export const INITIAL_PANEL_STATE: PanelState = {
   selectedSkillName: null,
   selectedDetail: null,
   selectedMarketplaceSkill: null,
+  installState: null,
 };
 
 export function skillPanelReducer(state: PanelState, action: PanelAction): PanelState {
@@ -86,6 +108,7 @@ export function skillPanelReducer(state: PanelState, action: PanelAction): Panel
         selectedSkillName: null,
         selectedDetail: null,
         selectedMarketplaceSkill: null,
+        installState: null,
       };
 
     case "TOGGLE_ENABLED":
@@ -103,10 +126,67 @@ export function skillPanelReducer(state: PanelState, action: PanelAction): Panel
         selectedSkillName: null,
         selectedDetail: null,
         selectedMarketplaceSkill: null,
+        installState: null,
       };
 
     case "CLOSE":
       return INITIAL_PANEL_STATE;
+
+    case "START_INSTALL":
+      return {
+        ...state,
+        view: "install",
+        installState: {
+          slug: action.slug,
+          version: action.version,
+          detail: action.detail,
+          progress: null,
+          error: null,
+          result: null,
+        },
+      };
+
+    case "INSTALL_PROGRESS":
+      if (!state.installState) return state;
+      return {
+        ...state,
+        installState: {
+          ...state.installState,
+          progress: action.step,
+        },
+      };
+
+    case "INSTALL_ERROR":
+      if (!state.installState) return state;
+      return {
+        ...state,
+        installState: {
+          ...state.installState,
+          error: action.error,
+        },
+      };
+
+    case "INSTALL_COMPLETE":
+      if (!state.installState) return state;
+      return {
+        ...state,
+        installState: {
+          ...state.installState,
+          result: action.result,
+        },
+      };
+
+    case "INSTALL_RESET":
+      if (!state.installState) return state;
+      return {
+        ...state,
+        installState: {
+          ...state.installState,
+          progress: null,
+          error: null,
+          result: null,
+        },
+      };
 
     default:
       return state;
@@ -128,6 +208,11 @@ export function getHelpActions(view: PanelView): readonly HelpAction[] {
       { key: "e", label: "Toggle" },
       { key: "Esc", label: "Back" },
     ];
+  }
+
+  if (view === "install") {
+    // InstallFlow manages its own help bar
+    return [];
   }
 
   return [
@@ -237,9 +322,37 @@ export function SkillPanel({
     dispatch({ type: "SELECT_MARKETPLACE_SKILL", slug });
   }, []);
 
-  // Handle marketplace skill install (wired in Task 5.4)
-  const handleMarketplaceInstall = useCallback((_slug: string, _version: string) => {
-    // Install flow will be implemented in Task 5.4
+  // Handle marketplace skill install — transitions to install flow view.
+  // The actual SkillInstaller.install() call will be wired in Task 5.5;
+  // for now this sets up the UI flow with the detail data from the source.
+  const handleMarketplaceInstall = useCallback((slug: string, version: string) => {
+    if (!marketplaceSource) return;
+
+    marketplaceSource.getDetail(slug).then((result) => {
+      if (result.ok) {
+        dispatch({ type: "START_INSTALL", slug, version, detail: result.value });
+      }
+    }).catch(() => {
+      // Silently ignore — detail view already handles errors
+    });
+  }, [marketplaceSource]);
+
+  // Install flow callbacks
+  const handleInstallConfirm = useCallback(() => {
+    // Actual SkillInstaller.install() call will be wired in Task 5.5.
+    // The InstallFlow component transitions to "progress" step on confirm.
+  }, []);
+
+  const handleInstallCancel = useCallback(() => {
+    dispatch({ type: "GO_BACK" });
+  }, []);
+
+  const handleInstallComplete = useCallback(() => {
+    dispatch({ type: "GO_BACK" });
+  }, []);
+
+  const handleInstallRetry = useCallback(() => {
+    dispatch({ type: "INSTALL_RESET" });
   }, []);
 
   // Keyboard handler for panel-level shortcuts
@@ -277,6 +390,37 @@ export function SkillPanel({
       [visible, state.view, state.activeTabIndex, state.selectedSkillName, handleToggle, handleBack, handleTabChange],
     ),
   );
+
+  // Install flow view — shown when user triggers install from detail view
+  if (state.view === "install" && state.installState) {
+    const inst = state.installState;
+    return (
+      <ModalPanel
+        visible={visible}
+        title={`Install ${inst.detail.name}`}
+        hint="Installing skill"
+        width={76}
+        height={24}
+        closeOnEscape={false}
+        onClose={handleClose}
+      >
+        <InstallFlow
+          skillName={inst.detail.name}
+          skillVersion={inst.version}
+          skillAuthor={inst.detail.author}
+          trustLevel={inst.detail.trustLevel}
+          requiredTools={inst.detail.requiredTools}
+          onConfirm={handleInstallConfirm}
+          onCancel={handleInstallCancel}
+          onComplete={handleInstallComplete}
+          onRetry={handleInstallRetry}
+          installProgress={inst.progress}
+          installError={inst.error}
+          installResult={inst.result}
+        />
+      </ModalPanel>
+    );
+  }
 
   // Marketplace detail view — shown when a marketplace skill is selected on ClawHub tab
   if (state.view === "detail" && state.selectedMarketplaceSkill && marketplaceSource) {

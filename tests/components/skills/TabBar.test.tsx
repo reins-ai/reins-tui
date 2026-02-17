@@ -317,6 +317,7 @@ describe("SkillPanel initial state with tabs", () => {
       selectedSkillName: null,
       selectedDetail: null,
       selectedMarketplaceSkill: null,
+      installState: null,
     });
   });
 });
