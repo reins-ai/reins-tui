@@ -44,8 +44,8 @@ export function getPrevTabIndex(currentIndex: number, tabCount: number): number 
 
 export const SKILL_PANEL_TABS: readonly TabDefinition[] = [
   { label: "Installed", id: "installed" },
-  { label: "ClawHub", id: "clawhub" },
   { label: "Reins Marketplace", id: "reins" },
+  { label: "ClawHub", id: "clawhub" },
 ];
 
 // ---------------------------------------------------------------------------

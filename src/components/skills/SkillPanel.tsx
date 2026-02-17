@@ -217,7 +217,7 @@ export function getHelpActions(view: PanelView, activeTabIndex?: number): readon
   }
 
   // Reins Marketplace placeholder tab — minimal actions
-  if (activeTabIndex === 2) {
+  if (activeTabIndex === 1) {
     return [
       { key: "Tab", label: "Switch Tab" },
       { key: "Esc", label: "Close" },
@@ -225,7 +225,7 @@ export function getHelpActions(view: PanelView, activeTabIndex?: number): readon
   }
 
   // ClawHub tab — includes sort action
-  if (activeTabIndex === 1) {
+  if (activeTabIndex === 2) {
     return [
       { key: "Tab", label: "Switch Tab" },
       { key: "j/k", label: "Navigate" },
@@ -494,21 +494,19 @@ export function SkillPanel({
     );
   }
 
-  // ClawHub tab — marketplace skill list
+  // Reins Marketplace tab — placeholder
   if (state.activeTabIndex === 1) {
     return (
       <ModalPanel
         visible={visible}
         title="Skills"
-        hint="Tab switch · s sort · / search · Esc close"
+        hint="Tab switch · Esc close"
         width={76}
         height={24}
         closeOnEscape={false}
         onClose={handleClose}
       >
-        <MarketplaceListPanel
-          source={marketplaceSource}
-          onSelectSkill={handleMarketplaceSelect}
+        <MarketplacePlaceholder
           tabBar={
             <TabBar
               tabs={SKILL_PANEL_TABS}
@@ -517,22 +515,27 @@ export function SkillPanel({
             />
           }
         />
+        <Box style={{ marginTop: 1 }}>
+          <HelpBar view="list" activeTabIndex={state.activeTabIndex} tokens={tokens} />
+        </Box>
       </ModalPanel>
     );
   }
 
-  // Reins Marketplace tab — placeholder
+  // ClawHub tab — marketplace skill list
   return (
     <ModalPanel
       visible={visible}
       title="Skills"
-      hint="Tab switch · Esc close"
+      hint="Tab switch · s sort · / search · Esc close"
       width={76}
       height={24}
       closeOnEscape={false}
       onClose={handleClose}
     >
-      <MarketplacePlaceholder
+      <MarketplaceListPanel
+        source={marketplaceSource}
+        onSelectSkill={handleMarketplaceSelect}
         tabBar={
           <TabBar
             tabs={SKILL_PANEL_TABS}
@@ -541,9 +544,6 @@ export function SkillPanel({
           />
         }
       />
-      <Box style={{ marginTop: 1 }}>
-        <HelpBar view="list" activeTabIndex={state.activeTabIndex} tokens={tokens} />
-      </Box>
     </ModalPanel>
   );
 }
