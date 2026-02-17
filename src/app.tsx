@@ -20,6 +20,7 @@ import { ChannelTokenPrompt } from "./components/channel-token-prompt";
 import { callDaemonChannelApi, maskBotToken } from "./commands/handlers/channels";
 import { DaemonPanel } from "./components/daemon-panel";
 import { IntegrationPanel } from "./components/integration-panel";
+import { BrowserPanel } from "./components/BrowserPanel";
 import { SkillPanel } from "./components/skills/SkillPanel";
 import type { SkillListItem } from "./components/skills/SkillListPanel";
 import type { SkillDetailData } from "./components/skills/SkillDetailView";
@@ -363,6 +364,11 @@ function AppView({ version, dimensions }: AppViewProps) {
 
   const closeSkillPanel = useCallback(() => {
     dispatch({ type: "SET_SKILL_PANEL_OPEN", payload: false });
+    dispatch({ type: "SET_STATUS", payload: "Ready" });
+  }, [dispatch]);
+
+  const closeBrowserPanel = useCallback(() => {
+    dispatch({ type: "SET_BROWSER_PANEL_OPEN", payload: false });
     dispatch({ type: "SET_STATUS", payload: "Ready" });
   }, [dispatch]);
 
@@ -1163,6 +1169,10 @@ function AppView({ version, dimensions }: AppViewProps) {
         dispatch({ type: "SET_SKILL_PANEL_OPEN", payload: true });
         dispatch({ type: "SET_STATUS", payload: "Skills" });
         break;
+      case "browser":
+        dispatch({ type: "SET_BROWSER_PANEL_OPEN", payload: true });
+        dispatch({ type: "SET_STATUS", payload: "Browser panel" });
+        break;
       case "thinking":
         dispatch({ type: "TOGGLE_THINKING_VISIBILITY" });
         dispatch({
@@ -1311,7 +1321,7 @@ function AppView({ version, dimensions }: AppViewProps) {
       return;
     }
 
-    if (state.isConnectFlowOpen || state.isModelSelectorOpen || state.isSearchSettingsOpen || state.isDaemonPanelOpen || state.isIntegrationPanelOpen || state.isSkillPanelOpen || state.isChannelTokenPromptOpen) {
+    if (state.isConnectFlowOpen || state.isModelSelectorOpen || state.isSearchSettingsOpen || state.isDaemonPanelOpen || state.isIntegrationPanelOpen || state.isSkillPanelOpen || state.isBrowserPanelOpen || state.isChannelTokenPromptOpen) {
       return;
     }
 
@@ -1447,6 +1457,7 @@ function AppView({ version, dimensions }: AppViewProps) {
     || state.isDaemonPanelOpen
     || state.isIntegrationPanelOpen
     || state.isSkillPanelOpen
+    || state.isBrowserPanelOpen
     || state.isChannelTokenPromptOpen
     || state.panels.modal.visible
     || state.panels.drawer.visible
@@ -1515,6 +1526,11 @@ function AppView({ version, dimensions }: AppViewProps) {
       <IntegrationPanel
         visible={state.isIntegrationPanelOpen}
         onClose={closeIntegrationPanel}
+      />
+      <BrowserPanel
+        visible={state.isBrowserPanelOpen}
+        onClose={closeBrowserPanel}
+        daemonBaseUrl={resolvedDaemonUrl}
       />
       <SkillPanel
         visible={state.isSkillPanelOpen}
