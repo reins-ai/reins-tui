@@ -5,6 +5,7 @@ import type { MarketplaceSource } from "@reins/core";
 import { useThemeTokens } from "../../theme";
 import { Box, Text, useKeyboard } from "../../ui";
 import { ModalPanel } from "../modal-panel";
+import { MarketplaceDetailView } from "./MarketplaceDetailView";
 import { MarketplaceListPanel } from "./MarketplaceListPanel";
 import { SkillDetailView, type SkillDetailData } from "./SkillDetailView";
 import {
@@ -42,10 +43,12 @@ export interface PanelState {
   readonly activeTabIndex: number;
   readonly selectedSkillName: string | null;
   readonly selectedDetail: SkillDetailData | null;
+  readonly selectedMarketplaceSkill: string | null;
 }
 
 export type PanelAction =
   | { type: "SELECT_SKILL"; name: string; detail: SkillDetailData | null }
+  | { type: "SELECT_MARKETPLACE_SKILL"; slug: string }
   | { type: "GO_BACK" }
   | { type: "TOGGLE_ENABLED"; updatedDetail: SkillDetailData | null }
   | { type: "SWITCH_TAB"; index: number }
@@ -56,6 +59,7 @@ export const INITIAL_PANEL_STATE: PanelState = {
   activeTabIndex: 0,
   selectedSkillName: null,
   selectedDetail: null,
+  selectedMarketplaceSkill: null,
 };
 
 export function skillPanelReducer(state: PanelState, action: PanelAction): PanelState {
@@ -68,12 +72,20 @@ export function skillPanelReducer(state: PanelState, action: PanelAction): Panel
         selectedDetail: action.detail,
       };
 
+    case "SELECT_MARKETPLACE_SKILL":
+      return {
+        ...state,
+        view: "detail",
+        selectedMarketplaceSkill: action.slug,
+      };
+
     case "GO_BACK":
       return {
         ...state,
         view: "list",
         selectedSkillName: null,
         selectedDetail: null,
+        selectedMarketplaceSkill: null,
       };
 
     case "TOGGLE_ENABLED":
@@ -90,6 +102,7 @@ export function skillPanelReducer(state: PanelState, action: PanelAction): Panel
         view: "list",
         selectedSkillName: null,
         selectedDetail: null,
+        selectedMarketplaceSkill: null,
       };
 
     case "CLOSE":
@@ -221,8 +234,12 @@ export function SkillPanel({
 
   // Handle marketplace skill selection (ClawHub tab)
   const handleMarketplaceSelect = useCallback((slug: string) => {
-    // Store the slug for detail view — detail view comes in Task 5.3
-    void slug;
+    dispatch({ type: "SELECT_MARKETPLACE_SKILL", slug });
+  }, []);
+
+  // Handle marketplace skill install (wired in Task 5.4)
+  const handleMarketplaceInstall = useCallback((_slug: string, _version: string) => {
+    // Install flow will be implemented in Task 5.4
   }, []);
 
   // Keyboard handler for panel-level shortcuts
@@ -261,7 +278,29 @@ export function SkillPanel({
     ),
   );
 
-  // Detail view — shown regardless of active tab when a skill is selected
+  // Marketplace detail view — shown when a marketplace skill is selected on ClawHub tab
+  if (state.view === "detail" && state.selectedMarketplaceSkill && marketplaceSource) {
+    return (
+      <ModalPanel
+        visible={visible}
+        title={state.selectedMarketplaceSkill}
+        hint="Enter install · Esc back"
+        width={76}
+        height={24}
+        closeOnEscape={false}
+        onClose={handleClose}
+      >
+        <MarketplaceDetailView
+          slug={state.selectedMarketplaceSkill}
+          source={marketplaceSource}
+          onBack={handleBack}
+          onInstall={handleMarketplaceInstall}
+        />
+      </ModalPanel>
+    );
+  }
+
+  // Installed skill detail view — shown when an installed skill is selected
   if (state.view === "detail") {
     return (
       <ModalPanel
