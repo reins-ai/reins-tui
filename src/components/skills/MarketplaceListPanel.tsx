@@ -276,6 +276,15 @@ function padTo(str: string, len: number): string {
   return str + " ".repeat(len - str.length);
 }
 
+function padLeft(str: string, len: number): string {
+  if (str.length >= len) return str.slice(0, len);
+  return " ".repeat(len - str.length) + str;
+}
+
+const NAME_COL_WIDTH = 18;
+const INSTALL_COL_WIDTH = 8;
+const DESCRIPTION_COL_WIDTH = 38;
+
 function MarketplaceSkillRow({
   skill,
   isSelected,
@@ -287,9 +296,15 @@ function MarketplaceSkillRow({
 }) {
   const installs = formatInstallCount(skill.installCount);
   const indicator = isSelected ? "▸" : " ";
-  const trustColor = tokens[getMarketplaceTrustColorToken(skill.trustLevel)];
-  const name = padTo(truncateDescription(normalizeInlineText(skill.name), 18), 18);
-  const description = truncateDescription(normalizeInlineText(skill.description), 38);
+  const name = padTo(
+    truncateDescription(normalizeInlineText(skill.name), NAME_COL_WIDTH),
+    NAME_COL_WIDTH,
+  );
+  const description = padTo(
+    truncateDescription(normalizeInlineText(skill.description), DESCRIPTION_COL_WIDTH),
+    DESCRIPTION_COL_WIDTH,
+  );
+  const installsLabel = padLeft(`↓ ${installs}`, INSTALL_COL_WIDTH);
 
   return (
     <Box
@@ -304,13 +319,9 @@ function MarketplaceSkillRow({
         style={{ color: tokens["accent.primary"] }}
       />
       <Text
-        content="● "
-        style={{ color: trustColor }}
-      />
-      <Text
         content={name}
         style={{
-          color: isSelected ? tokens["text.primary"] : tokens["text.secondary"],
+          color: tokens["status.warning"],
         }}
       />
       <Text
@@ -324,7 +335,7 @@ function MarketplaceSkillRow({
         }}
       />
       <Text
-        content={`  ↓ ${installs}`}
+        content={`  ${installsLabel}`}
         style={{ color: tokens["status.info"] }}
       />
     </Box>
