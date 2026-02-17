@@ -260,15 +260,14 @@ function SortModeSelector({
   );
 }
 
-/** Maximum content width inside the modal panel (76 panel - 2 padding). */
-const ROW_CONTENT_WIDTH = 72;
-
 /**
- * Pads or truncates a string to exactly `len` characters.
+ * Normalizes inline text for compact single-line rendering.
  */
-function padTo(str: string, len: number): string {
-  if (str.length >= len) return str.slice(0, len);
-  return str + " ".repeat(len - str.length);
+function normalizeInlineText(value: string): string {
+  return value
+    .replace(/`/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function MarketplaceSkillRow({
@@ -281,49 +280,33 @@ function MarketplaceSkillRow({
   tokens: Record<string, string>;
 }) {
   const installs = formatInstallCount(skill.installCount);
-  const indicator = isSelected ? "▸ " : "  ";
-
-  // Line 1: indicator + name (left) ... downloads (right)
-  const suffix = `  ↓ ${installs}`;
-  const nameMaxLen = ROW_CONTENT_WIDTH - indicator.length - suffix.length;
-  const paddedName = padTo(skill.name, nameMaxLen);
-
-  // Line 2: indented description
-  const descIndent = "    ";
-  const descMaxLen = ROW_CONTENT_WIDTH - descIndent.length;
-  const desc = truncateDescription(skill.description, descMaxLen);
+  const indicator = isSelected ? "▸" : " ";
+  const name = truncateDescription(normalizeInlineText(skill.name), 18);
+  const description = truncateDescription(normalizeInlineText(skill.description), 42);
+  const summary = `${name} · ${description}`;
 
   return (
     <Box
       style={{
-        flexDirection: "column",
+        flexDirection: "row",
+        paddingLeft: 1,
         backgroundColor: isSelected ? tokens["surface.elevated"] : "transparent",
       }}
     >
-      {/* Line 1: name + downloads */}
-      <Box style={{ flexDirection: "row", paddingLeft: 1 }}>
-        <Text
-          content={indicator}
-          style={{ color: tokens["accent.primary"] }}
-        />
-        <Text
-          content={paddedName}
-          style={{
-            color: isSelected ? tokens["text.primary"] : tokens["text.secondary"],
-          }}
-        />
-        <Text
-          content={suffix}
-          style={{ color: tokens["text.muted"] }}
-        />
-      </Box>
-      {/* Line 2: description */}
-      <Box style={{ flexDirection: "row", paddingLeft: 1 }}>
-        <Text
-          content={descIndent + desc}
-          style={{ color: tokens["text.muted"] }}
-        />
-      </Box>
+      <Text
+        content={`${indicator} `}
+        style={{ color: tokens["accent.primary"] }}
+      />
+      <Text
+        content={summary}
+        style={{
+          color: isSelected ? tokens["text.primary"] : tokens["text.secondary"],
+        }}
+      />
+      <Text
+        content={`  ↓ ${installs}`}
+        style={{ color: tokens["text.muted"] }}
+      />
     </Box>
   );
 }
