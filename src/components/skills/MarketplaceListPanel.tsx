@@ -265,9 +265,15 @@ function SortModeSelector({
  */
 function normalizeInlineText(value: string): string {
   return value
+    .replace(/[^\x20-\x7E]/g, " ")
     .replace(/`/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function padTo(str: string, len: number): string {
+  if (str.length >= len) return str.slice(0, len);
+  return str + " ".repeat(len - str.length);
 }
 
 function MarketplaceSkillRow({
@@ -281,9 +287,9 @@ function MarketplaceSkillRow({
 }) {
   const installs = formatInstallCount(skill.installCount);
   const indicator = isSelected ? "▸" : " ";
-  const name = truncateDescription(normalizeInlineText(skill.name), 18);
-  const description = truncateDescription(normalizeInlineText(skill.description), 42);
-  const summary = `${name} · ${description}`;
+  const trustColor = tokens[getMarketplaceTrustColorToken(skill.trustLevel)];
+  const name = padTo(truncateDescription(normalizeInlineText(skill.name), 18), 18);
+  const description = truncateDescription(normalizeInlineText(skill.description), 38);
 
   return (
     <Box
@@ -298,14 +304,28 @@ function MarketplaceSkillRow({
         style={{ color: tokens["accent.primary"] }}
       />
       <Text
-        content={summary}
+        content="● "
+        style={{ color: trustColor }}
+      />
+      <Text
+        content={name}
         style={{
           color: isSelected ? tokens["text.primary"] : tokens["text.secondary"],
         }}
       />
       <Text
-        content={`  ↓ ${installs}`}
+        content="  "
         style={{ color: tokens["text.muted"] }}
+      />
+      <Text
+        content={description}
+        style={{
+          color: isSelected ? tokens["text.secondary"] : tokens["text.muted"],
+        }}
+      />
+      <Text
+        content={`  ↓ ${installs}`}
+        style={{ color: tokens["status.info"] }}
       />
     </Box>
   );
