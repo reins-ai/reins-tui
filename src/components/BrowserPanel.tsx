@@ -196,7 +196,10 @@ export function BrowserPanel({ visible, onClose, daemonBaseUrl }: BrowserPanelPr
   const statusColor = isRunning ? tokens["status.success"] : tokens["status.error"];
   const statusLabel = isRunning ? "Running" : "Stopped";
 
-  const hintText = "q close · auto-refreshes every 5s";
+  const modeHint = isRunning
+    ? (browserStatus?.headless === true ? "headed to switch mode" : "headless to switch mode")
+    : "";
+  const hintText = `q close · auto-refreshes every 5s${modeHint ? ` · /browser ${modeHint}` : ""}`;
 
   return (
     <ModalPanel
@@ -270,7 +273,7 @@ export function BrowserPanel({ visible, onClose, daemonBaseUrl }: BrowserPanelPr
           ) : (
             <Box style={{ flexDirection: "row", marginTop: 1 }}>
               <Text
-                content="Browser not running — use /browser headed to start"
+                content="Browser not running — use a browser tool or /browser to start"
                 style={{ color: tokens["text.muted"] }}
               />
             </Box>

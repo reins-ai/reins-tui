@@ -7,12 +7,13 @@ import type { CommandHandler, CommandHandlerContext } from "./types";
 // Subcommand definitions
 // ---------------------------------------------------------------------------
 
-const BROWSER_SUBCOMMANDS = ["headed", "screenshot", "close"] as const;
+const BROWSER_SUBCOMMANDS = ["headed", "headless", "screenshot", "close"] as const;
 type BrowserSubcommand = (typeof BROWSER_SUBCOMMANDS)[number];
 
 /** Aliases that map to canonical subcommand names. */
 const SUBCOMMAND_ALIASES: Readonly<Record<string, BrowserSubcommand>> = {
   h: "headed",
+  hl: "headless",
   ss: "screenshot",
   stop: "close",
 };
@@ -154,6 +155,34 @@ const handleBrowserHeaded: CommandHandler = async (_args, context) => {
   });
 };
 
+const handleBrowserHeadless: CommandHandler = async (_args, context) => {
+  const baseUrl = await resolveBrowserBaseUrl(context);
+  const result = await callBrowserApi("/api/browser/launch-headless", {}, 15_000, fetch, baseUrl);
+
+  if (result.ok) {
+    return ok({
+      statusMessage: "Switching to headless mode",
+      responseText: result.data.message ?? "Browser is relaunching in headless mode.",
+      signals: [{ type: "OPEN_BROWSER_PANEL" }],
+    });
+  }
+
+  // Graceful fallback
+  return ok({
+    statusMessage: "Headless mode requested",
+    responseText: [
+      "**Headless mode requested.**",
+      "",
+      "If the browser is currently running in headed mode, close it first",
+      "with `/browser close`, then relaunch. The daemon will start Chrome",
+      "without a visible window on the next browser tool invocation if configured.",
+      "",
+      "Check `/browser` for current status.",
+    ].join("\n"),
+    signals: [{ type: "OPEN_BROWSER_PANEL" }],
+  });
+};
+
 const handleBrowserScreenshot: CommandHandler = async (_args, context) => {
   const baseUrl = await resolveBrowserBaseUrl(context);
   const result = await callBrowserApi(
@@ -241,6 +270,7 @@ export const handleBrowserCommand: CommandHandler = (args, context) => {
 
   const subcommandHandlers: Record<BrowserSubcommand, CommandHandler> = {
     headed: handleBrowserHeaded,
+    headless: handleBrowserHeadless,
     screenshot: handleBrowserScreenshot,
     close: handleBrowserClose,
   };

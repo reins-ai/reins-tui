@@ -534,12 +534,17 @@ const BROWSER_SPEC: CommandSpec = {
   name: "browser",
   aliases: ["br"],
   description: "Control the browser — navigate, screenshot, and monitor pages.",
-  usage: "/browser [headed | screenshot | close]",
+  usage: "/browser [headed | headless | screenshot | close]",
   root: [
     {
       type: "literal",
       value: "headed",
-      description: "Launch browser in headed (visible) mode",
+      description: "Switch to headed (visible window) mode",
+    },
+    {
+      type: "literal",
+      value: "headless",
+      description: "Switch to headless (background) mode",
     },
     {
       type: "literal",
