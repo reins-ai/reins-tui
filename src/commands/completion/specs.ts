@@ -530,6 +530,30 @@ const SKILLS_SPEC: CommandSpec = {
   root: [],
 };
 
+const BROWSER_SPEC: CommandSpec = {
+  name: "browser",
+  aliases: ["br"],
+  description: "Control the browser — navigate, screenshot, and monitor pages.",
+  usage: "/browser [headed | screenshot | close]",
+  root: [
+    {
+      type: "literal",
+      value: "headed",
+      description: "Launch browser in headed (visible) mode",
+    },
+    {
+      type: "literal",
+      value: "screenshot",
+      description: "Take a screenshot of the current page",
+    },
+    {
+      type: "literal",
+      value: "close",
+      description: "Close the browser",
+    },
+  ],
+};
+
 // ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
@@ -555,6 +579,7 @@ const ALL_SPECS: readonly CommandSpec[] = [
   SETUP_SPEC,
   INTEGRATIONS_SPEC,
   SKILLS_SPEC,
+  BROWSER_SPEC,
 ];
 
 /**
