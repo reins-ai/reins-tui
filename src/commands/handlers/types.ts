@@ -3,7 +3,7 @@ import type { Result } from "../../daemon/contracts";
 import type { ParsedCommand } from "../parser";
 import type { SlashCommandDefinition } from "../registry";
 
-export type CommandSignalType = "OPEN_CONNECT_FLOW" | "OPEN_EMBEDDING_SETUP" | "OPEN_SETTINGS" | "OPEN_SEARCH_SETTINGS" | "OPEN_DAEMON_PANEL" | "OPEN_INTEGRATION_PANEL" | "OPEN_SKILL_PANEL" | "PROMPT_CHANNEL_TOKEN" | "RELAUNCH_ONBOARDING" | "QUIT_TUI" | "ENVIRONMENT_SWITCHED" | "TOGGLE_THINKING_VISIBILITY";
+export type CommandSignalType = "OPEN_CONNECT_FLOW" | "OPEN_EMBEDDING_SETUP" | "OPEN_SETTINGS" | "OPEN_SEARCH_SETTINGS" | "OPEN_DAEMON_PANEL" | "OPEN_INTEGRATION_PANEL" | "OPEN_SKILL_PANEL" | "OPEN_BROWSER_PANEL" | "PROMPT_CHANNEL_TOKEN" | "RELAUNCH_ONBOARDING" | "QUIT_TUI" | "ENVIRONMENT_SWITCHED" | "TOGGLE_THINKING_VISIBILITY";
 
 export interface CommandSignal {
   readonly type: CommandSignalType;
@@ -155,6 +155,10 @@ export interface CommandHandlerContext {
   readonly environment: EnvironmentCommandContext | null;
   readonly memory: MemoryCommandContext | null;
   readonly daemonClient: DaemonClient | null;
+}
+
+export interface BrowserCommandContext {
+  readonly daemonBaseUrl?: string;
 }
 
 export type CommandArgs = ParsedCommand["args"];

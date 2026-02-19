@@ -30,6 +30,7 @@ describe("slash command registry", () => {
       "thinking",
       "integrations",
       "skills",
+      "browser",
     ]);
   });
 
@@ -58,6 +59,7 @@ describe("slash command registry", () => {
       thinking: "appearance",
       integrations: "system",
       skills: "system",
+      browser: "system",
     });
   });
 
@@ -191,6 +193,7 @@ describe("getCommandAutocomplete", () => {
 
     expect(result.length).toBe(SLASH_COMMANDS.length);
     expect(result.map((item) => item.name)).toEqual([
+      "browser",
       "channels",
       "clear",
       "compact",
