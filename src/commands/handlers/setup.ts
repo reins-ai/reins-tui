@@ -18,13 +18,20 @@ export const handleSetupCommand: CommandHandler = (args) => {
     });
   }
 
+  if (subcommand === "persona") {
+    return ok({
+      statusMessage: "Opening persona editor",
+      signals: [{ type: "OPEN_PERSONA_EDITOR" }],
+    });
+  }
+
   if (subcommand === "reset-onboarding") {
     return resetOnboarding();
   }
 
   return err({
     code: "INVALID_ARGUMENT",
-    message: `Unknown subcommand '${subcommand}'. Usage: /setup or /setup reset-onboarding`,
+    message: `Unknown subcommand '${subcommand}'. Usage: /setup, /setup persona, or /setup reset-onboarding`,
   });
 };
 

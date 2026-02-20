@@ -14,6 +14,7 @@ export * from "./markdown-text";
 export * from "./memory-panel";
 export * from "./message";
 export * from "./modal-panel";
+export * from "./persona-editor";
 export * from "./model-selector";
 export * from "./sidebar";
 export * from "./status-bar";
