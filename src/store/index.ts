@@ -81,6 +81,7 @@ export type AppAction =
   | { type: "SET_INTEGRATION_PANEL_OPEN"; payload: boolean }
   | { type: "SET_SKILL_PANEL_OPEN"; payload: boolean }
   | { type: "SET_BROWSER_PANEL_OPEN"; payload: boolean }
+  | { type: "SET_SCHEDULE_PANEL_OPEN"; payload: boolean }
   | { type: "SET_CHANNEL_TOKEN_PROMPT"; payload: { open: boolean; platform?: string } }
   | { type: "SET_ONBOARDING_STATUS"; payload: OnboardingStatus }
   | { type: "SET_ONBOARDING_RERUN" }
@@ -480,6 +481,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "SET_BROWSER_PANEL_OPEN":
       return typeof action.payload === "boolean"
         ? { ...state, isBrowserPanelOpen: action.payload }
+        : state;
+    case "SET_SCHEDULE_PANEL_OPEN":
+      return typeof action.payload === "boolean"
+        ? { ...state, isSchedulePanelOpen: action.payload }
         : state;
     case "SET_CHANNEL_TOKEN_PROMPT":
       return {

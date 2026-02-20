@@ -34,6 +34,7 @@ describe("slash command registry", () => {
       "nudges",
       "tasks",
       "browser",
+      "schedule",
     ]);
   });
 
@@ -66,6 +67,7 @@ describe("slash command registry", () => {
       nudges: "system",
       tasks: "system",
       browser: "system",
+      schedule: "system",
     });
   });
 
@@ -216,6 +218,7 @@ describe("getCommandAutocomplete", () => {
       "nudges",
       "quit",
       "remember",
+      "schedule",
       "search-settings",
       "settings",
       "setup",
