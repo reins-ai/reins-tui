@@ -23,6 +23,7 @@ import { DaemonPanel } from "./components/daemon-panel";
 import { IntegrationPanel } from "./components/integration-panel";
 import { BrowserPanel } from "./components/BrowserPanel";
 import { SchedulePanel } from "./components/SchedulePanel";
+import { PersonaEditor } from "./components/persona-editor";
 import { SkillPanel } from "./components/skills/SkillPanel";
 import type { SkillListItem } from "./components/skills/SkillListPanel";
 import type { SkillDetailData } from "./components/skills/SkillDetailView";
@@ -388,6 +389,34 @@ function AppView({ version, dimensions }: AppViewProps) {
     dispatch({ type: "SET_SCHEDULE_PANEL_OPEN", payload: false });
     dispatch({ type: "SET_STATUS", payload: "Ready" });
   }, [dispatch]);
+
+  const fetchPersonaForStatusBar = useCallback(async (baseUrl: string) => {
+    try {
+      const response = await fetch(`${baseUrl}/api/persona`);
+      if (!response.ok) return;
+      const data = (await response.json()) as { name?: string; avatar?: string };
+      if (data.name) {
+        dispatch({
+          type: "SET_PERSONA",
+          payload: { name: data.name, avatar: data.avatar ?? null },
+        });
+      }
+    } catch {
+      // Silently ignore — persona display is optional
+    }
+  }, [dispatch]);
+
+  // Fetch persona name for status bar on mount
+  useEffect(() => {
+    void fetchPersonaForStatusBar(resolvedDaemonUrl);
+  }, [resolvedDaemonUrl, fetchPersonaForStatusBar]);
+
+  const closePersonaEditor = useCallback(() => {
+    dispatch({ type: "SET_PERSONA_EDITOR_OPEN", payload: false });
+    dispatch({ type: "SET_STATUS", payload: "Ready" });
+    // Refresh persona name in status bar after editor closes
+    void fetchPersonaForStatusBar(resolvedDaemonUrl);
+  }, [dispatch, resolvedDaemonUrl, fetchPersonaForStatusBar]);
 
   // Skill state store, registry, and scanner — initialized once, shared across callbacks
   const skillStateStoreRef = useRef<FileSkillStateStore>(
@@ -1352,7 +1381,7 @@ function AppView({ version, dimensions }: AppViewProps) {
       return;
     }
 
-    if (state.isConnectFlowOpen || state.isModelSelectorOpen || state.isSearchSettingsOpen || state.isDaemonPanelOpen || state.isIntegrationPanelOpen || state.isSkillPanelOpen || state.isBrowserPanelOpen || state.isSchedulePanelOpen || state.isChannelTokenPromptOpen) {
+    if (state.isConnectFlowOpen || state.isModelSelectorOpen || state.isSearchSettingsOpen || state.isDaemonPanelOpen || state.isIntegrationPanelOpen || state.isSkillPanelOpen || state.isBrowserPanelOpen || state.isSchedulePanelOpen || state.isPersonaEditorOpen || state.isChannelTokenPromptOpen) {
       return;
     }
 
@@ -1500,6 +1529,7 @@ function AppView({ version, dimensions }: AppViewProps) {
     || state.isSkillPanelOpen
     || state.isBrowserPanelOpen
     || state.isSchedulePanelOpen
+    || state.isPersonaEditorOpen
     || state.isChannelTokenPromptOpen
     || state.panels.modal.visible
     || state.panels.drawer.visible
@@ -1577,6 +1607,11 @@ function AppView({ version, dimensions }: AppViewProps) {
       <SchedulePanel
         visible={state.isSchedulePanelOpen}
         onClose={closeSchedulePanel}
+        daemonBaseUrl={resolvedDaemonUrl}
+      />
+      <PersonaEditor
+        visible={state.isPersonaEditorOpen}
+        onClose={closePersonaEditor}
         daemonBaseUrl={resolvedDaemonUrl}
       />
       <SkillPanel

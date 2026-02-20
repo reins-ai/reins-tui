@@ -435,9 +435,11 @@ export function StatusBar({
   const segmentSet = resolveStatusSegmentSet(sources);
   const { left, right } = groupSegments(segmentSet.visibleSegments);
 
-  // Build persona badge when name is provided
-  const personaBadge = personaName
-    ? `${personaAvatar ?? "🤖"} ${personaName}`
+  // Build persona badge — prefer props, fall back to store state
+  const resolvedPersonaName = personaName ?? state.personaName;
+  const resolvedPersonaAvatar = personaAvatar ?? state.personaAvatar;
+  const personaBadge = resolvedPersonaName
+    ? `${resolvedPersonaAvatar ?? "🤖"} ${resolvedPersonaName}`
     : null;
 
   // Render per-segment colored spans for the left group
