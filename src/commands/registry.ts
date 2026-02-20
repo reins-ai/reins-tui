@@ -28,7 +28,8 @@ export type SlashCommandHandlerKey =
   | "TASKS"
   | "BROWSER"
   | "SCHEDULE"
-  | "IMPORT_MEMORIES";
+  | "IMPORT_MEMORIES"
+  | "EXPORT_PERSONA";
 
 export interface SlashCommandDefinition {
   readonly name: string;
@@ -267,6 +268,14 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     usage: "/import-memories <path>",
     category: "memory",
     handlerKey: "IMPORT_MEMORIES",
+  }),
+  Object.freeze({
+    name: "export-persona",
+    aliases: Object.freeze([]),
+    description: "Export the active persona (PERSONA.yaml + PERSONALITY.md) as a zip archive.",
+    usage: "/export-persona [output-path]",
+    category: "environment",
+    handlerKey: "EXPORT_PERSONA",
   }),
 ]);
 
