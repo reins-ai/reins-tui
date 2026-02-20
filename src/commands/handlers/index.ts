@@ -10,6 +10,7 @@ import { handleSkillsCommand } from "./skills";
 import { handleMemoryCommand, handleRememberCommand } from "./memory";
 import { handleMemorySetupCommand } from "./memory-setup";
 import { handleModelCommand } from "./model";
+import { handleBriefingCommand, handleNudgesCommand } from "./proactive";
 import { handleSearchSettingsCommand } from "./search-settings";
 import {
   handleClearConversationCommand,
@@ -45,6 +46,8 @@ const HANDLER_MAP: Record<SlashCommandHandlerKey, CommandHandler> = {
   TOGGLE_THINKING: handleThinkingCommand,
   INTEGRATIONS: handleIntegrationsCommand,
   SKILLS: handleSkillsCommand,
+  BRIEFING: handleBriefingCommand,
+  NUDGES: handleNudgesCommand,
 };
 
 export async function dispatchCommand(

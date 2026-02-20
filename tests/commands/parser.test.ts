@@ -30,6 +30,8 @@ describe("slash command registry", () => {
       "thinking",
       "integrations",
       "skills",
+      "briefing",
+      "nudges",
     ]);
   });
 
@@ -58,6 +60,8 @@ describe("slash command registry", () => {
       thinking: "appearance",
       integrations: "system",
       skills: "system",
+      briefing: "system",
+      nudges: "system",
     });
   });
 
@@ -191,6 +195,7 @@ describe("getCommandAutocomplete", () => {
 
     expect(result.length).toBe(SLASH_COMMANDS.length);
     expect(result.map((item) => item.name)).toEqual([
+      "briefing",
       "channels",
       "clear",
       "compact",
@@ -203,6 +208,7 @@ describe("getCommandAutocomplete", () => {
       "memory",
       "model",
       "new",
+      "nudges",
       "quit",
       "remember",
       "search-settings",

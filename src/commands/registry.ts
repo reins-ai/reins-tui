@@ -22,7 +22,9 @@ export type SlashCommandHandlerKey =
   | "SETUP"
   | "TOGGLE_THINKING"
   | "INTEGRATIONS"
-  | "SKILLS";
+  | "SKILLS"
+  | "BRIEFING"
+  | "NUDGES";
 
 export interface SlashCommandDefinition {
   readonly name: string;
@@ -214,6 +216,22 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     category: "system",
     handlerKey: "SKILLS",
   }),
+  Object.freeze({
+    name: "briefing",
+    aliases: Object.freeze([]),
+    description: "Trigger an immediate morning briefing.",
+    usage: "/briefing",
+    category: "system",
+    handlerKey: "BRIEFING",
+  }),
+  Object.freeze({
+    name: "nudges",
+    aliases: Object.freeze([]),
+    description: "Toggle nudge injection on or off.",
+    usage: "/nudges [on|off]",
+    category: "system",
+    handlerKey: "NUDGES",
+  }),
 ]);
 
 const COMMAND_LOOKUP = new Map<string, SlashCommandDefinition>();
@@ -364,6 +382,31 @@ const PALETTE_ACTION_DEFINITIONS: readonly PaletteActionDefinition[] = Object.fr
     category: "settings",
     keywords: Object.freeze(["setup", "onboarding", "reset", "rerun", "re-run", "wizard", "reconfigure"]),
     actionKey: "rerun-setup",
+  }),
+  // Proactive Intelligence
+  Object.freeze({
+    id: "action:trigger-briefing",
+    label: "Trigger Briefing",
+    description: "Generate and deliver an immediate morning briefing.",
+    category: "actions",
+    keywords: Object.freeze(["briefing", "morning", "summary", "daily", "report"]),
+    actionKey: "trigger-briefing",
+  }),
+  Object.freeze({
+    id: "action:nudges-on",
+    label: "Enable Nudges",
+    description: "Turn on nudge injection in conversations.",
+    category: "settings",
+    keywords: Object.freeze(["nudges", "nudge", "enable", "on", "proactive", "suggestions"]),
+    actionKey: "nudges-on",
+  }),
+  Object.freeze({
+    id: "action:nudges-off",
+    label: "Disable Nudges",
+    description: "Turn off nudge injection in conversations.",
+    category: "settings",
+    keywords: Object.freeze(["nudges", "nudge", "disable", "off", "proactive", "suggestions"]),
+    actionKey: "nudges-off",
   }),
 ]);
 
