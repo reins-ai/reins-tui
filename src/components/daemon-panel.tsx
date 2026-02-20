@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 
 import { DaemonProfileStore, type TransportType } from "@reins/core";
 
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "../daemon/client";
 import {
   addDaemonProfile,
+  getActiveDaemonUrl,
   switchDaemonProfile,
   removeDaemonProfile,
   showDaemonToken,
@@ -13,6 +14,11 @@ import {
 import { useDaemon } from "../daemon/daemon-context";
 import { useThemeTokens } from "../theme";
 import { Box, Input, Text, useKeyboard } from "../ui";
+import type {
+  ChannelHealthStatus,
+  ChannelStatusSnapshot,
+} from "../commands/handlers/channels";
+import { callDaemonChannelGet } from "../commands/handlers/channels";
 import { ModalPanel } from "./modal-panel";
 
 // ---------------------------------------------------------------------------
@@ -738,6 +744,148 @@ function TokenDisplay({
 }
 
 // ---------------------------------------------------------------------------
+// Channel status helpers (exported for testing)
+// ---------------------------------------------------------------------------
+
+/**
+ * Return a theme-token key for a channel connection state.
+ */
+export function getChannelStateColorToken(
+  state: ChannelHealthStatus["state"],
+): string {
+  switch (state) {
+    case "connected":
+      return "status.success";
+    case "error":
+      return "status.error";
+    case "disconnected":
+    case "connecting":
+    case "reconnecting":
+      return "status.warning";
+    default:
+      return "text.muted";
+  }
+}
+
+/**
+ * Return a status glyph for a channel connection state.
+ */
+export function getChannelStateGlyph(
+  state: ChannelHealthStatus["state"],
+): string {
+  switch (state) {
+    case "connected":
+      return "●";
+    case "error":
+      return "●";
+    case "connecting":
+    case "reconnecting":
+      return "◐";
+    case "disconnected":
+      return "○";
+    default:
+      return "○";
+  }
+}
+
+/**
+ * Format an uptime duration in milliseconds to a compact label.
+ */
+export function formatUptimeLabel(uptimeMs: number): string {
+  const secs = Math.floor(uptimeMs / 1_000);
+  if (secs < 60) return `${secs}s`;
+  if (secs < 3_600) return `${Math.floor(secs / 60)}m`;
+  return `${Math.floor(secs / 3_600)}h`;
+}
+
+// ---------------------------------------------------------------------------
+// Channel sub-components
+// ---------------------------------------------------------------------------
+
+function ChannelRow({
+  channel,
+  tokens,
+}: {
+  channel: ChannelHealthStatus;
+  tokens: Record<string, string>;
+}) {
+  const glyph = getChannelStateGlyph(channel.state);
+  const stateColor = tokens[getChannelStateColorToken(channel.state)] ?? tokens["text.muted"];
+  const platformLabel = channel.platform === "telegram" ? "Telegram" : "Discord";
+  const uptimeLabel = formatUptimeLabel(channel.uptimeMs);
+
+  return (
+    <Box style={{ flexDirection: "column" }}>
+      <Box style={{ flexDirection: "row" }}>
+        <Text content={`  ${glyph} `} style={{ color: stateColor }} />
+        <Text content={`${platformLabel} `} style={{ color: tokens["text.primary"] }} />
+        <Text content={`(${channel.channelId})`} style={{ color: tokens["text.muted"] }} />
+        <Text content={`  up ${uptimeLabel}`} style={{ color: tokens["text.muted"] }} />
+      </Box>
+      {channel.lastError ? (
+        <Box style={{ flexDirection: "row" }}>
+          <Text content="    └ " style={{ color: tokens["text.muted"] }} />
+          <Text
+            content={channel.lastError.slice(0, 50)}
+            style={{ color: tokens["status.error"] }}
+          />
+        </Box>
+      ) : null}
+    </Box>
+  );
+}
+
+export function ChannelSection({
+  channels,
+  loading,
+  error,
+  tokens,
+}: {
+  channels: ChannelHealthStatus[] | null;
+  loading: boolean;
+  error: string | null;
+  tokens: Record<string, string>;
+}) {
+  if (loading) {
+    return (
+      <Box style={{ flexDirection: "row", marginBottom: 1 }}>
+        <Text content="Channels  " style={{ color: tokens["accent.primary"] }} />
+        <Text content="loading..." style={{ color: tokens["text.muted"] }} />
+      </Box>
+    );
+  }
+
+  if (error) {
+    return (
+      <Box style={{ flexDirection: "row", marginBottom: 1 }}>
+        <Text content="Channels  " style={{ color: tokens["accent.primary"] }} />
+        <Text content={error} style={{ color: tokens["status.error"] }} />
+      </Box>
+    );
+  }
+
+  if (!channels || channels.length === 0) {
+    return (
+      <Box style={{ flexDirection: "row", marginBottom: 1 }}>
+        <Text content="Channels  " style={{ color: tokens["accent.primary"] }} />
+        <Text content="no channels configured" style={{ color: tokens["text.muted"] }} />
+      </Box>
+    );
+  }
+
+  return (
+    <Box style={{ flexDirection: "column", marginBottom: 1 }}>
+      <Box style={{ flexDirection: "row", marginBottom: 0 }}>
+        <Text content="Channels" style={{ color: tokens["accent.primary"] }} />
+      </Box>
+      {channels.map((ch) => (
+        <ChannelRow key={ch.channelId} channel={ch} tokens={tokens} />
+      ))}
+    </Box>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
 
@@ -746,6 +894,48 @@ export function DaemonPanel({ visible, onClose }: DaemonPanelProps) {
   const { connectionStatus } = useDaemon();
   const [state, dispatch] = useReducer(panelReducer, INITIAL_STATE);
   const profileStore = useMemo(() => new DaemonProfileStore(), []);
+
+  // --- Channel status (component-local) ---
+  const [channels, setChannels] = useState<ChannelHealthStatus[] | null>(null);
+  const [channelError, setChannelError] = useState<string | null>(null);
+  const [channelsLoading, setChannelsLoading] = useState(false);
+
+  useEffect(() => {
+    if (!visible || connectionStatus !== "connected") {
+      setChannels(null);
+      setChannelError(null);
+      setChannelsLoading(false);
+      return;
+    }
+
+    setChannelsLoading(true);
+    let cancelled = false;
+
+    void (async () => {
+      const baseUrl = await getActiveDaemonUrl();
+      const result = await callDaemonChannelGet<ChannelStatusSnapshot>(
+        "/channels/status",
+        10_000,
+        fetch,
+        baseUrl,
+      );
+
+      if (cancelled) return;
+      setChannelsLoading(false);
+
+      if (result.ok) {
+        setChannels(result.data.channels);
+        setChannelError(null);
+      } else {
+        setChannels(null);
+        setChannelError(result.error);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [visible, connectionStatus]);
 
   // Track a refresh counter so we can re-load profiles after mutations
   const refreshCounterRef = useRef(0);
@@ -1018,6 +1208,16 @@ export function DaemonPanel({ visible, onClose }: DaemonPanelProps) {
           <ProfileList
             profiles={state.profiles}
             selectedIndex={state.selectedIndex}
+            tokens={tokens}
+          />
+        ) : null}
+
+        {/* Channel status — only in ready/action-prompt steps */}
+        {state.step === "ready" || state.step === "action-prompt" ? (
+          <ChannelSection
+            channels={channels}
+            loading={channelsLoading}
+            error={channelError}
             tokens={tokens}
           />
         ) : null}
