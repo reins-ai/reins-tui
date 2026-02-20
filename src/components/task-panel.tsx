@@ -1,3 +1,6 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+
+import { DEFAULT_DAEMON_HTTP_BASE_URL } from "../daemon/client";
 import { useThemeTokens } from "../theme";
 import type { ThemeTokens } from "../theme/theme-schema";
 import { Box, Text } from "../ui";
@@ -29,6 +32,22 @@ export interface TaskPanelProps {
   tasks: readonly TaskItem[];
   selectedIndex: number | null;
   onSelect?: (index: number) => void;
+  daemonBaseUrl?: string;
+}
+
+// --- Sub-agent types ---
+
+export type SubAgentStatus = "queued" | "running" | "done" | "failed";
+
+export interface SubAgentInfo {
+  id: string;
+  status: SubAgentStatus;
+  stepsUsed: number;
+  prompt: string;
+}
+
+export interface SubAgentStatusResponse {
+  agents: SubAgentInfo[];
 }
 
 // --- Pure utility functions (exported for testability) ---
@@ -299,6 +318,140 @@ export function resolveTaskLineColor(
   }
 }
 
+// --- Sub-agent utility functions (exported for testability) ---
+
+const AGENT_PROMPT_PREVIEW_LENGTH = 50;
+const AGENT_POLL_INTERVAL_MS = 1000;
+
+/**
+ * Returns the status glyph for a sub-agent status.
+ */
+export function getAgentStatusGlyph(status: SubAgentStatus): string {
+  switch (status) {
+    case "queued":
+      return "\u23F3"; // ⏳
+    case "running":
+      return "\u25B6"; // ▶
+    case "done":
+      return "\u2713"; // ✓
+    case "failed":
+      return "\u2717"; // ✗
+  }
+}
+
+/**
+ * Returns the theme token value for a sub-agent status color.
+ */
+export function getAgentStatusColorToken(
+  status: SubAgentStatus,
+  tokens: Readonly<ThemeTokens>,
+): string {
+  switch (status) {
+    case "queued":
+      return tokens["text.muted"];
+    case "running":
+      return tokens["status.warning"];
+    case "done":
+      return tokens["status.success"];
+    case "failed":
+      return tokens["status.error"];
+  }
+}
+
+/**
+ * Builds a compact summary line for a single sub-agent card.
+ * Format: "▶ agent-1  running  3 steps  Summarize the quarterly…"
+ */
+export function buildAgentCardLine(
+  agent: SubAgentInfo,
+  maxWidth: number,
+): string {
+  const glyph = getAgentStatusGlyph(agent.status);
+  const stepsText = `${agent.stepsUsed} step${agent.stepsUsed === 1 ? "" : "s"}`;
+
+  // Fixed-width columns: glyph(1) + space(1) + id(variable) + space(2) + status(7) + space(2) + steps(variable) + space(2)
+  const fixedPrefix = `${glyph} ${agent.id}  ${agent.status.padEnd(7)}  ${stepsText}  `;
+  const previewWidth = maxWidth - fixedPrefix.length;
+
+  if (previewWidth <= 0) return fixedPrefix.trimEnd();
+
+  const previewText = truncatePreview(
+    agent.prompt,
+    Math.min(previewWidth, AGENT_PROMPT_PREVIEW_LENGTH),
+  );
+  return `${fixedPrefix}${previewText}`;
+}
+
+/**
+ * Returns true when any sub-agent is still active (queued or running).
+ */
+export function hasActiveAgents(agents: readonly SubAgentInfo[]): boolean {
+  return agents.some((a) => a.status === "queued" || a.status === "running");
+}
+
+/**
+ * Fetches sub-agent status from the daemon.
+ */
+async function fetchAgentStatus(baseUrl: string): Promise<SubAgentInfo[]> {
+  const response = await fetch(`${baseUrl}/api/agents/status`);
+  if (!response.ok) {
+    return [];
+  }
+  const data = (await response.json()) as SubAgentStatusResponse;
+  return data.agents;
+}
+
+/**
+ * Hook that polls /api/agents/status at ~1s intervals while agents are active.
+ * Stops polling when all agents are done/failed or the array is empty.
+ */
+export function useSubAgentPolling(
+  daemonBaseUrl: string,
+): readonly SubAgentInfo[] {
+  const [agents, setAgents] = useState<SubAgentInfo[]>([]);
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const agentsRef = useRef<SubAgentInfo[]>([]);
+
+  const doFetch = useCallback(async () => {
+    try {
+      const result = await fetchAgentStatus(daemonBaseUrl);
+      agentsRef.current = result;
+      setAgents(result);
+    } catch {
+      // Silently ignore fetch errors — daemon may be unreachable
+    }
+  }, [daemonBaseUrl]);
+
+  useEffect(() => {
+    // Initial fetch
+    void doFetch();
+
+    // Start polling
+    intervalRef.current = setInterval(() => {
+      // Check if we should continue polling based on latest state
+      const current = agentsRef.current;
+      if (current.length === 0 || !hasActiveAgents(current)) {
+        // Stop polling when no active agents
+        if (intervalRef.current !== null) {
+          clearInterval(intervalRef.current);
+          intervalRef.current = null;
+        }
+        return;
+      }
+      void doFetch();
+    }, AGENT_POLL_INTERVAL_MS);
+
+    return () => {
+      if (intervalRef.current !== null) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [doFetch]);
+
+  return agents;
+}
+
 // --- Component ---
 
 /**
@@ -312,10 +465,13 @@ export function resolveTaskLineColor(
  * Today panel area alongside briefing and calendar cards.
  */
 export function TaskPanel(props: TaskPanelProps) {
-  const { tasks, selectedIndex } = props;
+  const { tasks, selectedIndex, daemonBaseUrl } = props;
   const { tokens } = useThemeTokens();
 
-  if (tasks.length === 0) {
+  const resolvedBaseUrl = daemonBaseUrl ?? DEFAULT_DAEMON_HTTP_BASE_URL;
+  const agents = useSubAgentPolling(resolvedBaseUrl);
+
+  if (tasks.length === 0 && agents.length === 0) {
     return null;
   }
 
@@ -325,6 +481,11 @@ export function TaskPanel(props: TaskPanelProps) {
   const headerFill = "\u2500".repeat(Math.max(0, CARD_WIDTH - headerText.length - 2));
   const topBorder = `\u256D${headerText}${headerFill}\u256E`;
   const bottomBorder = `\u2570${"\u2500".repeat(CARD_WIDTH - 2)}\u256F`;
+
+  // Sub-agent section header and border
+  const agentHeaderText = `\u2500 Sub-Agents `;
+  const agentHeaderFill = "\u2500".repeat(Math.max(0, LINE_WIDTH - agentHeaderText.length));
+  const agentSectionSeparator = `\u2502 ${agentHeaderText}${agentHeaderFill} \u2502`;
 
   return (
     <Box style={{ flexDirection: "column", marginTop: 1, marginBottom: 1 }}>
@@ -363,6 +524,25 @@ export function TaskPanel(props: TaskPanelProps) {
           </Box>
         );
       })}
+      {agents.length > 0 ? (
+        <>
+          <Text style={{ color: tokens["text.muted"] }}>{agentSectionSeparator}</Text>
+          {agents.map((agent) => {
+            const agentColor = getAgentStatusColorToken(agent.status, tokens);
+            const cardContent = buildAgentCardLine(agent, LINE_WIDTH);
+            const cardLine = padTaskLine(cardContent, CARD_WIDTH);
+
+            return (
+              <Text
+                key={agent.id}
+                style={{ color: agentColor }}
+              >
+                {cardLine}
+              </Text>
+            );
+          })}
+        </>
+      ) : null}
       <Text style={{ color: tokens["accent.primary"] }}>{bottomBorder}</Text>
     </Box>
   );
