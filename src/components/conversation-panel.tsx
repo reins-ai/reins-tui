@@ -1,3 +1,5 @@
+import { useMemo, useRef } from "react";
+
 import type { DisplayMessage, DisplayToolCall } from "../store";
 import { useApp } from "../store";
 import { useConversation } from "../hooks";
@@ -51,10 +53,91 @@ function adjustedBlockGap(gap: number): number {
 /** Scrollbar hidden temporarily; no gutter needed. */
 const SCROLLBAR_GUTTER = 0;
 
+// ---------------------------------------------------------------------------
+// Memory notification types and helpers
+// ---------------------------------------------------------------------------
+
+export interface MemoryNotification {
+  callId: string;
+  contentPreview: string;
+  memoryId: string;
+  dismissed: boolean;
+}
+
+/**
+ * Extract a "remember" result from a tool message content string.
+ * Returns the memory id and content if the tool result represents
+ * a successful remember action, or null otherwise.
+ */
+export function extractRememberResult(content: string): { id: string; content: string } | null {
+  try {
+    const parsed = JSON.parse(content) as unknown;
+    if (
+      typeof parsed === "object" &&
+      parsed !== null &&
+      "action" in parsed &&
+      (parsed as { action: unknown }).action === "remember" &&
+      "memory" in parsed
+    ) {
+      const memory = (parsed as { memory: unknown }).memory;
+      if (
+        typeof memory === "object" &&
+        memory !== null &&
+        "id" in memory &&
+        "content" in memory &&
+        typeof (memory as { id: unknown }).id === "string" &&
+        typeof (memory as { content: unknown }).content === "string"
+      ) {
+        return {
+          id: (memory as { id: string }).id,
+          content: (memory as { content: string }).content,
+        };
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+function MemoryNotificationBar({
+  notification,
+  tokens,
+  onView,
+  onUndo,
+}: {
+  notification: MemoryNotification;
+  tokens: Readonly<ThemeTokens>;
+  onView?: (memoryId: string) => void;
+  onUndo?: (memoryId: string) => void;
+}) {
+  if (notification.dismissed) return null;
+
+  const preview = notification.contentPreview.length > 40
+    ? notification.contentPreview.slice(0, 40) + "..."
+    : notification.contentPreview;
+
+  return (
+    <Box style={{ flexDirection: "row", marginTop: 0 }}>
+      <Text content="💾 " style={{ color: tokens["status.info"] }} />
+      <Text content="Remembered: " style={{ color: tokens["status.info"] }} />
+      <Text content={`"${preview}"`} style={{ color: tokens["text.secondary"] }} />
+      {onView ? (
+        <Text content="  [view]" style={{ color: tokens["accent.secondary"] }} />
+      ) : null}
+      {onUndo ? (
+        <Text content="  [undo]" style={{ color: tokens["text.muted"] }} />
+      ) : null}
+    </Box>
+  );
+}
+
 export interface ConversationPanelProps {
   isFocused: boolean;
   borderColor: string;
   version: string;
+  onViewMemory?: (memoryId: string) => void;
+  onUndoMemory?: (memoryId: string) => void;
 }
 
 const DISPLAY_TO_LIFECYCLE_STATUS: Record<DisplayToolCall["status"], ToolCallStatus> = {
@@ -192,7 +275,13 @@ function hasOrderedToolBlocks(message: DisplayMessage): boolean {
   return message.contentBlocks.some((block) => block.type === "tool-call" && block.toolCallId !== undefined && toolIds.has(block.toolCallId));
 }
 
-export function ConversationPanel({ isFocused, borderColor: _borderColor, version }: ConversationPanelProps) {
+export function ConversationPanel({
+  isFocused,
+  borderColor: _borderColor,
+  version,
+  onViewMemory,
+  onUndoMemory,
+}: ConversationPanelProps) {
   const { messages, isStreaming, lifecycleStatus } = useConversation();
   const { state } = useApp();
   const { tokens, getRoleBorder } = useThemeTokens();
@@ -202,6 +291,67 @@ export function ConversationPanel({ isFocused, borderColor: _borderColor, versio
   const hasContent = messages.some(
     (message) => message.content.trim().length > 0 || (message.toolCalls && message.toolCalls.length > 0),
   );
+
+  // Track dismissed memory notifications across renders
+  const dismissedNotificationsRef = useRef<Set<string>>(new Set());
+
+  // Detect memory "remember" tool results from messages
+  const memoryNotifications = useMemo(() => {
+    const notifications: MemoryNotification[] = [];
+    for (const message of messages) {
+      if (message.role !== "tool" as string) continue;
+      if (!message.toolCalls || message.toolCalls.length === 0) {
+        // Tool result messages may not have toolCalls — check content directly
+        const result = extractRememberResult(message.content);
+        if (result) {
+          notifications.push({
+            callId: message.id,
+            contentPreview: result.content,
+            memoryId: result.id,
+            dismissed: dismissedNotificationsRef.current.has(message.id),
+          });
+        }
+        continue;
+      }
+      for (const tc of message.toolCalls) {
+        if (tc.name === "memory" && tc.status === "complete" && tc.result) {
+          const result = extractRememberResult(tc.result);
+          if (result) {
+            notifications.push({
+              callId: tc.id,
+              contentPreview: result.content,
+              memoryId: result.id,
+              dismissed: dismissedNotificationsRef.current.has(tc.id),
+            });
+          }
+        }
+      }
+    }
+    return notifications;
+  }, [messages]);
+
+  // Build a map of message id → notifications for inline rendering
+  const notificationsByMessageId = useMemo(() => {
+    const map = new Map<string, MemoryNotification[]>();
+    for (const notification of memoryNotifications) {
+      // Associate notification with the message that contains it
+      for (const message of messages) {
+        if (message.id === notification.callId) {
+          const existing = map.get(message.id) ?? [];
+          existing.push(notification);
+          map.set(message.id, existing);
+          break;
+        }
+        if (message.toolCalls?.some((tc) => tc.id === notification.callId)) {
+          const existing = map.get(message.id) ?? [];
+          existing.push(notification);
+          map.set(message.id, existing);
+          break;
+        }
+      }
+    }
+    return map;
+  }, [memoryNotifications, messages]);
 
   return (
     <Box style={{ flexGrow: 1, minHeight: 0, flexDirection: "column", paddingLeft: 1, paddingRight: 1, paddingTop: 1 }}>
@@ -360,6 +510,17 @@ export function ConversationPanel({ isFocused, borderColor: _borderColor, versio
                     />
                   </Box>
                 ) : null}
+                {/* Memory "Remembered" notifications */}
+                {(notificationsByMessageId.get(message.id) ?? []).map((notification) => (
+                  <Box key={`mem-notif-${notification.callId}`} style={{ marginTop: adjustedBlockGap(MESSAGE_GAP) }}>
+                    <MemoryNotificationBar
+                      notification={notification}
+                      tokens={tokens}
+                      onView={onViewMemory}
+                      onUndo={onUndoMemory}
+                    />
+                  </Box>
+                ))}
               </Box>
             );
           })}

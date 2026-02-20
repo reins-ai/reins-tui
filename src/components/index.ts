@@ -11,6 +11,7 @@ export * from "./input-area";
 export * from "./layout";
 export * from "./logo-ascii";
 export * from "./markdown-text";
+export * from "./memory-panel";
 export * from "./message";
 export * from "./modal-panel";
 export * from "./model-selector";
