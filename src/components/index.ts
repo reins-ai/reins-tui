@@ -3,6 +3,7 @@ export * from "./channel-token-prompt";
 export * from "./command-palette";
 export * from "./connect-flow";
 export * from "./conversation-list";
+export * from "./documents-panel";
 export * from "./conversation-panel";
 export * from "./drawer-panel";
 export * from "./error-boundary";
