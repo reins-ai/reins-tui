@@ -32,6 +32,7 @@ describe("slash command registry", () => {
       "skills",
       "briefing",
       "nudges",
+      "tasks",
     ]);
   });
 
@@ -62,6 +63,7 @@ describe("slash command registry", () => {
       skills: "system",
       briefing: "system",
       nudges: "system",
+      tasks: "system",
     });
   });
 
@@ -216,6 +218,7 @@ describe("getCommandAutocomplete", () => {
       "setup",
       "skills",
       "status",
+      "tasks",
       "theme",
       "thinking",
     ]);

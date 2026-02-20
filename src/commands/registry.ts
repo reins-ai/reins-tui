@@ -24,7 +24,8 @@ export type SlashCommandHandlerKey =
   | "INTEGRATIONS"
   | "SKILLS"
   | "BRIEFING"
-  | "NUDGES";
+  | "NUDGES"
+  | "TASKS";
 
 export interface SlashCommandDefinition {
   readonly name: string;
@@ -232,6 +233,14 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     category: "system",
     handlerKey: "NUDGES",
   }),
+  Object.freeze({
+    name: "tasks",
+    aliases: Object.freeze(["bg"]),
+    description: "Manage background tasks: list, cancel, or retry.",
+    usage: "/tasks [list|cancel|retry] [id]",
+    category: "system",
+    handlerKey: "TASKS",
+  }),
 ]);
 
 const COMMAND_LOOKUP = new Map<string, SlashCommandDefinition>();
@@ -407,6 +416,31 @@ const PALETTE_ACTION_DEFINITIONS: readonly PaletteActionDefinition[] = Object.fr
     category: "settings",
     keywords: Object.freeze(["nudges", "nudge", "disable", "off", "proactive", "suggestions"]),
     actionKey: "nudges-off",
+  }),
+  // Background Tasks
+  Object.freeze({
+    id: "action:tasks-list",
+    label: "List Background Tasks",
+    description: "Show all background tasks with their status.",
+    category: "actions",
+    keywords: Object.freeze(["tasks", "background", "list", "queue", "jobs", "status"]),
+    actionKey: "tasks-list",
+  }),
+  Object.freeze({
+    id: "action:tasks-cancel",
+    label: "Cancel Background Task",
+    description: "Cancel a running background task.",
+    category: "actions",
+    keywords: Object.freeze(["tasks", "background", "cancel", "stop", "abort", "kill"]),
+    actionKey: "tasks-cancel",
+  }),
+  Object.freeze({
+    id: "action:tasks-retry",
+    label: "Retry Failed Task",
+    description: "Re-enqueue a failed background task.",
+    category: "actions",
+    keywords: Object.freeze(["tasks", "background", "retry", "rerun", "failed", "redo"]),
+    actionKey: "tasks-retry",
   }),
 ]);
 
