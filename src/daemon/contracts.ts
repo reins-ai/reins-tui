@@ -284,6 +284,8 @@ export type DaemonStreamEvent =
       messageId: string;
       content: string;
       timestamp: string;
+      finishReason?: string;
+      usage?: TokenUsage;
     }
   | {
       type: "error";
@@ -292,6 +294,12 @@ export type DaemonStreamEvent =
       error: DaemonClientError;
       timestamp: string;
     };
+
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+}
 
 export const DAEMON_CONTRACT_COMPATIBILITY_NOTES = [
   "sendMessage response keeps userMessageId for existing clients and may also include canonical messageId",

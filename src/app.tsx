@@ -25,7 +25,7 @@ import { SkillPanel } from "./components/skills/SkillPanel";
 import type { SkillListItem } from "./components/skills/SkillListPanel";
 import type { SkillDetailData } from "./components/skills/SkillDetailView";
 import { DaemonMemoryClient } from "./daemon/memory-client";
-import { HelpScreen } from "./screens";
+import { AuthGate, HelpScreen } from "./screens";
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "./daemon/client";
 import { getActiveDaemonUrl } from "./daemon/actions";
 import { DaemonProvider, useDaemon } from "./daemon/daemon-context";
@@ -323,6 +323,7 @@ function AppView({ version, dimensions }: AppViewProps) {
   const firstRunState = useFirstRun();
   const [showHelp, setShowHelp] = useState(false);
   const [resolvedDaemonUrl, setResolvedDaemonUrl] = useState(DEFAULT_DAEMON_HTTP_BASE_URL);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
   // Resolve active daemon URL from profile store on mount and after onboarding
   useEffect(() => {
@@ -351,6 +352,15 @@ function AppView({ version, dimensions }: AppViewProps) {
       payload: result.skipped ? "Skipped to chat" : "Setup complete",
     });
   }, [dispatch]);
+
+  const handleAuthComplete = useCallback((_sessionToken: string) => {
+    setIsAuthenticated(true);
+    dispatch({ type: "SET_STATUS", payload: "Signed in" });
+  }, [dispatch]);
+
+  const handleAuthSkip = useCallback(() => {
+    setIsAuthenticated(true);
+  }, []);
 
   const closeDaemonPanel = useCallback(() => {
     dispatch({ type: "SET_DAEMON_PANEL_OPEN", payload: false });
@@ -1447,7 +1457,17 @@ function AppView({ version, dimensions }: AppViewProps) {
     );
   }
 
-  // Normal app render (onboardingStatus === "complete")
+  // Auth gate: check for session token after onboarding completes
+  if (isAuthenticated === null || isAuthenticated === false) {
+    return (
+      <AuthGate
+        onAuthComplete={handleAuthComplete}
+        onSkipAuth={handleAuthSkip}
+      />
+    );
+  }
+
+  // Normal app render (onboardingStatus === "complete", authenticated)
   const suppressMainInput = showHelp
     || state.isCommandPaletteOpen
     || state.isConnectFlowOpen
