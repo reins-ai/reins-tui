@@ -4,6 +4,7 @@ import type { SlashCommandHandlerKey } from "../registry";
 import { handleBrowserCommand } from "./browser";
 import { handleExportPersonaCommand } from "./export-persona";
 import { handleImportMemoriesCommand } from "./import-memories";
+import { handleImportPersonaCommand } from "./import-persona";
 import { handleScheduleCommand } from "./schedule";
 import { handleChannelsCommand } from "./channels";
 import { handleConnectCommand } from "./connect";
@@ -58,6 +59,7 @@ const HANDLER_MAP: Record<SlashCommandHandlerKey, CommandHandler> = {
   SCHEDULE: handleScheduleCommand,
   IMPORT_MEMORIES: handleImportMemoriesCommand,
   EXPORT_PERSONA: handleExportPersonaCommand,
+  IMPORT_PERSONA: handleImportPersonaCommand,
 };
 
 export async function dispatchCommand(

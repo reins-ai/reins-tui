@@ -29,7 +29,8 @@ export type SlashCommandHandlerKey =
   | "BROWSER"
   | "SCHEDULE"
   | "IMPORT_MEMORIES"
-  | "EXPORT_PERSONA";
+  | "EXPORT_PERSONA"
+  | "IMPORT_PERSONA";
 
 export interface SlashCommandDefinition {
   readonly name: string;
@@ -276,6 +277,14 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     usage: "/export-persona [output-path]",
     category: "environment",
     handlerKey: "EXPORT_PERSONA",
+  }),
+  Object.freeze({
+    name: "import-persona",
+    aliases: Object.freeze([]),
+    description: "Import a persona pack (zip) into the active environment.",
+    usage: "/import-persona <path-to-zip>",
+    category: "environment",
+    handlerKey: "IMPORT_PERSONA",
   }),
 ]);
 
