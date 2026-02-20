@@ -18,6 +18,7 @@ import { SearchSettingsModal } from "./components/search-settings-modal";
 import { OnboardingWizard, type OnboardingWizardResult } from "./components/onboarding";
 import { ChannelTokenPrompt } from "./components/channel-token-prompt";
 import { callDaemonChannelApi, maskBotToken } from "./commands/handlers/channels";
+import { resetOnboarding } from "./commands/handlers/setup";
 import { DaemonPanel } from "./components/daemon-panel";
 import { IntegrationPanel } from "./components/integration-panel";
 import { SkillPanel } from "./components/skills/SkillPanel";
@@ -1248,6 +1249,16 @@ function AppView({ version, dimensions }: AppViewProps) {
       case "open-skills":
         dispatch({ type: "SET_SKILL_PANEL_OPEN", payload: true });
         dispatch({ type: "SET_STATUS", payload: "Skills" });
+        break;
+      case "rerun-setup":
+        void resetOnboarding().then((result) => {
+          if (result.ok) {
+            dispatch({ type: "SET_ONBOARDING_RERUN" });
+            dispatch({ type: "SET_STATUS", payload: result.value.statusMessage });
+          } else {
+            dispatch({ type: "SET_STATUS", payload: result.error.message });
+          }
+        });
         break;
       default:
         dispatch({ type: "SET_STATUS", payload: `Action: ${actionKey}` });

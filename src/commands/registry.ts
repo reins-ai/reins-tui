@@ -186,7 +186,7 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     name: "setup",
     aliases: Object.freeze(["onboarding", "personality"]),
     description: "Re-run the onboarding setup wizard.",
-    usage: "/setup",
+    usage: "/setup [reset-onboarding]",
     category: "system",
     handlerKey: "SETUP",
   }),
@@ -355,6 +355,15 @@ const PALETTE_ACTION_DEFINITIONS: readonly PaletteActionDefinition[] = Object.fr
     category: "actions",
     keywords: Object.freeze(["copy", "response", "clipboard", "last"]),
     actionKey: "copy-last-response",
+  }),
+  // Setup
+  Object.freeze({
+    id: "action:rerun-setup",
+    label: "Re-run setup",
+    description: "Reset onboarding and re-run the setup wizard.",
+    category: "settings",
+    keywords: Object.freeze(["setup", "onboarding", "reset", "rerun", "re-run", "wizard", "reconfigure"]),
+    actionKey: "rerun-setup",
   }),
 ]);
 
