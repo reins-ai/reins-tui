@@ -2,6 +2,7 @@ import { err, type Result } from "../../daemon/contracts";
 import type { ParsedCommand } from "../parser";
 import type { SlashCommandHandlerKey } from "../registry";
 import { handleBrowserCommand } from "./browser";
+import { handleScheduleCommand } from "./schedule";
 import { handleChannelsCommand } from "./channels";
 import { handleConnectCommand } from "./connect";
 import { handleDaemonCommand } from "./daemon";
@@ -52,6 +53,7 @@ const HANDLER_MAP: Record<SlashCommandHandlerKey, CommandHandler> = {
   NUDGES: handleNudgesCommand,
   TASKS: handleTasksCommand,
   BROWSER: handleBrowserCommand,
+  SCHEDULE: handleScheduleCommand,
 };
 
 export async function dispatchCommand(

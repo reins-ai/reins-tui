@@ -12,8 +12,14 @@ import {
   buildExpandedLines,
   wrapText,
   resolveTaskLineColor,
+  getAgentStatusGlyph,
+  getAgentStatusColorToken,
+  buildAgentCardLine,
+  hasActiveAgents,
   type TaskItem,
   type TaskItemStatus,
+  type SubAgentInfo,
+  type SubAgentStatus,
 } from "../../src/components/task-panel";
 import type { ThemeTokens } from "../../src/theme/theme-schema";
 
@@ -604,5 +610,183 @@ describe("TaskPanel data flow", () => {
       const line = padTaskLine("test content", width);
       expect(line).toHaveLength(width);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Sub-agent status card utilities
+// ---------------------------------------------------------------------------
+
+function createAgent(overrides?: Partial<SubAgentInfo>): SubAgentInfo {
+  return {
+    id: "agent-1",
+    status: "running",
+    stepsUsed: 3,
+    prompt: "Summarize the quarterly report for the board meeting",
+    ...overrides,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// getAgentStatusGlyph
+// ---------------------------------------------------------------------------
+
+describe("getAgentStatusGlyph", () => {
+  test("returns hourglass for queued", () => {
+    expect(getAgentStatusGlyph("queued")).toBe("\u23F3");
+  });
+
+  test("returns play triangle for running", () => {
+    expect(getAgentStatusGlyph("running")).toBe("\u25B6");
+  });
+
+  test("returns check mark for done", () => {
+    expect(getAgentStatusGlyph("done")).toBe("\u2713");
+  });
+
+  test("returns cross for failed", () => {
+    expect(getAgentStatusGlyph("failed")).toBe("\u2717");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getAgentStatusColorToken
+// ---------------------------------------------------------------------------
+
+describe("getAgentStatusColorToken", () => {
+  test("returns muted color for queued", () => {
+    expect(getAgentStatusColorToken("queued", MOCK_TOKENS)).toBe(MOCK_TOKENS["text.muted"]);
+  });
+
+  test("returns warning color for running", () => {
+    expect(getAgentStatusColorToken("running", MOCK_TOKENS)).toBe(MOCK_TOKENS["status.warning"]);
+  });
+
+  test("returns success color for done", () => {
+    expect(getAgentStatusColorToken("done", MOCK_TOKENS)).toBe(MOCK_TOKENS["status.success"]);
+  });
+
+  test("returns error color for failed", () => {
+    expect(getAgentStatusColorToken("failed", MOCK_TOKENS)).toBe(MOCK_TOKENS["status.error"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildAgentCardLine
+// ---------------------------------------------------------------------------
+
+describe("buildAgentCardLine", () => {
+  test("includes status glyph for running agent", () => {
+    const agent = createAgent({ status: "running" });
+    const line = buildAgentCardLine(agent, 38);
+    expect(line.includes(getAgentStatusGlyph("running"))).toBe(true);
+  });
+
+  test("includes agent id", () => {
+    const agent = createAgent({ id: "sub-42" });
+    const line = buildAgentCardLine(agent, 38);
+    expect(line.includes("sub-42")).toBe(true);
+  });
+
+  test("includes status text", () => {
+    const agent = createAgent({ status: "done" });
+    const line = buildAgentCardLine(agent, 38);
+    expect(line.includes("done")).toBe(true);
+  });
+
+  test("includes steps used with singular form", () => {
+    const agent = createAgent({ stepsUsed: 1 });
+    const line = buildAgentCardLine(agent, 60);
+    expect(line.includes("1 step")).toBe(true);
+    expect(line.includes("1 steps")).toBe(false);
+  });
+
+  test("includes steps used with plural form", () => {
+    const agent = createAgent({ stepsUsed: 5 });
+    const line = buildAgentCardLine(agent, 60);
+    expect(line.includes("5 steps")).toBe(true);
+  });
+
+  test("includes truncated prompt preview", () => {
+    const agent = createAgent({
+      prompt: "Summarize the quarterly report for the board meeting presentation",
+    });
+    const line = buildAgentCardLine(agent, 80);
+    expect(line.includes("Summarize")).toBe(true);
+  });
+
+  test("truncates long prompts to 50 chars max", () => {
+    const longPrompt = "a".repeat(200);
+    const agent = createAgent({ prompt: longPrompt });
+    const line = buildAgentCardLine(agent, 120);
+    // The prompt portion should be at most 50 chars (including ellipsis)
+    const promptPart = line.slice(line.lastIndexOf("  ") + 2);
+    expect(promptPart.length).toBeLessThanOrEqual(50);
+  });
+
+  test("handles all four statuses", () => {
+    const statuses: SubAgentStatus[] = ["queued", "running", "done", "failed"];
+    for (const status of statuses) {
+      const agent = createAgent({ status });
+      const line = buildAgentCardLine(agent, 60);
+      expect(line.includes(getAgentStatusGlyph(status))).toBe(true);
+      expect(line.includes(status)).toBe(true);
+    }
+  });
+
+  test("handles zero steps", () => {
+    const agent = createAgent({ stepsUsed: 0 });
+    const line = buildAgentCardLine(agent, 60);
+    expect(line.includes("0 steps")).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// hasActiveAgents
+// ---------------------------------------------------------------------------
+
+describe("hasActiveAgents", () => {
+  test("returns true when any agent is queued", () => {
+    const agents = [
+      createAgent({ status: "queued" }),
+      createAgent({ id: "agent-2", status: "done" }),
+    ];
+    expect(hasActiveAgents(agents)).toBe(true);
+  });
+
+  test("returns true when any agent is running", () => {
+    const agents = [
+      createAgent({ status: "running" }),
+      createAgent({ id: "agent-2", status: "done" }),
+    ];
+    expect(hasActiveAgents(agents)).toBe(true);
+  });
+
+  test("returns false when all agents are done", () => {
+    const agents = [
+      createAgent({ status: "done" }),
+      createAgent({ id: "agent-2", status: "done" }),
+    ];
+    expect(hasActiveAgents(agents)).toBe(false);
+  });
+
+  test("returns false when all agents are failed", () => {
+    const agents = [
+      createAgent({ status: "failed" }),
+      createAgent({ id: "agent-2", status: "failed" }),
+    ];
+    expect(hasActiveAgents(agents)).toBe(false);
+  });
+
+  test("returns false when agents array is empty", () => {
+    expect(hasActiveAgents([])).toBe(false);
+  });
+
+  test("returns false when mix of done and failed only", () => {
+    const agents = [
+      createAgent({ status: "done" }),
+      createAgent({ id: "agent-2", status: "failed" }),
+    ];
+    expect(hasActiveAgents(agents)).toBe(false);
   });
 });

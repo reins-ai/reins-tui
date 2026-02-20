@@ -145,6 +145,7 @@ export interface AppState {
   isIntegrationPanelOpen: boolean;
   isSkillPanelOpen: boolean;
   isBrowserPanelOpen: boolean;
+  isSchedulePanelOpen: boolean;
   isChannelTokenPromptOpen: boolean;
   channelTokenPromptPlatform: string | null;
   onboardingStatus: OnboardingStatus;
@@ -183,6 +184,7 @@ export const DEFAULT_STATE: AppState = {
   isIntegrationPanelOpen: false,
   isSkillPanelOpen: false,
   isBrowserPanelOpen: false,
+  isSchedulePanelOpen: false,
   isChannelTokenPromptOpen: false,
   channelTokenPromptPlatform: null,
   onboardingStatus: "checking",

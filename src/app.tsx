@@ -22,6 +22,7 @@ import { resetOnboarding } from "./commands/handlers/setup";
 import { DaemonPanel } from "./components/daemon-panel";
 import { IntegrationPanel } from "./components/integration-panel";
 import { BrowserPanel } from "./components/BrowserPanel";
+import { SchedulePanel } from "./components/SchedulePanel";
 import { SkillPanel } from "./components/skills/SkillPanel";
 import type { SkillListItem } from "./components/skills/SkillListPanel";
 import type { SkillDetailData } from "./components/skills/SkillDetailView";
@@ -380,6 +381,11 @@ function AppView({ version, dimensions }: AppViewProps) {
 
   const closeBrowserPanel = useCallback(() => {
     dispatch({ type: "SET_BROWSER_PANEL_OPEN", payload: false });
+    dispatch({ type: "SET_STATUS", payload: "Ready" });
+  }, [dispatch]);
+
+  const closeSchedulePanel = useCallback(() => {
+    dispatch({ type: "SET_SCHEDULE_PANEL_OPEN", payload: false });
     dispatch({ type: "SET_STATUS", payload: "Ready" });
   }, [dispatch]);
 
@@ -1184,6 +1190,10 @@ function AppView({ version, dimensions }: AppViewProps) {
         dispatch({ type: "SET_BROWSER_PANEL_OPEN", payload: true });
         dispatch({ type: "SET_STATUS", payload: "Browser panel" });
         break;
+      case "schedule":
+        dispatch({ type: "SET_SCHEDULE_PANEL_OPEN", payload: true });
+        dispatch({ type: "SET_STATUS", payload: "Schedule panel" });
+        break;
       case "thinking":
         dispatch({ type: "TOGGLE_THINKING_VISIBILITY" });
         dispatch({
@@ -1342,7 +1352,7 @@ function AppView({ version, dimensions }: AppViewProps) {
       return;
     }
 
-    if (state.isConnectFlowOpen || state.isModelSelectorOpen || state.isSearchSettingsOpen || state.isDaemonPanelOpen || state.isIntegrationPanelOpen || state.isSkillPanelOpen || state.isBrowserPanelOpen || state.isChannelTokenPromptOpen) {
+    if (state.isConnectFlowOpen || state.isModelSelectorOpen || state.isSearchSettingsOpen || state.isDaemonPanelOpen || state.isIntegrationPanelOpen || state.isSkillPanelOpen || state.isBrowserPanelOpen || state.isSchedulePanelOpen || state.isChannelTokenPromptOpen) {
       return;
     }
 
@@ -1489,6 +1499,7 @@ function AppView({ version, dimensions }: AppViewProps) {
     || state.isIntegrationPanelOpen
     || state.isSkillPanelOpen
     || state.isBrowserPanelOpen
+    || state.isSchedulePanelOpen
     || state.isChannelTokenPromptOpen
     || state.panels.modal.visible
     || state.panels.drawer.visible
@@ -1561,6 +1572,11 @@ function AppView({ version, dimensions }: AppViewProps) {
       <BrowserPanel
         visible={state.isBrowserPanelOpen}
         onClose={closeBrowserPanel}
+        daemonBaseUrl={resolvedDaemonUrl}
+      />
+      <SchedulePanel
+        visible={state.isSchedulePanelOpen}
+        onClose={closeSchedulePanel}
         daemonBaseUrl={resolvedDaemonUrl}
       />
       <SkillPanel

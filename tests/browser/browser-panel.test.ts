@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test";
 import {
   formatUptime,
   panelReducer,
+  INITIAL_STATE,
   type BrowserStatusResponse,
 } from "../../src/components/BrowserPanel";
 
@@ -39,12 +40,6 @@ describe("formatUptime", () => {
 // ---------------------------------------------------------------------------
 
 describe("panelReducer", () => {
-  const INITIAL_STATE = {
-    fetchState: "idle" as const,
-    browserStatus: null,
-    errorMessage: null,
-  };
-
   it("transitions to loading on FETCH_START", () => {
     const next = panelReducer(INITIAL_STATE, { type: "FETCH_START" });
     expect(next.fetchState).toBe("loading");
@@ -52,7 +47,7 @@ describe("panelReducer", () => {
   });
 
   it("stores browser status on FETCH_SUCCESS", () => {
-    const data: BrowserStatusResponse = {
+    const status: BrowserStatusResponse = {
       status: "running",
       pid: 12345,
       tabCount: 3,
@@ -61,9 +56,15 @@ describe("panelReducer", () => {
       uptimeMs: 120_000,
       headless: true,
     };
-    const next = panelReducer(INITIAL_STATE, { type: "FETCH_SUCCESS", data });
+    const next = panelReducer(INITIAL_STATE, {
+      type: "FETCH_SUCCESS",
+      status,
+      tabs: [],
+      snapshot: null,
+      watchers: [],
+    });
     expect(next.fetchState).toBe("success");
-    expect(next.browserStatus).toEqual(data);
+    expect(next.browserStatus).toEqual(status);
     expect(next.errorMessage).toBeNull();
   });
 
@@ -78,9 +79,11 @@ describe("panelReducer", () => {
 
   it("resets to initial state on RESET", () => {
     const modified = {
+      ...INITIAL_STATE,
       fetchState: "success" as const,
       browserStatus: { status: "running" as const, pid: 1 },
-      errorMessage: null,
+      snapshotExpanded: true,
+      extractionMode: "lean" as const,
     };
     const next = panelReducer(modified, { type: "RESET" });
     expect(next).toEqual(INITIAL_STATE);
@@ -91,8 +94,13 @@ describe("panelReducer", () => {
       type: "FETCH_ERROR",
       message: "fail",
     });
-    const data: BrowserStatusResponse = { status: "stopped" };
-    const next = panelReducer(errored, { type: "FETCH_SUCCESS", data });
+    const next = panelReducer(errored, {
+      type: "FETCH_SUCCESS",
+      status: { status: "stopped" },
+      tabs: [],
+      snapshot: null,
+      watchers: [],
+    });
     expect(next.fetchState).toBe("success");
     expect(next.errorMessage).toBeNull();
     expect(next.browserStatus?.status).toBe("stopped");

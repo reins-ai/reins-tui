@@ -26,7 +26,8 @@ export type SlashCommandHandlerKey =
   | "BRIEFING"
   | "NUDGES"
   | "TASKS"
-  | "BROWSER";
+  | "BROWSER"
+  | "SCHEDULE";
 
 export interface SlashCommandDefinition {
   readonly name: string;
@@ -249,6 +250,14 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     usage: "/browser [headed | screenshot | close]",
     category: "system",
     handlerKey: "BROWSER",
+  }),
+  Object.freeze({
+    name: "schedule",
+    aliases: Object.freeze(["sched"]),
+    description: "View and manage scheduled tasks and reminders.",
+    usage: "/schedule",
+    category: "system",
+    handlerKey: "SCHEDULE",
   }),
 ]);
 
