@@ -33,6 +33,7 @@ describe("slash command registry", () => {
       "briefing",
       "nudges",
       "tasks",
+      "browser",
     ]);
   });
 
@@ -64,6 +65,7 @@ describe("slash command registry", () => {
       briefing: "system",
       nudges: "system",
       tasks: "system",
+      browser: "system",
     });
   });
 
@@ -198,6 +200,7 @@ describe("getCommandAutocomplete", () => {
     expect(result.length).toBe(SLASH_COMMANDS.length);
     expect(result.map((item) => item.name)).toEqual([
       "briefing",
+      "browser",
       "channels",
       "clear",
       "compact",

@@ -25,7 +25,8 @@ export type SlashCommandHandlerKey =
   | "SKILLS"
   | "BRIEFING"
   | "NUDGES"
-  | "TASKS";
+  | "TASKS"
+  | "BROWSER";
 
 export interface SlashCommandDefinition {
   readonly name: string;
@@ -240,6 +241,14 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     usage: "/tasks [list|cancel|retry] [id]",
     category: "system",
     handlerKey: "TASKS",
+  }),
+  Object.freeze({
+    name: "browser",
+    aliases: Object.freeze(["br"]),
+    description: "Control the browser — navigate, screenshot, and monitor pages.",
+    usage: "/browser [headed | screenshot | close]",
+    category: "system",
+    handlerKey: "BROWSER",
   }),
 ]);
 

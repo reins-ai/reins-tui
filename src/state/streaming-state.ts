@@ -1,4 +1,4 @@
-import type { DaemonClientError, DaemonMessage, DaemonStreamEvent } from "../daemon/contracts";
+import type { DaemonClientError, DaemonMessage, DaemonStreamEvent, TokenUsage } from "../daemon/contracts";
 import { err, ok, type Result } from "../daemon/contracts";
 import {
   createInitialStatusMachineState,
@@ -134,6 +134,8 @@ export type StreamingState =
       toolCalls: StreamToolCall[];
       turnState: MultiToolTurnState;
       completedAt: string;
+      finishReason?: string;
+      usage?: TokenUsage;
     }
   | {
       status: "error";
@@ -648,6 +650,8 @@ export function reduceStreamingState(state: StreamingState, event: StreamingEven
         toolCalls: state.toolCalls,
         turnState: finalTurnState,
         completedAt: event.timestamp,
+        finishReason: event.finishReason,
+        usage: event.usage,
       };
     }
     case "cancelled-complete": {

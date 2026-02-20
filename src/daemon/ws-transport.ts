@@ -9,6 +9,7 @@ import {
   type DaemonStreamEvent,
   type StreamResponseRequest,
   type TaskUpdateEvent,
+  type TokenUsage,
 } from "./contracts";
 
 interface WebSocketMessageLike {
@@ -541,7 +542,9 @@ export class DaemonWsTransport {
 
     if (type === "complete" || type === "message_complete") {
       const content = typeof event.content === "string" ? event.content : "";
-      return { type: "complete", conversationId, messageId, content, timestamp };
+      const finishReason = typeof event.finishReason === "string" ? event.finishReason : undefined;
+      const usage = this.extractTokenUsage(event.usage);
+      return { type: "complete", conversationId, messageId, content, timestamp, finishReason, usage };
     }
 
     if (type === "error") {
@@ -570,6 +573,23 @@ export class DaemonWsTransport {
     }
 
     return null;
+  }
+
+  private extractTokenUsage(value: unknown): TokenUsage | undefined {
+    if (!value || typeof value !== "object") {
+      return undefined;
+    }
+
+    const record = value as Record<string, unknown>;
+    const inputTokens = typeof record.inputTokens === "number" ? record.inputTokens : undefined;
+    const outputTokens = typeof record.outputTokens === "number" ? record.outputTokens : undefined;
+    const totalTokens = typeof record.totalTokens === "number" ? record.totalTokens : undefined;
+
+    if (inputTokens === undefined || outputTokens === undefined || totalTokens === undefined) {
+      return undefined;
+    }
+
+    return { inputTokens, outputTokens, totalTokens };
   }
 
   private isRecord(value: unknown): value is Record<string, unknown> {

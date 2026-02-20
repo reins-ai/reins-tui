@@ -1,4 +1,11 @@
-export type CardType = "calendar-event" | "note" | "reminder" | "plain-text";
+export type CardType =
+  | "calendar-event"
+  | "note"
+  | "reminder"
+  | "plain-text"
+  | "browser-nav"
+  | "browser-snapshot"
+  | "browser-action";
 
 export interface CalendarEventCard {
   type: "calendar-event";
@@ -34,7 +41,41 @@ export interface PlainTextCard {
   content: string;
 }
 
-export type ContentCard = CalendarEventCard | NoteCard | ReminderCard | PlainTextCard;
+export interface BrowserNavCard {
+  type: "browser-nav";
+  action: string;
+  url?: string;
+  title?: string;
+  tabCount?: number;
+  message?: string;
+}
+
+export interface BrowserSnapshotCard {
+  type: "browser-snapshot";
+  url?: string;
+  format: string;
+  content: string;
+  elementCount?: number;
+  truncated: boolean;
+}
+
+export interface BrowserActionCard {
+  type: "browser-action";
+  action: string;
+  ref?: string;
+  message?: string;
+  screenshotPath?: string;
+  hasScreenshotData: boolean;
+}
+
+export type ContentCard =
+  | CalendarEventCard
+  | NoteCard
+  | ReminderCard
+  | PlainTextCard
+  | BrowserNavCard
+  | BrowserSnapshotCard
+  | BrowserActionCard;
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -183,6 +224,111 @@ function validatePlainTextCard(data: Record<string, unknown>): PlainTextCard | n
   };
 }
 
+function validateBrowserNavCard(data: Record<string, unknown>): BrowserNavCard | null {
+  if (data.type !== "browser-nav") {
+    return null;
+  }
+
+  if (!isNonEmptyString(data.action)) {
+    return null;
+  }
+
+  if (!isOptionalString(data.url)) {
+    return null;
+  }
+
+  if (!isOptionalString(data.title)) {
+    return null;
+  }
+
+  if (data.tabCount !== undefined && typeof data.tabCount !== "number") {
+    return null;
+  }
+
+  if (!isOptionalString(data.message)) {
+    return null;
+  }
+
+  return {
+    type: "browser-nav",
+    action: data.action,
+    url: data.url,
+    title: data.title,
+    tabCount: data.tabCount as number | undefined,
+    message: data.message,
+  };
+}
+
+function validateBrowserSnapshotCard(data: Record<string, unknown>): BrowserSnapshotCard | null {
+  if (data.type !== "browser-snapshot") {
+    return null;
+  }
+
+  if (!isNonEmptyString(data.format)) {
+    return null;
+  }
+
+  if (typeof data.content !== "string") {
+    return null;
+  }
+
+  if (!isOptionalString(data.url)) {
+    return null;
+  }
+
+  if (data.elementCount !== undefined && typeof data.elementCount !== "number") {
+    return null;
+  }
+
+  if (typeof data.truncated !== "boolean") {
+    return null;
+  }
+
+  return {
+    type: "browser-snapshot",
+    url: data.url,
+    format: data.format,
+    content: data.content,
+    elementCount: data.elementCount as number | undefined,
+    truncated: data.truncated,
+  };
+}
+
+function validateBrowserActionCard(data: Record<string, unknown>): BrowserActionCard | null {
+  if (data.type !== "browser-action") {
+    return null;
+  }
+
+  if (!isNonEmptyString(data.action)) {
+    return null;
+  }
+
+  if (!isOptionalString(data.ref)) {
+    return null;
+  }
+
+  if (!isOptionalString(data.message)) {
+    return null;
+  }
+
+  if (!isOptionalString(data.screenshotPath)) {
+    return null;
+  }
+
+  if (typeof data.hasScreenshotData !== "boolean") {
+    return null;
+  }
+
+  return {
+    type: "browser-action",
+    action: data.action,
+    ref: data.ref,
+    message: data.message,
+    screenshotPath: data.screenshotPath,
+    hasScreenshotData: data.hasScreenshotData,
+  };
+}
+
 export function validateCard(data: unknown): ContentCard | null {
   if (!isObject(data) || typeof data.type !== "string") {
     return null;
@@ -197,6 +343,12 @@ export function validateCard(data: unknown): ContentCard | null {
       return validateReminderCard(data);
     case "plain-text":
       return validatePlainTextCard(data);
+    case "browser-nav":
+      return validateBrowserNavCard(data);
+    case "browser-snapshot":
+      return validateBrowserSnapshotCard(data);
+    case "browser-action":
+      return validateBrowserActionCard(data);
     default:
       return null;
   }

@@ -21,11 +21,12 @@ import { callDaemonChannelApi, maskBotToken } from "./commands/handlers/channels
 import { resetOnboarding } from "./commands/handlers/setup";
 import { DaemonPanel } from "./components/daemon-panel";
 import { IntegrationPanel } from "./components/integration-panel";
+import { BrowserPanel } from "./components/BrowserPanel";
 import { SkillPanel } from "./components/skills/SkillPanel";
 import type { SkillListItem } from "./components/skills/SkillListPanel";
 import type { SkillDetailData } from "./components/skills/SkillDetailView";
 import { DaemonMemoryClient } from "./daemon/memory-client";
-import { HelpScreen } from "./screens";
+import { AuthGate, HelpScreen } from "./screens";
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "./daemon/client";
 import { getActiveDaemonUrl } from "./daemon/actions";
 import { DaemonProvider, useDaemon } from "./daemon/daemon-context";
@@ -323,6 +324,7 @@ function AppView({ version, dimensions }: AppViewProps) {
   const firstRunState = useFirstRun();
   const [showHelp, setShowHelp] = useState(false);
   const [resolvedDaemonUrl, setResolvedDaemonUrl] = useState(DEFAULT_DAEMON_HTTP_BASE_URL);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
 
   // Resolve active daemon URL from profile store on mount and after onboarding
   useEffect(() => {
@@ -352,6 +354,15 @@ function AppView({ version, dimensions }: AppViewProps) {
     });
   }, [dispatch]);
 
+  const handleAuthComplete = useCallback((_sessionToken: string) => {
+    setIsAuthenticated(true);
+    dispatch({ type: "SET_STATUS", payload: "Signed in" });
+  }, [dispatch]);
+
+  const handleAuthSkip = useCallback(() => {
+    setIsAuthenticated(true);
+  }, []);
+
   const closeDaemonPanel = useCallback(() => {
     dispatch({ type: "SET_DAEMON_PANEL_OPEN", payload: false });
     dispatch({ type: "SET_STATUS", payload: "Ready" });
@@ -364,6 +375,11 @@ function AppView({ version, dimensions }: AppViewProps) {
 
   const closeSkillPanel = useCallback(() => {
     dispatch({ type: "SET_SKILL_PANEL_OPEN", payload: false });
+    dispatch({ type: "SET_STATUS", payload: "Ready" });
+  }, [dispatch]);
+
+  const closeBrowserPanel = useCallback(() => {
+    dispatch({ type: "SET_BROWSER_PANEL_OPEN", payload: false });
     dispatch({ type: "SET_STATUS", payload: "Ready" });
   }, [dispatch]);
 
@@ -1164,6 +1180,10 @@ function AppView({ version, dimensions }: AppViewProps) {
         dispatch({ type: "SET_SKILL_PANEL_OPEN", payload: true });
         dispatch({ type: "SET_STATUS", payload: "Skills" });
         break;
+      case "browser":
+        dispatch({ type: "SET_BROWSER_PANEL_OPEN", payload: true });
+        dispatch({ type: "SET_STATUS", payload: "Browser panel" });
+        break;
       case "thinking":
         dispatch({ type: "TOGGLE_THINKING_VISIBILITY" });
         dispatch({
@@ -1322,7 +1342,7 @@ function AppView({ version, dimensions }: AppViewProps) {
       return;
     }
 
-    if (state.isConnectFlowOpen || state.isModelSelectorOpen || state.isSearchSettingsOpen || state.isDaemonPanelOpen || state.isIntegrationPanelOpen || state.isSkillPanelOpen || state.isChannelTokenPromptOpen) {
+    if (state.isConnectFlowOpen || state.isModelSelectorOpen || state.isSearchSettingsOpen || state.isDaemonPanelOpen || state.isIntegrationPanelOpen || state.isSkillPanelOpen || state.isBrowserPanelOpen || state.isChannelTokenPromptOpen) {
       return;
     }
 
@@ -1448,7 +1468,17 @@ function AppView({ version, dimensions }: AppViewProps) {
     );
   }
 
-  // Normal app render (onboardingStatus === "complete")
+  // Auth gate: check for session token after onboarding completes
+  if (isAuthenticated === null || isAuthenticated === false) {
+    return (
+      <AuthGate
+        onAuthComplete={handleAuthComplete}
+        onSkipAuth={handleAuthSkip}
+      />
+    );
+  }
+
+  // Normal app render (onboardingStatus === "complete", authenticated)
   const suppressMainInput = showHelp
     || state.isCommandPaletteOpen
     || state.isConnectFlowOpen
@@ -1458,6 +1488,7 @@ function AppView({ version, dimensions }: AppViewProps) {
     || state.isDaemonPanelOpen
     || state.isIntegrationPanelOpen
     || state.isSkillPanelOpen
+    || state.isBrowserPanelOpen
     || state.isChannelTokenPromptOpen
     || state.panels.modal.visible
     || state.panels.drawer.visible
@@ -1526,6 +1557,11 @@ function AppView({ version, dimensions }: AppViewProps) {
       <IntegrationPanel
         visible={state.isIntegrationPanelOpen}
         onClose={closeIntegrationPanel}
+      />
+      <BrowserPanel
+        visible={state.isBrowserPanelOpen}
+        onClose={closeBrowserPanel}
+        daemonBaseUrl={resolvedDaemonUrl}
       />
       <SkillPanel
         visible={state.isSkillPanelOpen}

@@ -1,6 +1,7 @@
 import { validateCard, type ContentCard } from "./card-schemas";
 
 const NOTE_PREVIEW_LIMIT = 280;
+const SNAPSHOT_CONTENT_LIMIT = 500;
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -224,6 +225,102 @@ function adaptReminder(output: unknown): ContentCard {
   return validateCard(card) ?? toPlainTextCard(output);
 }
 
+function adaptBrowserNav(output: unknown): ContentCard {
+  const payload = unwrapPayload(output);
+  if (!isObject(payload)) {
+    return toPlainTextCard(output);
+  }
+
+  const action = pickString(payload.action);
+  if (!action) {
+    return toPlainTextCard(output);
+  }
+
+  const tabCount = typeof payload.count === "number"
+    ? payload.count
+    : typeof payload.tabCount === "number"
+      ? payload.tabCount
+      : Array.isArray(payload.tabs)
+        ? payload.tabs.length
+        : undefined;
+
+  const card: ContentCard = {
+    type: "browser-nav",
+    action,
+    url: pickString(payload.url),
+    title: pickString(payload.title) ?? pickString(payload.pageTitle),
+    tabCount: tabCount as number | undefined,
+    message: pickString(payload.message) ?? pickString(payload.status),
+  };
+
+  return validateCard(card) ?? toPlainTextCard(output);
+}
+
+function adaptBrowserSnapshot(output: unknown): ContentCard {
+  const payload = unwrapPayload(output);
+
+  let url: string | undefined;
+  let format = "text";
+  let rawContent = "";
+  let elementCount: number | undefined;
+
+  if (typeof payload === "string") {
+    rawContent = payload;
+  } else if (isObject(payload)) {
+    url = pickString(payload.url);
+    format = pickString(payload.format) ?? "text";
+    rawContent = typeof payload.content === "string" ? payload.content : stringifyForFallback(payload);
+    elementCount = typeof payload.elementCount === "number" ? payload.elementCount : undefined;
+  } else {
+    return toPlainTextCard(output);
+  }
+
+  let truncated = false;
+  let content = rawContent;
+  if (rawContent.length > SNAPSHOT_CONTENT_LIMIT) {
+    const remaining = rawContent.length - SNAPSHOT_CONTENT_LIMIT;
+    content = `${rawContent.slice(0, SNAPSHOT_CONTENT_LIMIT)}[...truncated ${remaining} chars]`;
+    truncated = true;
+  }
+
+  const card: ContentCard = {
+    type: "browser-snapshot",
+    url,
+    format,
+    content,
+    elementCount,
+    truncated,
+  };
+
+  return validateCard(card) ?? toPlainTextCard(output);
+}
+
+function adaptBrowserAction(output: unknown): ContentCard {
+  const payload = unwrapPayload(output);
+  if (!isObject(payload)) {
+    return toPlainTextCard(output);
+  }
+
+  const action = pickString(payload.action);
+  if (!action) {
+    return toPlainTextCard(output);
+  }
+
+  const hasScreenshotData = typeof payload.data === "string" && payload.data.length > 0;
+  const screenshotPath = pickString(payload.path) ?? pickString(payload.screenshotPath);
+
+  const card: ContentCard = {
+    type: "browser-action",
+    action,
+    ref: pickString(payload.ref) ?? pickString(payload.element),
+    message: pickString(payload.message) ?? pickString(payload.result),
+    screenshotPath,
+    hasScreenshotData,
+  };
+
+  return validateCard(card) ?? toPlainTextCard(output);
+}
+
 export function adaptToolOutput(toolName: string, output: unknown): ContentCard {
   const normalizedName = toolName.trim().toLowerCase();
 
@@ -237,6 +334,18 @@ export function adaptToolOutput(toolName: string, output: unknown): ContentCard 
 
   if (normalizedName === "reminders" || normalizedName === "create_reminder") {
     return adaptReminder(output);
+  }
+
+  if (normalizedName === "browser") {
+    return adaptBrowserNav(output);
+  }
+
+  if (normalizedName === "browser_snapshot") {
+    return adaptBrowserSnapshot(output);
+  }
+
+  if (normalizedName === "browser_act") {
+    return adaptBrowserAction(output);
   }
 
   return toPlainTextCard(output);

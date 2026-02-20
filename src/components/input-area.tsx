@@ -345,6 +345,9 @@ export function InputArea({ isFocused, onSubmit, onCancelPrompt }: InputAreaProp
       if (signal.type === "OPEN_SKILL_PANEL") {
         dispatch({ type: "SET_SKILL_PANEL_OPEN", payload: true });
       }
+      if (signal.type === "OPEN_BROWSER_PANEL") {
+        dispatch({ type: "SET_BROWSER_PANEL_OPEN", payload: true });
+      }
       if (signal.type === "PROMPT_CHANNEL_TOKEN" && signal.payload) {
         dispatch({ type: "SET_CHANNEL_TOKEN_PROMPT", payload: { open: true, platform: signal.payload } });
       }
