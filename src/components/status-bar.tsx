@@ -357,6 +357,10 @@ export interface StatusBarProps {
   tokenCount?: number;
   cost?: string | null;
   compactionActive?: boolean;
+  /** Optional persona display name (e.g. "Alex"). Shown in header when provided. */
+  personaName?: string;
+  /** Optional persona avatar emoji (e.g. "🤖"). Shown alongside persona name. */
+  personaAvatar?: string;
 }
 
 export function StatusBar({
@@ -365,6 +369,8 @@ export function StatusBar({
   tokenCount,
   cost = null,
   compactionActive: compactionProp,
+  personaName,
+  personaAvatar,
 }: StatusBarProps) {
   const { state } = useApp();
   const { tokens } = useThemeTokens();
@@ -429,6 +435,11 @@ export function StatusBar({
   const segmentSet = resolveStatusSegmentSet(sources);
   const { left, right } = groupSegments(segmentSet.visibleSegments);
 
+  // Build persona badge when name is provided
+  const personaBadge = personaName
+    ? `${personaAvatar ?? "🤖"} ${personaName}`
+    : null;
+
   // Render per-segment colored spans for the left group
   const leftElements = left.flatMap((seg, i) => {
     const color = tokens[seg.colorToken as keyof typeof tokens] ?? tokens["text.primary"];
@@ -459,6 +470,16 @@ export function StatusBar({
       flexDirection: "row",
     }}>
       <Box style={{ flexGrow: 1, flexDirection: "row" }}>
+        {personaBadge && (
+          <>
+            <Text style={{ color: tokens["text.primary"] }}>
+              {personaBadge}
+            </Text>
+            <Text style={{ color: tokens["text.muted"] }}>
+              {SEGMENT_SEPARATOR}
+            </Text>
+          </>
+        )}
         {leftElements}
       </Box>
       {hasRight && (
