@@ -185,6 +185,84 @@ describe("handleSetupCommand", () => {
   });
 });
 
+describe("/settings reset-onboarding alias", () => {
+  it("/settings reset-onboarding resets checkpoint and emits RELAUNCH_ONBOARDING", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "reins-test-"));
+    try {
+      const checkpoint = new OnboardingCheckpointService({ dataRoot: tempDir });
+
+      await checkpoint.save({
+        version: 1,
+        setupComplete: true,
+        mode: "quickstart",
+        currentStep: null,
+        completedSteps: [
+          { step: "welcome", completedAt: new Date().toISOString(), mode: "quickstart" },
+        ],
+        startedAt: new Date().toISOString(),
+        completedAt: new Date().toISOString(),
+      });
+
+      const loadBefore = await checkpoint.load();
+      expect(loadBefore.ok).toBe(true);
+      if (loadBefore.ok) {
+        expect(loadBefore.value).not.toBeNull();
+      }
+
+      const result = await resetOnboarding({ checkpointService: checkpoint });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+
+      expect(result.value.statusMessage).toContain("reset");
+      expect(result.value.signals).toEqual([{ type: "RELAUNCH_ONBOARDING" }]);
+
+      const loadAfter = await checkpoint.load();
+      expect(loadAfter.ok).toBe(true);
+      if (loadAfter.ok) {
+        expect(loadAfter.value).toBeNull();
+      }
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it("/settings reset-onboarding resolves via command dispatch", async () => {
+    const context = createTestContext();
+    const result = await runCommand("/settings reset-onboarding", context);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.signals).toEqual([{ type: "RELAUNCH_ONBOARDING" }]);
+    expect(result.value.statusMessage).toContain("reset");
+  });
+
+  it("bare /settings still works without reset-onboarding subcommand", async () => {
+    const context = createTestContext();
+    const result = await runCommand("/settings", context);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.value.signals).toEqual([{ type: "OPEN_SETTINGS" }]);
+  });
+
+  it("both /setup reset-onboarding and /settings reset-onboarding produce same result", async () => {
+    const context = createTestContext();
+
+    const setupResult = await runCommand("/setup reset-onboarding", context);
+    const settingsResult = await runCommand("/settings reset-onboarding", context);
+
+    expect(setupResult.ok).toBe(true);
+    expect(settingsResult.ok).toBe(true);
+
+    if (setupResult.ok && settingsResult.ok) {
+      expect(setupResult.value.signals).toEqual(settingsResult.value.signals);
+    }
+  });
+});
+
 describe("palette entry: Re-run setup", () => {
   it("palette action 'Re-run setup' exists", () => {
     const action = PALETTE_ACTIONS.find((a) => a.id === "action:rerun-setup");
@@ -228,5 +306,11 @@ describe("palette entry: Re-run setup", () => {
     const action = PALETTE_ACTIONS.find((a) => a.id === "action:rerun-setup");
     expect(action).toBeDefined();
     expect(action!.description.toLowerCase()).toContain("reset");
+  });
+
+  it("palette action is searchable by 'settings'", () => {
+    const action = PALETTE_ACTIONS.find((a) => a.id === "action:rerun-setup");
+    expect(action).toBeDefined();
+    expect(action!.keywords).toContain("settings");
   });
 });

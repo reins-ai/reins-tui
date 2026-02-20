@@ -389,7 +389,7 @@ const PALETTE_ACTION_DEFINITIONS: readonly PaletteActionDefinition[] = Object.fr
     label: "Re-run setup",
     description: "Reset onboarding and re-run the setup wizard.",
     category: "settings",
-    keywords: Object.freeze(["setup", "onboarding", "reset", "rerun", "re-run", "wizard", "reconfigure"]),
+    keywords: Object.freeze(["setup", "settings", "onboarding", "reset", "rerun", "re-run", "wizard", "reconfigure"]),
     actionKey: "rerun-setup",
   }),
   // Proactive Intelligence
