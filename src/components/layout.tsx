@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import type { DaemonConnectionStatus } from "../daemon/contracts";
 import type { DaemonMode } from "../daemon/daemon-context";
@@ -17,6 +17,8 @@ import { SidebarContent, SIDEBAR_CONTEXT_WIDTH } from "./sidebar";
 import { StatusBar } from "./status-bar";
 import { DrawerPanel } from "./drawer-panel";
 import { ModalPanel } from "./modal-panel";
+import { BriefingPanel } from "./briefing-panel";
+import { TaskPanel } from "./task-panel";
 
 // --- Layout zone configuration ---
 
@@ -134,6 +136,48 @@ function useBreakpointConstraints(columns: number): BreakpointState {
 const DRAWER_WIDTH = SIDEBAR_CONTEXT_WIDTH;
 const TODAY_PANEL_WIDTH = 34;
 
+/**
+ * Content rendered inside the Today drawer panel.
+ *
+ * Composes BriefingPanel and TaskPanel alongside the existing activity
+ * summary. Both sub-components handle their own empty-state visibility:
+ * BriefingPanel returns null when no briefing data is available or when
+ * external channels are configured; TaskPanel returns null when the
+ * tasks array is empty. This means the Today panel gracefully degrades
+ * to showing only the activity summary when no briefing or task data
+ * has been provided yet.
+ */
+function TodayPanelContent() {
+  const { tokens } = useThemeTokens();
+
+  // Briefing state — populated when the daemon delivers a morning briefing
+  // via WebSocket. Null until a briefing is received.
+  const [briefing] = useState<import("./briefing-panel").BriefingData | null>(null);
+  const [channelsConfigured] = useState(false);
+  const [dismissedDates] = useState<ReadonlySet<string>>(() => new Set<string>());
+
+  // Task state — populated when background task updates arrive via WebSocket.
+  // Empty array until tasks are received.
+  const [tasks] = useState<readonly import("./task-panel").TaskItem[]>([]);
+  const [selectedTaskIndex] = useState<number | null>(null);
+
+  return (
+    <Box style={{ flexDirection: "column" }}>
+      <BriefingPanel
+        briefing={briefing}
+        channelsConfigured={channelsConfigured}
+        dismissedDates={dismissedDates}
+      />
+      <TaskPanel
+        tasks={tasks}
+        selectedIndex={selectedTaskIndex}
+      />
+      <Text content="Activity" style={{ color: tokens["text.secondary"] }} />
+      <Text content="Tool calls and events" style={{ color: tokens["text.muted"] }} />
+    </Box>
+  );
+}
+
 export function Layout({
   version,
   dimensions,
@@ -205,8 +249,7 @@ export function Layout({
         title={state.panels.today.pinned ? "Today [Pinned]" : "Today"}
         onClose={dismissToday}
       >
-        <Text content="Activity" style={{ color: tokens["text.secondary"] }} />
-        <Text content="Tool calls and events" style={{ color: tokens["text.muted"] }} />
+        <TodayPanelContent />
       </DrawerPanel>
 
       {/* Summoned center modal */}

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join, win32 } from "node:path";
+import { join } from "node:path";
 
 import { ContextSummaryService, type ContextSummary } from "./context-summary";
 
@@ -57,19 +57,39 @@ const DAY_PART_FALLBACK: Record<DayPart, string> = {
   night: "Burning the midnight oil?",
 };
 
+/**
+ * Resolves the canonical user config path at the Reins data root.
+ *
+ * Platform paths:
+ * - Linux:  ~/.reins/config.json
+ * - macOS:  ~/Library/Application Support/reins/config.json
+ * - Windows: %APPDATA%\reins\config.json
+ *
+ * Matches the data root used by @reins/core (daemon paths, user-config).
+ */
 function resolveUserConfigPath(): string {
   const platform = process.platform;
-  const configRoot = process.env.XDG_CONFIG_HOME && process.env.XDG_CONFIG_HOME.trim().length > 0
-    ? process.env.XDG_CONFIG_HOME
-    : platform === "win32"
-      ? win32.join(homedir(), ".config")
-      : join(homedir(), ".config");
+  const homeDirectory = homedir();
 
-  return platform === "win32"
-    ? win32.join(configRoot, "reins", "config.json")
-    : join(configRoot, "reins", "config.json");
+  let dataRoot: string;
+  if (platform === "darwin") {
+    dataRoot = join(homeDirectory, "Library", "Application Support", "reins");
+  } else if (platform === "win32") {
+    const appData = process.env.APPDATA ?? join(homeDirectory, "AppData", "Roaming");
+    dataRoot = join(appData, "reins");
+  } else {
+    dataRoot = join(homeDirectory, ".reins");
+  }
+
+  return join(dataRoot, "config.json");
 }
 
+/**
+ * Read the user's configured name from the config file.
+ *
+ * Checks both `name` (canonical UserConfig field) and `userName`
+ * (OnboardingEngine collectedData field) for compatibility.
+ */
 function parseConfiguredName(configPath: string): string | null {
   if (!existsSync(configPath)) {
     return null;
@@ -79,7 +99,12 @@ function parseConfiguredName(configPath: string): string | null {
     const raw = readFileSync(configPath, "utf8");
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     const name = typeof parsed.name === "string" ? parsed.name.trim() : "";
-    return name.length > 0 ? name : null;
+    if (name.length > 0) {
+      return name;
+    }
+
+    const userName = typeof parsed.userName === "string" ? parsed.userName.trim() : "";
+    return userName.length > 0 ? userName : null;
   } catch {
     return null;
   }

@@ -1,5 +1,6 @@
 import { err, ok } from "../../daemon/contracts";
 import { getSlashCommandByNameOrAlias, type SlashCommandCategory, type SlashCommandDefinition } from "../registry";
+import { resetOnboarding } from "./setup";
 import type { CommandHandler } from "./types";
 
 const CATEGORY_ORDER: readonly SlashCommandCategory[] = ["conversation", "model", "environment", "appearance", "memory", "system"];
@@ -82,7 +83,13 @@ export const handleCompactCommand: CommandHandler = (args, context) => {
   });
 };
 
-export const handleSettingsCommand: CommandHandler = () => {
+export const handleSettingsCommand: CommandHandler = (args) => {
+  const subcommand = args.positional[0]?.toLowerCase();
+
+  if (subcommand === "reset-onboarding") {
+    return resetOnboarding();
+  }
+
   return ok({
     statusMessage: "Settings UI is not available yet",
     responseText: "Settings will be interactive in a later wave.",

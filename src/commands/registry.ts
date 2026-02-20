@@ -23,6 +23,9 @@ export type SlashCommandHandlerKey =
   | "TOGGLE_THINKING"
   | "INTEGRATIONS"
   | "SKILLS"
+  | "BRIEFING"
+  | "NUDGES"
+  | "TASKS"
   | "BROWSER";
 
 export interface SlashCommandDefinition {
@@ -187,7 +190,7 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     name: "setup",
     aliases: Object.freeze(["onboarding", "personality"]),
     description: "Re-run the onboarding setup wizard.",
-    usage: "/setup",
+    usage: "/setup [reset-onboarding]",
     category: "system",
     handlerKey: "SETUP",
   }),
@@ -214,6 +217,30 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     usage: "/skills",
     category: "system",
     handlerKey: "SKILLS",
+  }),
+  Object.freeze({
+    name: "briefing",
+    aliases: Object.freeze([]),
+    description: "Trigger an immediate morning briefing.",
+    usage: "/briefing",
+    category: "system",
+    handlerKey: "BRIEFING",
+  }),
+  Object.freeze({
+    name: "nudges",
+    aliases: Object.freeze([]),
+    description: "Toggle nudge injection on or off.",
+    usage: "/nudges [on|off]",
+    category: "system",
+    handlerKey: "NUDGES",
+  }),
+  Object.freeze({
+    name: "tasks",
+    aliases: Object.freeze(["bg"]),
+    description: "Manage background tasks: list, cancel, or retry.",
+    usage: "/tasks [list|cancel|retry] [id]",
+    category: "system",
+    handlerKey: "TASKS",
   }),
   Object.freeze({
     name: "browser",
@@ -364,6 +391,65 @@ const PALETTE_ACTION_DEFINITIONS: readonly PaletteActionDefinition[] = Object.fr
     category: "actions",
     keywords: Object.freeze(["copy", "response", "clipboard", "last"]),
     actionKey: "copy-last-response",
+  }),
+  // Setup
+  Object.freeze({
+    id: "action:rerun-setup",
+    label: "Re-run setup",
+    description: "Reset onboarding and re-run the setup wizard.",
+    category: "settings",
+    keywords: Object.freeze(["setup", "settings", "onboarding", "reset", "rerun", "re-run", "wizard", "reconfigure"]),
+    actionKey: "rerun-setup",
+  }),
+  // Proactive Intelligence
+  Object.freeze({
+    id: "action:trigger-briefing",
+    label: "Trigger Briefing",
+    description: "Generate and deliver an immediate morning briefing.",
+    category: "actions",
+    keywords: Object.freeze(["briefing", "morning", "summary", "daily", "report"]),
+    actionKey: "trigger-briefing",
+  }),
+  Object.freeze({
+    id: "action:nudges-on",
+    label: "Enable Nudges",
+    description: "Turn on nudge injection in conversations.",
+    category: "settings",
+    keywords: Object.freeze(["nudges", "nudge", "enable", "on", "proactive", "suggestions"]),
+    actionKey: "nudges-on",
+  }),
+  Object.freeze({
+    id: "action:nudges-off",
+    label: "Disable Nudges",
+    description: "Turn off nudge injection in conversations.",
+    category: "settings",
+    keywords: Object.freeze(["nudges", "nudge", "disable", "off", "proactive", "suggestions"]),
+    actionKey: "nudges-off",
+  }),
+  // Background Tasks
+  Object.freeze({
+    id: "action:tasks-list",
+    label: "List Background Tasks",
+    description: "Show all background tasks with their status.",
+    category: "actions",
+    keywords: Object.freeze(["tasks", "background", "list", "queue", "jobs", "status"]),
+    actionKey: "tasks-list",
+  }),
+  Object.freeze({
+    id: "action:tasks-cancel",
+    label: "Cancel Background Task",
+    description: "Cancel a running background task.",
+    category: "actions",
+    keywords: Object.freeze(["tasks", "background", "cancel", "stop", "abort", "kill"]),
+    actionKey: "tasks-cancel",
+  }),
+  Object.freeze({
+    id: "action:tasks-retry",
+    label: "Retry Failed Task",
+    description: "Re-enqueue a failed background task.",
+    category: "actions",
+    keywords: Object.freeze(["tasks", "background", "retry", "rerun", "failed", "redo"]),
+    actionKey: "tasks-retry",
   }),
 ]);
 
