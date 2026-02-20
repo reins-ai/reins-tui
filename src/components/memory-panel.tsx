@@ -170,6 +170,8 @@ export interface MemoryPanelState {
   readonly isDeleting: boolean;
   readonly confirmingDeleteId: string | null;
   readonly errorMessage: string | null;
+  readonly exportStatus: string | null;
+  readonly isExporting: boolean;
 }
 
 export type MemoryPanelAction =
@@ -196,7 +198,11 @@ export type MemoryPanelAction =
   | { type: "DELETE_DONE"; id: string }
   | { type: "CONFIRM_DELETE"; id: string }
   | { type: "CANCEL_DELETE" }
-  | { type: "FOCUS_MEMORY"; id: string };
+  | { type: "FOCUS_MEMORY"; id: string }
+  | { type: "EXPORT_START" }
+  | { type: "EXPORT_SUCCESS"; message: string }
+  | { type: "EXPORT_ERROR"; message: string }
+  | { type: "CLEAR_EXPORT_STATUS" };
 
 export const MEMORY_PANEL_INITIAL_STATE: MemoryPanelState = {
   fetchState: "idle",
@@ -215,6 +221,8 @@ export const MEMORY_PANEL_INITIAL_STATE: MemoryPanelState = {
   isDeleting: false,
   confirmingDeleteId: null,
   errorMessage: null,
+  exportStatus: null,
+  isExporting: false,
 };
 
 export function memoryPanelReducer(
@@ -339,6 +347,14 @@ export function memoryPanelReducer(
       }
       return state;
     }
+    case "EXPORT_START":
+      return { ...state, isExporting: true, exportStatus: null };
+    case "EXPORT_SUCCESS":
+      return { ...state, isExporting: false, exportStatus: action.message };
+    case "EXPORT_ERROR":
+      return { ...state, isExporting: false, exportStatus: action.message };
+    case "CLEAR_EXPORT_STATUS":
+      return { ...state, exportStatus: null };
     default:
       return state;
   }
@@ -351,6 +367,12 @@ export function memoryPanelReducer(
 interface MemoriesResponse {
   memories: MemoryRecordDisplay[];
   count: number;
+}
+
+interface ExportResponse {
+  path: string;
+  count: number;
+  exportedAt: string;
 }
 
 async function fetchMemories(
@@ -372,6 +394,19 @@ async function fetchMemories(
   }
   const data = (await response.json()) as MemoriesResponse;
   return data.memories ?? [];
+}
+
+async function exportMemories(baseUrl: string): Promise<ExportResponse> {
+  const response = await fetch(`${baseUrl}/api/memories/export`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ outputPath: "~/.reins/memories-export.json" }),
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(body || `HTTP ${response.status}`);
+  }
+  return (await response.json()) as ExportResponse;
 }
 
 // ---------------------------------------------------------------------------
@@ -665,6 +700,29 @@ export function MemoryPanel(props: MemoryPanelProps) {
     [state.memories, state.typeFilter, state.searchQuery],
   );
 
+  const doExport = useCallback(async () => {
+    dispatch({ type: "EXPORT_START" });
+    try {
+      const result = await exportMemories(daemonBaseUrl);
+      dispatch({
+        type: "EXPORT_SUCCESS",
+        message: `✓ Exported ${result.count} memories to ${result.path}`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown error";
+      dispatch({ type: "EXPORT_ERROR", message: `✗ Export failed: ${message}` });
+    }
+  }, [daemonBaseUrl]);
+
+  // Auto-dismiss export status after 3 seconds
+  useEffect(() => {
+    if (state.exportStatus === null) return;
+    const timer = setTimeout(() => {
+      dispatch({ type: "CLEAR_EXPORT_STATUS" });
+    }, 3000);
+    return () => clearTimeout(timer);
+  }, [state.exportStatus]);
+
   const doSave = useCallback(async () => {
     if (!state.editingMemory) return;
     dispatch({ type: "SAVE_START" });
@@ -832,6 +890,14 @@ export function MemoryPanel(props: MemoryPanelProps) {
       return;
     }
 
+    // Export memories
+    if (sequence === "e") {
+      if (!state.isExporting) {
+        void doExport();
+      }
+      return;
+    }
+
     // Confirm delete from list view
     // (handled below in render — confirmation prompt shown inline)
   }, [
@@ -844,9 +910,11 @@ export function MemoryPanel(props: MemoryPanelProps) {
     state.typeFilter,
     state.selectedIndex,
     state.editImportance,
+    state.isExporting,
     filteredMemories,
     doSave,
     doDelete,
+    doExport,
   ]));
 
   // Handle list-view delete confirmation via separate keyboard handler
@@ -872,7 +940,7 @@ export function MemoryPanel(props: MemoryPanelProps) {
   const totalCount = state.memories.length;
   const filteredCount = filteredMemories.length;
 
-  const hintText = "q close · j/k navigate · / search · f type filter · s sort · Enter edit · d delete";
+  const hintText = "q close · j/k navigate · / search · f filter · s sort · Enter edit · d delete · e export";
 
   return (
     <ModalPanel
@@ -913,13 +981,25 @@ export function MemoryPanel(props: MemoryPanelProps) {
           {/* Success state */}
           {state.fetchState === "success" || state.memories.length > 0 ? (
             <Box style={{ flexDirection: "column" }}>
-              {/* Filter + sort bar */}
-              <FilterSortBar
-                typeFilter={state.typeFilter}
-                sortBy={state.sortBy}
-                sortOrder={state.sortOrder}
-                tokens={tokens}
-              />
+              {/* Filter + sort bar with export button */}
+              <Box style={{ flexDirection: "row" }}>
+                <Box style={{ flexDirection: "row", flexGrow: 1 }}>
+                  <FilterSortBar
+                    typeFilter={state.typeFilter}
+                    sortBy={state.sortBy}
+                    sortOrder={state.sortOrder}
+                    tokens={tokens}
+                  />
+                </Box>
+                <Text
+                  content={state.isExporting ? "[Exporting...]" : "[Export]"}
+                  style={{
+                    color: state.isExporting
+                      ? tokens["text.muted"]
+                      : tokens["accent.secondary"],
+                  }}
+                />
+              </Box>
 
               {/* Search bar */}
               {showSearch ? (
@@ -977,6 +1057,20 @@ export function MemoryPanel(props: MemoryPanelProps) {
                   <Text
                     content="Really delete? Enter=yes Esc=no"
                     style={{ color: tokens["status.warning"] }}
+                  />
+                </Box>
+              ) : null}
+
+              {/* Export status message */}
+              {state.exportStatus !== null ? (
+                <Box style={{ flexDirection: "row", marginTop: 1 }}>
+                  <Text
+                    content={state.exportStatus}
+                    style={{
+                      color: state.exportStatus.startsWith("✓")
+                        ? tokens["status.success"]
+                        : tokens["status.error"],
+                    }}
                   />
                 </Box>
               ) : null}

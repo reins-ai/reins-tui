@@ -27,7 +27,8 @@ export type SlashCommandHandlerKey =
   | "NUDGES"
   | "TASKS"
   | "BROWSER"
-  | "SCHEDULE";
+  | "SCHEDULE"
+  | "IMPORT_MEMORIES";
 
 export interface SlashCommandDefinition {
   readonly name: string;
@@ -258,6 +259,14 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     usage: "/schedule",
     category: "system",
     handlerKey: "SCHEDULE",
+  }),
+  Object.freeze({
+    name: "import-memories",
+    aliases: Object.freeze(["import-mem"]),
+    description: "Import memories from a JSON file or a directory of Markdown files.",
+    usage: "/import-memories <path>",
+    category: "memory",
+    handlerKey: "IMPORT_MEMORIES",
   }),
 ]);
 

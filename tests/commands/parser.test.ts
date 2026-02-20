@@ -35,6 +35,7 @@ describe("slash command registry", () => {
       "tasks",
       "browser",
       "schedule",
+      "import-memories",
     ]);
   });
 
@@ -68,6 +69,7 @@ describe("slash command registry", () => {
       tasks: "system",
       browser: "system",
       schedule: "system",
+      "import-memories": "memory",
     });
   });
 
@@ -211,6 +213,7 @@ describe("getCommandAutocomplete", () => {
       "env",
       "export",
       "help",
+      "import-memories",
       "integrations",
       "memory",
       "model",
