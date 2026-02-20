@@ -8,6 +8,7 @@ import {
   type DaemonResult,
   type DaemonStreamEvent,
   type StreamResponseRequest,
+  type TaskUpdateEvent,
 } from "./contracts";
 
 interface WebSocketMessageLike {
@@ -50,6 +51,15 @@ interface StreamEnvelope {
 interface HeartbeatEnvelope {
   type: "heartbeat" | "heartbeat.ping" | "heartbeat.pong";
   timestamp?: string;
+}
+
+interface TaskUpdateEnvelope {
+  type: "task_update";
+  taskId: string;
+  status: string;
+  preview?: string;
+  error?: string;
+  timestamp: string;
 }
 
 interface StreamSubscribeMessage {
@@ -131,6 +141,7 @@ export class DaemonWsTransport {
 
   private onUnexpectedCloseHandler: ((error: DaemonClientError) => void) | null = null;
   private onHeartbeatHandler: ((timestamp: string) => void) | null = null;
+  private onTaskUpdateHandler: ((event: TaskUpdateEvent) => void) | null = null;
 
   private readonly messageListener = (event: WebSocketMessageLike): void => {
     this.handleMessage(event);
@@ -153,6 +164,10 @@ export class DaemonWsTransport {
 
   public setHeartbeatHandler(handler: (timestamp: string) => void): void {
     this.onHeartbeatHandler = handler;
+  }
+
+  public setTaskUpdateHandler(handler: (event: TaskUpdateEvent) => void): void {
+    this.onTaskUpdateHandler = handler;
   }
 
   public isConnected(): boolean {
@@ -318,6 +333,11 @@ export class DaemonWsTransport {
       }
 
       this.onHeartbeatHandler?.(payload.timestamp ?? this.now().toISOString());
+      return;
+    }
+
+    if (this.isTaskUpdateEnvelope(payload)) {
+      this.onTaskUpdateHandler?.(payload);
       return;
     }
 
@@ -592,6 +612,20 @@ export class DaemonWsTransport {
         "type" in payload &&
         (payload as { type?: unknown }).type === "stream-event" &&
         "event" in payload,
+    );
+  }
+
+  private isTaskUpdateEnvelope(payload: unknown): payload is TaskUpdateEnvelope {
+    if (!payload || typeof payload !== "object") {
+      return false;
+    }
+
+    const candidate = payload as Record<string, unknown>;
+    return (
+      candidate.type === "task_update" &&
+      typeof candidate.taskId === "string" &&
+      typeof candidate.status === "string" &&
+      typeof candidate.timestamp === "string"
     );
   }
 

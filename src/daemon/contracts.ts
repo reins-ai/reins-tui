@@ -293,6 +293,15 @@ export type DaemonStreamEvent =
       timestamp: string;
     };
 
+export interface TaskUpdateEvent {
+  type: "task_update";
+  taskId: string;
+  status: string;
+  preview?: string;
+  error?: string;
+  timestamp: string;
+}
+
 export const DAEMON_CONTRACT_COMPATIBILITY_NOTES = [
   "sendMessage response keeps userMessageId for existing clients and may also include canonical messageId",
   "sendMessage response may include timestamp once daemon message persistence acknowledgement is wired",
