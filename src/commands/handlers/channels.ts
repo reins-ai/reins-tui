@@ -25,14 +25,14 @@ export interface ChannelHealthStatus {
   checkedAt: string;
 }
 
-interface ChannelStatusSummary {
+export interface ChannelStatusSummary {
   total: number;
   enabled: number;
   healthy: number;
   unhealthy: number;
 }
 
-interface ChannelStatusSnapshot {
+export interface ChannelStatusSnapshot {
   channels: ChannelHealthStatus[];
   summary: ChannelStatusSummary;
 }
