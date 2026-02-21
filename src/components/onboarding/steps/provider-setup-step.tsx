@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Box, Input, Text, useKeyboard } from "../../../ui";
+import { getActiveDaemonUrl } from "../../../daemon/actions";
 import { useDaemon } from "../../../daemon/daemon-context";
+import { logger } from "../../../lib/debug-logger";
 import { ConnectService } from "../../../providers/connect-service";
 import type { StepViewProps } from "./index";
 
@@ -39,6 +41,77 @@ function maskSecret(value: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+interface ProviderValidationResult {
+  configured: boolean;
+  models: string[];
+}
+
+type ValidationState =
+  | "idle"
+  | "validating"
+  | "valid"
+  | "invalid"
+  | "unreachable";
+
+const VALIDATION_TIMEOUT_MS = 10_000;
+
+async function validateProviderKey(
+  providerId: string,
+  daemonBaseUrl: string,
+): Promise<{ state: ValidationState; models: string[] }> {
+  try {
+    const url = `${daemonBaseUrl}/api/onboarding/validate-provider?provider=${encodeURIComponent(providerId)}`;
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(VALIDATION_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      logger.connect.warn("Provider validation HTTP error", {
+        provider: providerId,
+        status: response.status,
+      });
+      return { state: "unreachable", models: [] };
+    }
+
+    const payload = (await response.json()) as ProviderValidationResult;
+    if (payload.configured) {
+      return { state: "valid", models: payload.models ?? [] };
+    }
+
+    return { state: "invalid", models: [] };
+  } catch (error) {
+    logger.connect.warn("Provider validation failed", {
+      provider: providerId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { state: "unreachable", models: [] };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Hint text
+// ---------------------------------------------------------------------------
+
+function hintForState(isBusy: boolean, validation: ValidationState): string {
+  if (isBusy) {
+    return "Please wait...";
+  }
+
+  if (validation === "invalid") {
+    return "Tab retry  ·  Enter dismiss  ·  Esc back";
+  }
+
+  if (validation === "unreachable") {
+    return "Tab retry  ·  s validate later  ·  Enter dismiss  ·  Esc back";
+  }
+
+  return "Up/Down select  ·  Type API key  ·  Enter connect/continue  ·  Esc back";
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -49,10 +122,60 @@ export function ProviderSetupStepView({ tokens, engineState: _engineState, onSte
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [configuredProviders, setConfiguredProviders] = useState<Set<string>>(new Set());
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [validationState, setValidationState] = useState<ValidationState>("idle");
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
+  // Track the provider being validated so retry works correctly
+  const validatingProviderRef = useRef<string | null>(null);
+
   const selectedProvider = PROVIDERS[selectedIndex];
+
+  const isValidating = validationState === "validating";
+  const isBusy = isSubmitting || isValidating;
+
+  const runValidation = useCallback(async (providerId: string, providerLabel: string) => {
+    setValidationState("validating");
+    setErrorMessage(null);
+    setStatusMessage(`Validating ${providerLabel} API key...`);
+    validatingProviderRef.current = providerId;
+
+    const daemonBaseUrl = await getActiveDaemonUrl();
+    const result = await validateProviderKey(providerId, daemonBaseUrl);
+
+    if (result.state === "valid") {
+      setValidationState("valid");
+      setStatusMessage(
+        result.models.length > 0
+          ? `${providerLabel} connected — ${result.models.length} model${result.models.length === 1 ? "" : "s"} available.`
+          : `${providerLabel} connected and verified.`,
+      );
+      setConfiguredProviders((previous) => {
+        const next = new Set(previous);
+        next.add(providerId);
+        return next;
+      });
+      setApiKeyInput("");
+      validatingProviderRef.current = null;
+      return;
+    }
+
+    if (result.state === "invalid") {
+      setValidationState("invalid");
+      setStatusMessage(null);
+      setErrorMessage(
+        "API key is invalid or the provider is unreachable. Please check your key and try again.",
+      );
+      return;
+    }
+
+    // unreachable — daemon could not be contacted
+    setValidationState("unreachable");
+    setStatusMessage(null);
+    setErrorMessage(
+      "Could not reach the Reins daemon to validate your key. Make sure the daemon is running and try again.",
+    );
+  }, []);
 
   const handleConfigureProvider = useCallback(async () => {
     const normalizedKey = apiKeyInput.trim();
@@ -63,6 +186,7 @@ export function ProviderSetupStepView({ tokens, engineState: _engineState, onSte
 
     setIsSubmitting(true);
     setErrorMessage(null);
+    setValidationState("idle");
     setStatusMessage(`Configuring ${selectedProvider.label}...`);
 
     const result = await connectService.configureBYOK(selectedProvider.id, normalizedKey);
@@ -73,16 +197,11 @@ export function ProviderSetupStepView({ tokens, engineState: _engineState, onSte
       return;
     }
 
-    setConfiguredProviders((previous) => {
-      const next = new Set(previous);
-      next.add(selectedProvider.id);
-      return next;
-    });
     setIsSubmitting(false);
-    setApiKeyInput("");
-    setErrorMessage(null);
-    setStatusMessage(`${selectedProvider.label} connected.`);
-  }, [apiKeyInput, connectService, selectedProvider.id, selectedProvider.label]);
+
+    // Key stored — now validate it against the daemon
+    await runValidation(selectedProvider.id, selectedProvider.label);
+  }, [apiKeyInput, connectService, runValidation, selectedProvider.id, selectedProvider.label]);
 
   // Emit step data on selection change
   useEffect(() => {
@@ -96,7 +215,53 @@ export function ProviderSetupStepView({ tokens, engineState: _engineState, onSte
   useKeyboard((event) => {
     const keyName = event.name ?? "";
 
-    if (isSubmitting) {
+    if (isBusy) {
+      return;
+    }
+
+    // When validation failed, offer retry (Tab) and skip (s)
+    if (validationState === "invalid" || validationState === "unreachable") {
+      if (keyName === "tab") {
+        const providerId = validatingProviderRef.current;
+        if (providerId) {
+          const entry = PROVIDERS.find((p) => p.id === providerId);
+          if (entry) {
+            void runValidation(entry.id, entry.label);
+          }
+        }
+        return;
+      }
+
+      if (keyName === "s" && validationState === "unreachable") {
+        // Skip validation — key is stored but unverified
+        logger.connect.warn("User skipped API key validation", {
+          provider: validatingProviderRef.current,
+        });
+        const providerId = validatingProviderRef.current;
+        if (providerId) {
+          setConfiguredProviders((previous) => {
+            const next = new Set(previous);
+            next.add(providerId);
+            return next;
+          });
+        }
+        setValidationState("idle");
+        setApiKeyInput("");
+        setErrorMessage(null);
+        setStatusMessage("Key saved — validation skipped. You can verify later.");
+        validatingProviderRef.current = null;
+        return;
+      }
+
+      // Allow Enter to dismiss and return to input
+      if (keyName === "return" || keyName === "enter") {
+        setValidationState("idle");
+        setErrorMessage(null);
+        setStatusMessage(null);
+        validatingProviderRef.current = null;
+        return;
+      }
+
       return;
     }
 
@@ -106,6 +271,7 @@ export function ProviderSetupStepView({ tokens, engineState: _engineState, onSte
       );
       setErrorMessage(null);
       setStatusMessage(null);
+      setValidationState("idle");
       return;
     }
     if (keyName === "down") {
@@ -114,6 +280,7 @@ export function ProviderSetupStepView({ tokens, engineState: _engineState, onSte
       );
       setErrorMessage(null);
       setStatusMessage(null);
+      setValidationState("idle");
       return;
     }
 
@@ -219,22 +386,27 @@ export function ProviderSetupStepView({ tokens, engineState: _engineState, onSte
 
       {statusMessage !== null ? (
         <Box style={{ marginTop: 1 }}>
-          <Text content={statusMessage} style={{ color: tokens["status.success"] }} />
+          <Text
+            content={isValidating ? `* ${statusMessage}` : `* ${statusMessage}`}
+            style={{
+              color: isValidating
+                ? tokens["text.secondary"]
+                : tokens["status.success"],
+            }}
+          />
         </Box>
       ) : null}
 
       {errorMessage !== null ? (
-        <Box style={{ marginTop: 1 }}>
-          <Text content={errorMessage} style={{ color: tokens["status.error"] }} />
+        <Box style={{ marginTop: 1, flexDirection: "column" }}>
+          <Text content={`x ${errorMessage}`} style={{ color: tokens["status.error"] }} />
         </Box>
       ) : null}
 
       {/* Hint */}
       <Box style={{ marginTop: 1 }}>
         <Text
-          content={isSubmitting
-            ? "Configuring provider..."
-            : "Up/Down select  ·  Type API key  ·  Enter connect/continue  ·  Esc back"}
+          content={hintForState(isBusy, validationState)}
           style={{ color: tokens["text.muted"] }}
         />
       </Box>
