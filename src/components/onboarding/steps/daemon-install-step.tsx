@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-import { ServiceInstaller, type ServiceDefinition } from "@reins/core";
+import { DAEMON_PORT, ServiceInstaller, type ServiceDefinition } from "@reins/core";
 import { Box, Input, Text, useKeyboard } from "../../../ui";
 import { addDaemonProfile, isDaemonReachable } from "../../../daemon/actions";
 import type { StepViewProps } from "./index";
@@ -79,12 +79,15 @@ export interface NetworkDiagnostic {
  *   - 127.0.0.1  — explicit IPv4 loopback (macOS / Windows default)
  */
 const HEALTH_URLS = [
-  "http://localhost:7433/health",
-  "http://[::1]:7433/health",
-  "http://127.0.0.1:7433/health",
+  `http://localhost:${DAEMON_PORT}/health`,
+  `http://[::1]:${DAEMON_PORT}/health`,
+  `http://127.0.0.1:${DAEMON_PORT}/health`,
 ];
-const HEALTH_TIMEOUT_MS = 3000;
-const POST_START_DELAY_MS = 2500;
+const HEALTH_CHECK_TIMEOUT_MS = 3_000;
+const POST_START_DELAY_MS = 2_500;
+
+/** Working directory for the daemon service process. */
+const DAEMON_WORKING_DIR = process.cwd();
 
 const SERVICE_DEFINITION: ServiceDefinition = {
   serviceName: "com.reins.daemon",
@@ -92,7 +95,8 @@ const SERVICE_DEFINITION: ServiceDefinition = {
   description: "Reins personal assistant background daemon",
   command: "bun",
   args: ["run", "reins-daemon"],
-  workingDirectory: process.cwd(),
+  workingDirectory: DAEMON_WORKING_DIR,
+  // Empty env — daemon inherits from process.env at spawn time
   env: {},
   autoRestart: true,
 };
@@ -173,7 +177,7 @@ export function diagnoseHealthFailure(results: PromiseSettledResult<boolean>[]):
   if (kinds.has("connection-refused")) {
     return {
       kind: "connection-refused",
-      message: "Connection refused — the daemon is not running on port 7433.",
+      message: `Connection refused — the daemon is not running on port ${DAEMON_PORT}.`,
       hint: "Run: reins daemon start",
     };
   }
@@ -182,14 +186,14 @@ export function diagnoseHealthFailure(results: PromiseSettledResult<boolean>[]):
     return {
       kind: "timeout",
       message: "Connection timed out — the daemon did not respond.",
-      hint: "Check if a firewall is blocking port 7433.",
+      hint: `Check if a firewall is blocking port ${DAEMON_PORT}.`,
     };
   }
 
   if (kinds.has("port-in-use")) {
     return {
       kind: "port-in-use",
-      message: "Port 7433 is already in use by another service.",
+      message: `Port ${DAEMON_PORT} is already in use by another service.`,
       hint: "Stop the conflicting service or change the daemon port.",
     };
   }
@@ -218,7 +222,7 @@ interface HealthCheckResult {
 async function checkDaemonHealth(): Promise<HealthCheckResult> {
   const results = await Promise.allSettled(
     HEALTH_URLS.map((url) =>
-      fetch(url, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) })
+      fetch(url, { signal: AbortSignal.timeout(HEALTH_CHECK_TIMEOUT_MS) })
         .then((r) => r.ok),
     ),
   );
@@ -243,7 +247,7 @@ async function checkDaemonHealth(): Promise<HealthCheckResult> {
 async function fetchDaemonHealthDetail(): Promise<DaemonHealthDetail | null> {
   const results = await Promise.allSettled(
     HEALTH_URLS.map(async (url) => {
-      const response = await fetch(url, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) });
+      const response = await fetch(url, { signal: AbortSignal.timeout(HEALTH_CHECK_TIMEOUT_MS) });
       if (!response.ok) return null;
       const body = await response.json() as Record<string, unknown>;
       return body;
@@ -746,7 +750,7 @@ export function DaemonInstallStepView({ tokens, engineState: _engineState, onSte
               </Box>
               <Input
                 focused
-                placeholder="http://192.168.1.100:7433"
+                placeholder={`http://192.168.1.100:${DAEMON_PORT}`}
                 value={remoteUrl}
                 onInput={(value) => setRemoteUrl(extractInputValue(value))}
               />
