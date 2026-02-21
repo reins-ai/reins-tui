@@ -11,6 +11,7 @@ import {
   ModelSelectionStep,
   WorkspaceStep,
   PersonalityStep,
+  FeatureDiscoveryStep,
   ONBOARDING_STEPS,
   type EngineState,
   type FirstRunStatus,
@@ -118,6 +119,7 @@ function createStepHandlers() {
     new ModelSelectionStep(),
     new WorkspaceStep(),
     new PersonalityStep(),
+    new FeatureDiscoveryStep(),
   ];
 }
 

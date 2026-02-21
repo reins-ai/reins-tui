@@ -24,6 +24,7 @@ const STEP_LABELS: Record<OnboardingStep, string> = {
   "model-select": "Models",
   "workspace": "Workspace",
   "personality": "Personality",
+  "feature-discovery": "Get Started",
 };
 
 // ---------------------------------------------------------------------------

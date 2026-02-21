@@ -11,4 +11,5 @@ export {
   ModelSelectionStepView,
   WorkspaceStepView,
   PersonalityStepView,
+  FeatureDiscoveryStepView,
 } from "./steps";
