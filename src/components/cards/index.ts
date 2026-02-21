@@ -9,3 +9,4 @@ export { SubAgentGrid, deriveAgentStates, type SubAgentGridProps, type AgentStat
 export { ErrorCard, extractErrorMessage, truncateErrorMessage, formatErrorToolName, buildErrorCardHeader, buildErrorDetailLine, buildActionHints, getErrorCardStyle, isErrorCardCandidate, type ErrorCardProps } from "./error-card";
 export { ConversationContextMenu, type ConversationContextMenuProps, type ContextMenuAction, type ContextMenuMode } from "./conversation-context-menu";
 export { TokenBar, buildProgressBar, formatTokenCount, buildTokenLabel, getTokenBarTier, type TokenBarProps, type TokenBarTier } from "./token-bar";
+export { ContextWarningBanner, formatUtilisationPercent, buildWarningMessage, getWarningBannerStyle, type ContextWarningBannerProps } from "./context-warning-banner";

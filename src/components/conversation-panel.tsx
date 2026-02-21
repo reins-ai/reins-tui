@@ -9,10 +9,12 @@ import type { MessageRole } from "../theme/use-theme-tokens";
 import type { ToolCall, ToolCallStatus, ToolVisualState } from "../tools/tool-lifecycle";
 import { displayToolCallToVisualState } from "../tools/tool-lifecycle";
 import type { FramedBlockStyle } from "../ui/types";
-import { Box, ScrollBox, Text } from "../ui";
+import { Box, ScrollBox, Text, useKeyboard } from "../ui";
 import { FramedBlock, SUBTLE_BORDER_CHARS } from "../ui/primitives";
+import { ContextWarningBanner } from "./cards/context-warning-banner";
 import { ErrorCard } from "./cards/error-card";
 import { isErrorCardCandidate } from "./cards/error-card";
+import type { TokenUsageInfo } from "./input-area";
 import { LogoAscii } from "./logo-ascii";
 import { getMessageBlockStyle, getMessageBorderChars, Message } from "./message";
 import { ThinkingBlock } from "./thinking-block";
@@ -35,6 +37,26 @@ export function isExchangeBoundary(messages: readonly DisplayMessage[], index: n
   }
 
   return false;
+}
+
+// --- Context warning banner thresholds ---
+
+/** Utilisation ratio at or above which the warning banner appears. */
+export const CONTEXT_WARNING_SHOW_THRESHOLD = 0.85;
+
+/** Utilisation ratio below which the warning banner is hidden after compaction. */
+export const CONTEXT_WARNING_HIDE_THRESHOLD = 0.70;
+
+/**
+ * Determine whether the context warning banner should be visible.
+ * The banner appears at ≥ 85% utilisation and disappears only after
+ * compaction drops utilisation below 70%.
+ */
+export function shouldShowContextWarning(
+  utilisation: number | undefined,
+): boolean {
+  if (utilisation === undefined) return false;
+  return utilisation >= CONTEXT_WARNING_SHOW_THRESHOLD;
 }
 
 /** Spacing (in lines) between messages within the same exchange. */
@@ -140,6 +162,8 @@ export interface ConversationPanelProps {
   version: string;
   onViewMemory?: (memoryId: string) => void;
   onUndoMemory?: (memoryId: string) => void;
+  tokenUsage?: TokenUsageInfo;
+  onCompact?: () => void;
 }
 
 const DISPLAY_TO_LIFECYCLE_STATUS: Record<DisplayToolCall["status"], ToolCallStatus> = {
@@ -312,6 +336,8 @@ export function ConversationPanel({
   version,
   onViewMemory,
   onUndoMemory,
+  tokenUsage,
+  onCompact,
 }: ConversationPanelProps) {
   const { messages, isStreaming, lifecycleStatus } = useConversation();
   const { state } = useApp();
@@ -383,6 +409,18 @@ export function ConversationPanel({
     }
     return map;
   }, [memoryNotifications, messages]);
+
+  const showContextWarning = shouldShowContextWarning(tokenUsage?.utilisation);
+
+  useKeyboard((keyEvent) => {
+    if (!isFocused) return;
+    if (!showContextWarning) return;
+
+    const sequence = keyEvent.sequence ?? "";
+    if (sequence === "c" && onCompact) {
+      onCompact();
+    }
+  });
 
   return (
     <Box style={{ flexGrow: 1, minHeight: 0, flexDirection: "column", paddingLeft: 1, paddingRight: 1, paddingTop: 1 }}>
@@ -567,6 +605,15 @@ export function ConversationPanel({
           })}
           </Box>
         ) : null}
+
+      {showContextWarning && tokenUsage ? (
+        <Box style={{ marginTop: adjustedBlockGap(MESSAGE_GAP) }}>
+          <ContextWarningBanner
+            utilisation={tokenUsage.utilisation}
+            onCompact={onCompact ?? (() => {})}
+          />
+        </Box>
+      ) : null}
 
       {isStreaming && !hasContent ? (
         <Box style={{ marginTop: adjustedBlockGap(MESSAGE_GAP) }}>
