@@ -212,7 +212,7 @@ export function Layout({
       {/* Main content zone: conversation + input + optional side panels */}
       <ZoneShell
         backgroundColor={tokens["surface.primary"]}
-        style={{ flexGrow: 1, flexDirection: "row" }}
+        style={{ flexGrow: 1, flexDirection: "row", minHeight: 0 }}
       >
         <ChatScreen
           version={version}

@@ -124,4 +124,5 @@ export interface ZoneShellStyle {
   flexGrow?: number;
   flexShrink?: number;
   flexDirection?: "row" | "column";
+  minHeight?: number;
 }

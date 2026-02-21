@@ -42,13 +42,13 @@ import { loadModelPreferences, saveModelPreferences } from "./state/model-persis
 import { loadPinPreferences, savePinPreferences } from "./state/pin-persistence";
 import { loadThinkingPreferences, saveThinkingPreferences } from "./state/thinking-persistence";
 import { toPinPreferences, applyPinPreferences, DEFAULT_PANEL_STATE } from "./state/layout-mode";
-import { useConversations, useFocus, useFirstRun } from "./hooks";
+import { useConversations, useDebouncedWindowSize, useFocus, useFirstRun } from "./hooks";
 import type { PaletteAction } from "./palette/fuzzy-index";
 import type { ConversationLifecycleStatus } from "./state/status-machine";
 import { AppContext, DEFAULT_STATE, appReducer, useApp, createHydrationState, historyPayloadNormalizer } from "./store";
 import type { DisplayContentBlock, DisplayMessage, DisplayToolCall } from "./store";
 import { ThemeProvider, useThemeTokens } from "./theme";
-import { Box, Text, type KeyEvent, type TerminalDimensions, useKeyboard, useRenderer, useTerminalDimensions } from "./ui";
+import { Box, Text, type KeyEvent, type TerminalDimensions, useKeyboard, useRenderer } from "./ui";
 
 export interface AppProps {
   version: string;
@@ -1671,8 +1671,8 @@ function AppContainer({ version, dimensions }: AppContainerProps) {
 
 export function App({ version }: AppProps) {
   const [state, dispatch] = useReducer(appReducer, DEFAULT_STATE);
-  const rawDimensions = useTerminalDimensions();
-  const dimensions = useMemo(() => normalizeDimensions(rawDimensions), [rawDimensions]);
+  const debouncedDimensions = useDebouncedWindowSize(100);
+  const dimensions = useMemo(() => normalizeDimensions(debouncedDimensions), [debouncedDimensions]);
   const contextValue = useMemo(() => ({ state, dispatch }), [state]);
 
   return (

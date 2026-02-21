@@ -264,6 +264,7 @@ export function ZoneShell({
     flexDirection: zoneStyle?.flexDirection ?? "column",
     flexGrow: zoneStyle?.flexGrow,
     flexShrink: zoneStyle?.flexShrink,
+    minHeight: zoneStyle?.minHeight,
     backgroundColor: resolvedBg,
     border: hasBorder ? resolvedBorderSides : undefined,
     borderColor: hasBorder ? resolvedBorderColor : undefined,
