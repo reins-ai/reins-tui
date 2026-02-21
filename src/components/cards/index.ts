@@ -8,3 +8,4 @@ export { ThinkingBlockCard, wrapThinkingContent, padCardLine, buildThinkingHeade
 export { SubAgentGrid, deriveAgentStates, type SubAgentGridProps, type AgentState } from "./sub-agent-grid";
 export { ErrorCard, extractErrorMessage, truncateErrorMessage, formatErrorToolName, buildErrorCardHeader, buildErrorDetailLine, buildActionHints, getErrorCardStyle, isErrorCardCandidate, type ErrorCardProps } from "./error-card";
 export { ConversationContextMenu, type ConversationContextMenuProps, type ContextMenuAction, type ContextMenuMode } from "./conversation-context-menu";
+export { TokenBar, buildProgressBar, formatTokenCount, buildTokenLabel, getTokenBarTier, type TokenBarProps, type TokenBarTier } from "./token-bar";

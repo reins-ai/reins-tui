@@ -19,6 +19,7 @@ import { Box, Input, Text, useKeyboard, useRenderer } from "../ui";
 import { ACCENT_BORDER_CHARS, FramedBlock, SUBTLE_BORDER_CHARS } from "../ui/primitives";
 import { useConversations } from "../hooks";
 import { CompletionPopup } from "./completion-popup";
+import { TokenBar } from "./cards/token-bar";
 import type { ConversationLifecycleStatus } from "../state/status-machine";
 
 /**
@@ -57,10 +58,17 @@ export function formatLineCount(lineCount: number): string {
   return `[${lineCount} lines]`;
 }
 
+export interface TokenUsageInfo {
+  used: number;
+  limit: number;
+  utilisation: number;
+}
+
 export interface InputAreaProps {
   isFocused: boolean;
   onSubmit(text: string): void;
   onCancelPrompt?(): void | Promise<void>;
+  tokenUsage?: TokenUsageInfo;
 }
 
 export type InputSubmissionKind = "empty" | "command" | "message";
@@ -243,7 +251,7 @@ function toDate(value: Date | string | number): Date {
   return asDate;
 }
 
-export function InputArea({ isFocused, onSubmit, onCancelPrompt }: InputAreaProps) {
+export function InputArea({ isFocused, onSubmit, onCancelPrompt, tokenUsage }: InputAreaProps) {
   const { state, dispatch } = useApp();
   const conversations = useConversations();
   const { client: daemonClient, mode: daemonMode, isConnected } = useDaemon();
@@ -747,6 +755,13 @@ export function InputArea({ isFocused, onSubmit, onCancelPrompt }: InputAreaProp
             />
           ) : null}
         </Box>
+        {tokenUsage ? (
+          <TokenBar
+            used={tokenUsage.used}
+            limit={tokenUsage.limit}
+            utilisation={tokenUsage.utilisation}
+          />
+        ) : null}
       </FramedBlock>
     </>
   );
