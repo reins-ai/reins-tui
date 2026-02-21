@@ -14,6 +14,18 @@ import {
   isPromptCancellableLifecycle,
   getCancelPromptHint,
 } from "../../src/components/input-area";
+import {
+  buildProgressBar,
+  buildTokenLabel,
+  formatTokenCount,
+  getTokenBarTier,
+  type TokenBarProps,
+} from "../../src/components/cards/token-bar";
+import {
+  buildWarningMessage,
+  formatUtilisationPercent,
+  getWarningBannerStyle,
+} from "../../src/components/cards/context-warning-banner";
 import { ACCENT_BORDER_CHARS, SUBTLE_BORDER_CHARS } from "../../src/ui/primitives";
 
 // --- Mock theme tokens ---
@@ -377,5 +389,282 @@ describe("hint text content", () => {
     expect(expectedHint).toContain("send");
     expect(expectedHint).toContain("Shift+");
     expect(expectedHint).toContain("newline");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TokenBar helpers (from token-bar.tsx)
+// ---------------------------------------------------------------------------
+
+describe("TokenBar helpers", () => {
+  // --- buildProgressBar ---
+
+  describe("buildProgressBar", () => {
+    test("returns all empty at 0%", () => {
+      const bar = buildProgressBar(0);
+      expect(bar).toBe("\u2591".repeat(10));
+      expect(bar.length).toBe(10);
+    });
+
+    test("returns half-filled at 50%", () => {
+      const bar = buildProgressBar(0.5);
+      expect(bar).toBe("\u2593".repeat(5) + "\u2591".repeat(5));
+      expect(bar.length).toBe(10);
+    });
+
+    test("returns fully filled at 100%", () => {
+      const bar = buildProgressBar(1.0);
+      expect(bar).toBe("\u2593".repeat(10));
+      expect(bar.length).toBe(10);
+    });
+
+    test("uses 10-char width by default", () => {
+      const bar = buildProgressBar(0.3);
+      expect(bar.length).toBe(10);
+    });
+
+    test("clamps utilisation below 0 to 0", () => {
+      const bar = buildProgressBar(-0.5);
+      expect(bar).toBe("\u2591".repeat(10));
+    });
+
+    test("clamps utilisation above 1 to 1", () => {
+      const bar = buildProgressBar(1.5);
+      expect(bar).toBe("\u2593".repeat(10));
+    });
+
+    test("rounds filled count correctly at 25%", () => {
+      const bar = buildProgressBar(0.25);
+      // Math.round(0.25 * 10) = 3 filled
+      const filledCount = bar.split("").filter((c) => c === "\u2593").length;
+      expect(filledCount).toBe(3);
+    });
+
+    test("rounds filled count correctly at 75%", () => {
+      const bar = buildProgressBar(0.75);
+      // Math.round(0.75 * 10) = 8 filled
+      const filledCount = bar.split("").filter((c) => c === "\u2593").length;
+      expect(filledCount).toBe(8);
+    });
+
+    test("returns consistent length for edge utilisation values", () => {
+      for (const u of [0, 0.01, 0.1, 0.5, 0.9, 0.99, 1.0]) {
+        expect(buildProgressBar(u).length).toBe(10);
+      }
+    });
+  });
+
+  // --- getTokenBarTier ---
+
+  describe("getTokenBarTier", () => {
+    test("returns 'normal' at 0%", () => {
+      expect(getTokenBarTier(0)).toBe("normal");
+    });
+
+    test("returns 'normal' at 69%", () => {
+      expect(getTokenBarTier(0.69)).toBe("normal");
+    });
+
+    test("returns 'amber' at 70%", () => {
+      expect(getTokenBarTier(0.70)).toBe("amber");
+    });
+
+    test("returns 'amber' at 84%", () => {
+      expect(getTokenBarTier(0.84)).toBe("amber");
+    });
+
+    test("returns 'orange' at 85%", () => {
+      expect(getTokenBarTier(0.85)).toBe("orange");
+    });
+
+    test("returns 'orange' at 94%", () => {
+      expect(getTokenBarTier(0.94)).toBe("orange");
+    });
+
+    test("returns 'danger' at 95%", () => {
+      expect(getTokenBarTier(0.95)).toBe("danger");
+    });
+
+    test("returns 'danger' at 100%", () => {
+      expect(getTokenBarTier(1.0)).toBe("danger");
+    });
+
+    test("returns 'normal' for negative utilisation", () => {
+      expect(getTokenBarTier(-0.1)).toBe("normal");
+    });
+
+    test("returns 'danger' for utilisation above 100%", () => {
+      expect(getTokenBarTier(1.5)).toBe("danger");
+    });
+  });
+
+  // --- formatTokenCount ---
+
+  describe("formatTokenCount", () => {
+    test("formats 0", () => {
+      expect(formatTokenCount(0)).toBe("0");
+    });
+
+    test("formats small numbers without commas", () => {
+      expect(formatTokenCount(42)).toBe("42");
+    });
+
+    test("formats with commas for large numbers", () => {
+      const result = formatTokenCount(1247);
+      // toLocaleString may vary by locale, but should contain the digits
+      expect(result).toContain("1");
+      expect(result).toContain("247");
+    });
+
+    test("formats 200000 with separators", () => {
+      const result = formatTokenCount(200000);
+      expect(result).toContain("200");
+      expect(result).toContain("000");
+    });
+
+    test("formats 1000000 with separators", () => {
+      const result = formatTokenCount(1000000);
+      expect(result).toContain("1");
+      expect(result).toContain("000");
+    });
+  });
+
+  // --- buildTokenLabel ---
+
+  describe("buildTokenLabel", () => {
+    test("builds label with used and limit", () => {
+      const label = buildTokenLabel(1247, 200000);
+      expect(label).toContain("tokens");
+      expect(label).toContain("/");
+    });
+
+    test("builds label for zero usage", () => {
+      const label = buildTokenLabel(0, 200000);
+      expect(label).toContain("0");
+      expect(label).toContain("tokens");
+    });
+
+    test("builds label at full capacity", () => {
+      const label = buildTokenLabel(200000, 200000);
+      expect(label).toContain("tokens");
+      // Both numbers should be the same formatted value
+      const parts = label.split("/");
+      expect(parts.length).toBe(2);
+    });
+  });
+
+  // --- TokenBarProps type contract ---
+
+  describe("TokenBarProps type contract", () => {
+    test("props shape matches expected interface", () => {
+      const props: TokenBarProps = {
+        used: 1247,
+        limit: 200000,
+        utilisation: 0.006235,
+      };
+
+      expect(props.used).toBe(1247);
+      expect(props.limit).toBe(200000);
+      expect(typeof props.utilisation).toBe("number");
+    });
+
+    test("isCompacting is optional and defaults conceptually to false", () => {
+      const props: TokenBarProps = {
+        used: 100,
+        limit: 200000,
+        utilisation: 0.0005,
+      };
+
+      expect(props.isCompacting).toBeUndefined();
+    });
+
+    test("isCompacting can be set to true", () => {
+      const props: TokenBarProps = {
+        used: 180000,
+        limit: 200000,
+        utilisation: 0.9,
+        isCompacting: true,
+      };
+
+      expect(props.isCompacting).toBe(true);
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ContextWarningBanner helpers (from context-warning-banner.tsx)
+// ---------------------------------------------------------------------------
+
+describe("ContextWarningBanner helpers", () => {
+  describe("formatUtilisationPercent", () => {
+    test("formats 0.87 as '87%'", () => {
+      expect(formatUtilisationPercent(0.87)).toBe("87%");
+    });
+
+    test("formats 0 as '0%'", () => {
+      expect(formatUtilisationPercent(0)).toBe("0%");
+    });
+
+    test("formats 1.0 as '100%'", () => {
+      expect(formatUtilisationPercent(1.0)).toBe("100%");
+    });
+
+    test("rounds to nearest integer", () => {
+      expect(formatUtilisationPercent(0.856)).toBe("86%");
+    });
+  });
+
+  describe("buildWarningMessage", () => {
+    test("includes warning icon", () => {
+      const msg = buildWarningMessage(0.87);
+      expect(msg).toContain("\u26A0");
+    });
+
+    test("includes utilisation percentage", () => {
+      const msg = buildWarningMessage(0.87);
+      expect(msg).toContain("87%");
+    });
+
+    test("includes compact action hint", () => {
+      const msg = buildWarningMessage(0.87);
+      expect(msg).toContain("[c] compact now");
+    });
+
+    test("includes 'Context at' prefix", () => {
+      const msg = buildWarningMessage(0.90);
+      expect(msg).toContain("Context at 90%");
+    });
+  });
+
+  describe("getWarningBannerStyle", () => {
+    test("uses status.warning for accent colour", () => {
+      const tokens: Record<string, string> = {
+        "status.warning": "#ffaa00",
+        "surface.secondary": "#1a1a1a",
+      };
+      const style = getWarningBannerStyle(tokens as unknown as ThemeTokens);
+      expect(style.accentColor).toBe("#ffaa00");
+    });
+
+    test("uses surface.secondary for background", () => {
+      const tokens: Record<string, string> = {
+        "status.warning": "#ffaa00",
+        "surface.secondary": "#1a1a1a",
+      };
+      const style = getWarningBannerStyle(tokens as unknown as ThemeTokens);
+      expect(style.backgroundColor).toBe("#1a1a1a");
+    });
+
+    test("has consistent padding", () => {
+      const tokens: Record<string, string> = {
+        "status.warning": "#ffaa00",
+        "surface.secondary": "#1a1a1a",
+      };
+      const style = getWarningBannerStyle(tokens as unknown as ThemeTokens);
+      expect(style.paddingLeft).toBe(2);
+      expect(style.paddingRight).toBe(1);
+      expect(style.paddingTop).toBe(0);
+      expect(style.paddingBottom).toBe(0);
+    });
   });
 });
