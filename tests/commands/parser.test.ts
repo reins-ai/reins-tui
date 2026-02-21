@@ -36,6 +36,8 @@ describe("slash command registry", () => {
       "browser",
       "schedule",
       "import-memories",
+      "export-persona",
+      "import-persona",
     ]);
   });
 
@@ -70,6 +72,8 @@ describe("slash command registry", () => {
       browser: "system",
       schedule: "system",
       "import-memories": "memory",
+      "export-persona": "environment",
+      "import-persona": "environment",
     });
   });
 
@@ -212,8 +216,10 @@ describe("getCommandAutocomplete", () => {
       "daemon",
       "env",
       "export",
+      "export-persona",
       "help",
       "import-memories",
+      "import-persona",
       "integrations",
       "memory",
       "model",
