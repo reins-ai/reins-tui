@@ -36,10 +36,11 @@ import type { DaemonMessage, DaemonResult, ConversationSummary as DaemonConversa
 import { mapConversationHistory } from "./daemon/ws-transport";
 import { ConnectService } from "./providers/connect-service";
 import { GreetingService, type StartupContent } from "./personalization/greeting-service";
-import { createConversationStore, type ConversationStoreState } from "./state/conversation-store";
+import { createConversationStore, restoreSession, type ConversationStoreState } from "./state/conversation-store";
 import type { StreamToolCall, TurnContentBlock } from "./state/streaming-state";
 import { loadModelPreferences, saveModelPreferences } from "./state/model-persistence";
 import { loadPinPreferences, savePinPreferences } from "./state/pin-persistence";
+import { loadSessionState, saveSessionState } from "./state/session-persistence";
 import { loadThinkingPreferences, saveThinkingPreferences } from "./state/thinking-persistence";
 import { toPinPreferences, applyPinPreferences, DEFAULT_PANEL_STATE } from "./state/layout-mode";
 import { useConversations, useDebouncedWindowSize, useFocus, useFirstRun } from "./hooks";
@@ -724,6 +725,10 @@ function AppView({ version, dimensions }: AppViewProps) {
     };
   }, [isConnected]);
 
+  // Track whether the initial session restore has run so we only apply
+  // KeepSystemAndRecentStrategy trimming on the very first load.
+  const sessionRestoredRef = useRef(false);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -737,7 +742,14 @@ function AppView({ version, dimensions }: AppViewProps) {
       dispatch({ type: "SET_CONVERSATIONS", payload: conversations });
 
       if (conversations.length > 0 && !state.activeConversationId) {
-        dispatch({ type: "SET_ACTIVE_CONVERSATION", payload: conversations[0].id });
+        // Prefer the persisted conversation ID from the previous session
+        const persisted = loadSessionState();
+        const persistedExists = persisted !== null
+          && conversations.some((c) => c.id === persisted.lastConversationId);
+        const targetId = persistedExists
+          ? persisted!.lastConversationId
+          : conversations[0].id;
+        dispatch({ type: "SET_ACTIVE_CONVERSATION", payload: targetId });
       }
     };
 
@@ -748,6 +760,18 @@ function AppView({ version, dimensions }: AppViewProps) {
     };
   }, [daemonClient, dispatch, isConnected, state.activeConversationId]);
 
+  // Persist active conversation ID so it survives restarts
+  const prevActiveConversationRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (
+      state.activeConversationId
+      && state.activeConversationId !== prevActiveConversationRef.current
+    ) {
+      prevActiveConversationRef.current = state.activeConversationId;
+      saveSessionState({ lastConversationId: state.activeConversationId });
+    }
+  }, [state.activeConversationId]);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -756,6 +780,31 @@ function AppView({ version, dimensions }: AppViewProps) {
     }
 
     const loadConversation = async () => {
+      // On the first load after startup, use restoreSession to apply
+      // KeepSystemAndRecentStrategy trimming when messages are too large.
+      if (!sessionRestoredRef.current) {
+        sessionRestoredRef.current = true;
+        const restored = await restoreSession(
+          daemonClient,
+          state.activeConversationId as string,
+        );
+        if (!restored || cancelled) {
+          return;
+        }
+
+        const rawMessages = mapConversationHistory(restored.messages);
+        const hydrationState = createHydrationState();
+        dispatch({
+          type: "HYDRATE_HISTORY",
+          payload: {
+            rawMessages,
+            normalizer: historyPayloadNormalizer,
+            hydrationState,
+          },
+        });
+        return;
+      }
+
       const result = await daemonClient.getConversation(state.activeConversationId as string);
       if (!result.ok || cancelled) {
         return;

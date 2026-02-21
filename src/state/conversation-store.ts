@@ -1,3 +1,9 @@
+import {
+  KeepSystemAndRecentStrategy,
+  estimateConversationTokens,
+} from "@reins/core";
+import type { Message } from "@reins/core";
+
 import type { DaemonClient } from "../daemon/client";
 import {
   err,
@@ -312,5 +318,94 @@ export function createConversationStore(options: ConversationStoreOptions): Conv
         timestamp: now().toISOString(),
       });
     },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Session restore — fetch last conversation and trim if too large
+// ---------------------------------------------------------------------------
+
+/** Default context window budget used when trimming restored messages. */
+const RESTORE_MAX_TOKENS = 128_000;
+
+/** Tokens reserved for the next user message and system overhead. */
+const RESTORE_RESERVED_TOKENS = 4_000;
+
+/** Message count threshold above which trimming is applied. */
+const RESTORE_MESSAGE_COUNT_THRESHOLD = 200;
+
+/** Number of recent non-system messages to keep when trimming. */
+const RESTORE_KEEP_RECENT = 20;
+
+function daemonMessageToCore(message: DaemonMessage): Message {
+  return {
+    id: message.id,
+    role: message.role,
+    content: message.content,
+    createdAt: new Date(message.createdAt),
+  };
+}
+
+function coreMessageToDaemon(message: Message): DaemonMessage {
+  return {
+    id: message.id,
+    role: message.role as DaemonMessage["role"],
+    content: typeof message.content === "string"
+      ? message.content
+      : JSON.stringify(message.content),
+    createdAt: message.createdAt instanceof Date
+      ? message.createdAt.toISOString()
+      : String(message.createdAt),
+  };
+}
+
+export interface RestoreSessionResult {
+  conversationId: string;
+  messages: DaemonMessage[];
+  trimmed: boolean;
+}
+
+/**
+ * Fetch a conversation from the daemon and trim its messages if they
+ * exceed the context budget. Uses `KeepSystemAndRecentStrategy` to
+ * preserve system messages and the most recent exchanges.
+ *
+ * Returns `null` when the conversation cannot be fetched (e.g. daemon
+ * offline or conversation deleted).
+ */
+export async function restoreSession(
+  daemonClient: DaemonClient,
+  conversationId: string,
+): Promise<RestoreSessionResult | null> {
+  const result = await daemonClient.getConversation(conversationId);
+  if (!result.ok) {
+    return null;
+  }
+
+  const record = result.value;
+  let messages = record.messages;
+  let trimmed = false;
+
+  if (messages.length > RESTORE_MESSAGE_COUNT_THRESHOLD) {
+    const coreMessages = messages.map(daemonMessageToCore);
+    const tokenCount = estimateConversationTokens(coreMessages);
+    const effectiveLimit = RESTORE_MAX_TOKENS - RESTORE_RESERVED_TOKENS;
+
+    if (tokenCount > effectiveLimit) {
+      const strategy = new KeepSystemAndRecentStrategy();
+      const truncated = strategy.truncate(coreMessages, {
+        maxTokens: RESTORE_MAX_TOKENS,
+        reservedTokens: RESTORE_RESERVED_TOKENS,
+        keepRecentMessages: RESTORE_KEEP_RECENT,
+      });
+      messages = truncated.map(coreMessageToDaemon);
+      trimmed = true;
+    }
+  }
+
+  return {
+    conversationId: record.id,
+    messages,
+    trimmed,
   };
 }
