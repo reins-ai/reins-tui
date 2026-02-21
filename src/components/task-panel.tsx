@@ -5,6 +5,9 @@ import type { ActivityEvent, ActivityStats } from "../state/activity-store";
 import { useThemeTokens } from "../theme";
 import type { ThemeTokens } from "../theme/theme-schema";
 import { Box, ScrollBox, Text, useKeyboard } from "../ui";
+import type { ExportFormat } from "../util/activity-export";
+import { exportActivityLog } from "../util/activity-export";
+import { Clipboard } from "../util/clipboard";
 import { StepCard } from "./cards/step-card";
 
 // --- Constants ---
@@ -561,8 +564,10 @@ export interface ActivityPanelProps {
   events: ActivityEvent[];
   stats?: ActivityStats;
   onClear?: () => void;
+  onExport?: (format: ExportFormat) => void;
   width?: number;
   maxVisible?: number;
+  focusedCardIndex?: number;
 }
 
 /**
@@ -576,7 +581,7 @@ export function hasDoomLoop(events: ActivityEvent[]): boolean {
 
 /**
  * Formats activity stats into a compact summary string.
- * Format: "N tool calls · X tokens · Y.Ys total  [c] clear"
+ * Format: "N tool calls · X tokens · Y.Ys total"
  */
 export function formatStats(stats: ActivityStats): string {
   const calls = `${stats.totalToolCalls} tool call${stats.totalToolCalls === 1 ? "" : "s"}`;
@@ -586,7 +591,19 @@ export function formatStats(stats: ActivityStats): string {
   const wallMs = stats.totalWallMs > 0
     ? ` \u00B7 ${(stats.totalWallMs / 1000).toFixed(1)}s total`
     : "";
-  return `${calls}${tokens}${wallMs}  [c] clear`;
+  return `${calls}${tokens}${wallMs}`;
+}
+
+/**
+ * Builds the keybinding hint line for the activity panel footer.
+ * Shows available actions: [y] copy, [x] export, [c] clear.
+ */
+export function formatKeybindingHints(hasFocusedCard: boolean): string {
+  const hints: string[] = [];
+  if (hasFocusedCard) hints.push("[y] copy");
+  hints.push("[x] export");
+  hints.push("[c] clear");
+  return hints.join("  ");
 }
 
 /**
@@ -604,10 +621,23 @@ export function ActivityPanel(props: ActivityPanelProps) {
     events,
     stats,
     onClear,
+    onExport,
     width = ACTIVITY_CARD_WIDTH,
     maxVisible = ACTIVITY_MAX_VISIBLE,
+    focusedCardIndex,
   } = props;
   const { tokens } = useThemeTokens();
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
+  const exportTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear export status timer on unmount
+  useEffect(() => {
+    return () => {
+      if (exportTimerRef.current !== null) {
+        clearTimeout(exportTimerRef.current);
+      }
+    };
+  }, []);
 
   const headerText = `\u2500 ${ACTIVITY_HEADER_ICON} ${ACTIVITY_HEADER_LABEL} `;
   const headerFill = "\u2500".repeat(Math.max(0, width - headerText.length - 2));
@@ -620,10 +650,48 @@ export function ActivityPanel(props: ActivityPanelProps) {
   const visibleEvents = events.slice(0, maxVisible);
   const totalEvents = events.length;
   const isDoomLoop = hasDoomLoop(events);
+  const hasFocusedCard = focusedCardIndex !== undefined && focusedCardIndex >= 0 && focusedCardIndex < visibleEvents.length;
 
   useKeyboard((keyEvent) => {
-    if (keyEvent.sequence === "c" && !keyEvent.ctrl && onClear) {
+    const seq = keyEvent.sequence ?? "";
+
+    // [c] — clear activity log
+    if (seq === "c" && !keyEvent.ctrl && onClear) {
       onClear();
+      return;
+    }
+
+    // [y] — copy focused card's full event JSON to clipboard
+    if (seq === "y" && hasFocusedCard) {
+      const event = visibleEvents[focusedCardIndex!];
+      if (event) {
+        void Clipboard.copy(JSON.stringify(event, null, 2));
+      }
+      return;
+    }
+
+    // [x] — export full session log to file
+    if (seq === "x" && !keyEvent.ctrl) {
+      if (onExport) {
+        onExport("json");
+      } else if (events.length > 0) {
+        void exportActivityLog(events, "json").then((result) => {
+          if (result.ok && result.filePath) {
+            setExportStatus(`\u2713 Exported to ${result.filePath}`);
+          } else {
+            setExportStatus(`\u2717 Export failed: ${result.error ?? "unknown error"}`);
+          }
+          // Clear status after 3 seconds
+          if (exportTimerRef.current !== null) {
+            clearTimeout(exportTimerRef.current);
+          }
+          exportTimerRef.current = setTimeout(() => {
+            setExportStatus(null);
+            exportTimerRef.current = null;
+          }, 3000);
+        });
+      }
+      return;
     }
   });
 
@@ -633,6 +701,11 @@ export function ActivityPanel(props: ActivityPanelProps) {
       {isDoomLoop && (
         <Text style={{ color: tokens["status.error"] }}>
           {padActivityLine("\u26A0  Loop detected: repeated tool calls with identical args.", width)}
+        </Text>
+      )}
+      {exportStatus !== null && (
+        <Text style={{ color: exportStatus.startsWith("\u2713") ? tokens["status.success"] : tokens["status.error"] }}>
+          {padActivityLine(exportStatus, width)}
         </Text>
       )}
       {visibleEvents.length === 0 ? (
@@ -651,6 +724,7 @@ export function ActivityPanel(props: ActivityPanelProps) {
                 event={event}
                 stepNumber={stepNumber}
                 width={width}
+                isFocused={focusedCardIndex === index}
               />
             );
           })}
@@ -661,6 +735,9 @@ export function ActivityPanel(props: ActivityPanelProps) {
           <Text style={{ color: tokens["text.muted"] }}>{separatorLine}</Text>
           <Text style={{ color: tokens["text.muted"] }}>
             {padActivityLine(formatStats(stats), width)}
+          </Text>
+          <Text style={{ color: tokens["text.muted"] }}>
+            {padActivityLine(formatKeybindingHints(hasFocusedCard), width)}
           </Text>
         </>
       )}
