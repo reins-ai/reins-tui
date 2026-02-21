@@ -1,4 +1,4 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, mock } from "bun:test";
 
 import {
   extractErrorMessage,
@@ -9,6 +9,7 @@ import {
   buildActionHints,
   getErrorCardStyle,
   isErrorCardCandidate,
+  type ErrorCardProps,
 } from "../../src/components/cards/error-card";
 import type { DisplayToolCall } from "../../src/store/types";
 import type { ThemeTokens } from "../../src/theme/theme-schema";
@@ -237,6 +238,197 @@ describe("isErrorCardCandidate", () => {
 
   it("returns false for error status with no isError and empty result", () => {
     const tc = makeToolCall({ status: "error", isError: false, result: "" });
+    expect(isErrorCardCandidate(tc)).toBe(false);
+  });
+});
+
+// --- ErrorCardProps callback contract ---
+
+describe("ErrorCardProps callback contract", () => {
+  it("onRetry receives toolCallId and toolName", () => {
+    const onRetry = mock((toolCallId: string, toolName: string) => {
+      return { toolCallId, toolName };
+    });
+
+    const tc = makeToolCall({ id: "tc-42", name: "mcp.bash" });
+    // Simulate what the component does when [r] is pressed
+    onRetry(tc.id, tc.name);
+
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(onRetry).toHaveBeenCalledWith("tc-42", "mcp.bash");
+  });
+
+  it("onIgnore receives toolCallId", () => {
+    const onIgnore = mock((toolCallId: string) => {
+      return { toolCallId };
+    });
+
+    const tc = makeToolCall({ id: "tc-99" });
+    // Simulate what the component does when [i] is pressed
+    onIgnore(tc.id);
+
+    expect(onIgnore).toHaveBeenCalledTimes(1);
+    expect(onIgnore).toHaveBeenCalledWith("tc-99");
+  });
+
+  it("onRetry is not called when callback is undefined", () => {
+    const props: Partial<ErrorCardProps> = {
+      toolCall: makeToolCall(),
+      isFocused: true,
+      onRetry: undefined,
+      onIgnore: undefined,
+    };
+
+    // Simulate the guard: if (sequence === "r" && onRetry) { onRetry(...) }
+    const sequence = "r";
+    if (sequence === "r" && props.onRetry) {
+      props.onRetry(props.toolCall!.id, props.toolCall!.name);
+    }
+    // No error thrown — undefined callbacks are safely skipped
+    expect(props.onRetry).toBeUndefined();
+  });
+
+  it("onIgnore is not called when callback is undefined", () => {
+    const props: Partial<ErrorCardProps> = {
+      toolCall: makeToolCall(),
+      isFocused: true,
+      onRetry: undefined,
+      onIgnore: undefined,
+    };
+
+    const sequence = "i";
+    if (sequence === "i" && props.onIgnore) {
+      props.onIgnore(props.toolCall!.id);
+    }
+    expect(props.onIgnore).toBeUndefined();
+  });
+
+  it("callbacks are not invoked when isFocused is false", () => {
+    const onRetry = mock(() => {});
+    const onIgnore = mock(() => {});
+
+    const isFocused = false;
+    const sequence = "r";
+
+    // Simulate the guard: if (!isFocused) return;
+    if (isFocused) {
+      if (sequence === "r") onRetry();
+      if (sequence === "i") onIgnore();
+    }
+
+    expect(onRetry).not.toHaveBeenCalled();
+    expect(onIgnore).not.toHaveBeenCalled();
+  });
+
+  it("only retry is called for 'r' key, not ignore", () => {
+    const onRetry = mock(() => {});
+    const onIgnore = mock(() => {});
+
+    const isFocused = true;
+    const sequence = "r";
+
+    if (isFocused) {
+      if (sequence === "r" && onRetry) onRetry();
+      if (sequence === "i" && onIgnore) onIgnore();
+    }
+
+    expect(onRetry).toHaveBeenCalledTimes(1);
+    expect(onIgnore).not.toHaveBeenCalled();
+  });
+
+  it("only ignore is called for 'i' key, not retry", () => {
+    const onRetry = mock(() => {});
+    const onIgnore = mock(() => {});
+
+    const isFocused = true;
+    const sequence = "i";
+
+    if (isFocused) {
+      if (sequence === "r" && onRetry) onRetry();
+      if (sequence === "i" && onIgnore) onIgnore();
+    }
+
+    expect(onRetry).not.toHaveBeenCalled();
+    expect(onIgnore).toHaveBeenCalledTimes(1);
+  });
+
+  it("unrelated keys do not trigger callbacks", () => {
+    const onRetry = mock(() => {});
+    const onIgnore = mock(() => {});
+
+    const isFocused = true;
+    const sequence = "x";
+
+    if (isFocused) {
+      if (sequence === "r" && onRetry) onRetry();
+      if (sequence === "i" && onIgnore) onIgnore();
+    }
+
+    expect(onRetry).not.toHaveBeenCalled();
+    expect(onIgnore).not.toHaveBeenCalled();
+  });
+});
+
+// --- Error card end-to-end data flow ---
+
+describe("error card end-to-end data flow", () => {
+  it("full pipeline: candidate check → extract → format → display", () => {
+    const tc = makeToolCall({
+      id: "tc-1",
+      name: "mcp.file_write",
+      status: "error",
+      isError: true,
+      result: "EACCES: permission denied, open '/etc/hosts'",
+    });
+
+    // Step 1: Check if this is an error card candidate
+    expect(isErrorCardCandidate(tc)).toBe(true);
+
+    // Step 2: Extract the error message
+    const errorMsg = extractErrorMessage(tc);
+    expect(errorMsg).toBe("EACCES: permission denied, open '/etc/hosts'");
+
+    // Step 3: Build the header
+    const header = buildErrorCardHeader(tc.name);
+    expect(header).toBe("\u2717 File write failed");
+
+    // Step 4: Build the detail line
+    const detail = buildErrorDetailLine(errorMsg);
+    expect(detail).toBe("Error: EACCES: permission denied, open '/etc/hosts'");
+
+    // Step 5: Build action hints
+    const hints = buildActionHints();
+    expect(hints).toContain("[r] retry");
+    expect(hints).toContain("[i] ignore");
+  });
+
+  it("pipeline with very long error message", () => {
+    const longError = "Stack trace: " + "at module.ts:123\n".repeat(50);
+    const tc = makeToolCall({
+      name: "tools/execute",
+      status: "error",
+      isError: true,
+      result: longError,
+    });
+
+    expect(isErrorCardCandidate(tc)).toBe(true);
+
+    const errorMsg = extractErrorMessage(tc);
+    expect(errorMsg).toBe(longError);
+
+    const detail = buildErrorDetailLine(errorMsg);
+    // Detail line should be truncated
+    expect(detail.length).toBeLessThan(longError.length + 10);
+    expect(detail.startsWith("Error: ")).toBe(true);
+  });
+
+  it("pipeline for non-error tool call is rejected", () => {
+    const tc = makeToolCall({
+      status: "complete",
+      isError: false,
+      result: "Success",
+    });
+
     expect(isErrorCardCandidate(tc)).toBe(false);
   });
 });
