@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 import { ServiceInstaller, type ServiceDefinition } from "@reins/core";
 import { Box, Input, Text, useKeyboard } from "../../../ui";
@@ -22,6 +24,7 @@ type ServiceState = "running" | "stopped" | "not-installed" | "unknown";
 interface DetectionResult {
   healthOk: boolean;
   serviceStatus: ServiceState;
+  diagnostic: NetworkDiagnostic | null;
 }
 
 /**
@@ -44,6 +47,22 @@ interface FunctionalityResult {
   fullyFunctional: boolean;
   /** Human-readable informational messages about missing capabilities. */
   notices: string[];
+}
+
+/**
+ * Diagnostic classification for daemon health check failures.
+ * Used to provide actionable error messages instead of generic ones.
+ */
+export type NetworkDiagnosticKind =
+  | "connection-refused"
+  | "timeout"
+  | "port-in-use"
+  | "unknown";
+
+export interface NetworkDiagnostic {
+  kind: NetworkDiagnosticKind;
+  message: string;
+  hint: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -79,14 +98,124 @@ const SERVICE_DEFINITION: ServiceDefinition = {
 };
 
 // ---------------------------------------------------------------------------
-// Cross-platform detection helpers
+// Network diagnostics
 // ---------------------------------------------------------------------------
 
 /**
- * Try all loopback addresses in parallel. Returns true if any responds OK.
+ * Resolve the platform-specific daemon log directory path.
+ * Mirrors the logic in reins-core/src/daemon/paths.ts.
+ */
+function getDaemonLogPath(): string {
+  const home = homedir();
+  const platform = process.platform;
+
+  if (platform === "darwin") {
+    return join(home, "Library", "Application Support", "reins", "logs");
+  }
+  if (platform === "win32") {
+    const appData = process.env.APPDATA ?? join(home, "AppData", "Roaming");
+    return join(appData, "reins", "logs");
+  }
+  // Linux and other platforms
+  return join(home, ".reins", "logs");
+}
+
+/**
+ * Classify a fetch error into a specific diagnostic category.
+ * Bun's fetch produces different error shapes depending on the failure:
+ *   - ECONNREFUSED: daemon not running on that address
+ *   - AbortError / TimeoutError: request timed out (AbortSignal.timeout)
+ *   - EADDRINUSE: port conflict (rare from fetch, more common from bind)
+ */
+export function classifyFetchError(error: unknown): NetworkDiagnosticKind {
+  if (!(error instanceof Error)) return "unknown";
+
+  const message = error.message.toLowerCase();
+  const code = (error as NodeJS.ErrnoException).code ?? "";
+
+  // Connection refused — daemon is not listening
+  if (code === "ECONNREFUSED" || message.includes("econnrefused") || message.includes("connection refused")) {
+    return "connection-refused";
+  }
+
+  // Timeout — AbortSignal.timeout fires an AbortError or TimeoutError
+  if (
+    error.name === "AbortError" ||
+    error.name === "TimeoutError" ||
+    code === "ETIMEDOUT" ||
+    message.includes("timed out") ||
+    message.includes("timeout")
+  ) {
+    return "timeout";
+  }
+
+  // Port in use — unlikely from fetch but possible in some error chains
+  if (code === "EADDRINUSE" || message.includes("eaddrinuse") || message.includes("address already in use")) {
+    return "port-in-use";
+  }
+
+  return "unknown";
+}
+
+/**
+ * Analyze all health check failures and produce a single actionable diagnostic.
+ * Prioritizes the most informative error: connection-refused > timeout > port-in-use > unknown.
+ */
+export function diagnoseHealthFailure(results: PromiseSettledResult<boolean>[]): NetworkDiagnostic {
+  const kinds = new Set<NetworkDiagnosticKind>();
+
+  for (const result of results) {
+    if (result.status === "rejected") {
+      kinds.add(classifyFetchError(result.reason));
+    }
+  }
+
+  if (kinds.has("connection-refused")) {
+    return {
+      kind: "connection-refused",
+      message: "Connection refused — the daemon is not running on port 7433.",
+      hint: "Run: reins daemon start",
+    };
+  }
+
+  if (kinds.has("timeout")) {
+    return {
+      kind: "timeout",
+      message: "Connection timed out — the daemon did not respond.",
+      hint: "Check if a firewall is blocking port 7433.",
+    };
+  }
+
+  if (kinds.has("port-in-use")) {
+    return {
+      kind: "port-in-use",
+      message: "Port 7433 is already in use by another service.",
+      hint: "Stop the conflicting service or change the daemon port.",
+    };
+  }
+
+  return {
+    kind: "unknown",
+    message: "Could not connect to the daemon.",
+    hint: "Check the daemon logs for details.",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Cross-platform detection helpers
+// ---------------------------------------------------------------------------
+
+interface HealthCheckResult {
+  ok: boolean;
+  diagnostic: NetworkDiagnostic | null;
+}
+
+/**
+ * Try all loopback addresses in parallel. Returns whether any responds OK
+ * and, on failure, a diagnostic describing the most likely cause.
  * This handles IPv4-only (macOS/Windows), IPv6-only (Linux), and dual-stack.
  */
-async function checkDaemonHealth(): Promise<boolean> {
+async function checkDaemonHealth(): Promise<HealthCheckResult> {
   const results = await Promise.allSettled(
     HEALTH_URLS.map((url) =>
       fetch(url, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) })
@@ -94,9 +223,14 @@ async function checkDaemonHealth(): Promise<boolean> {
     ),
   );
 
-  return results.some(
+  const anyOk = results.some(
     (r) => r.status === "fulfilled" && r.value === true,
   );
+
+  return {
+    ok: anyOk,
+    diagnostic: anyOk ? null : diagnoseHealthFailure(results),
+  };
 }
 
 /**
@@ -185,11 +319,11 @@ async function detectServiceStatus(installer: ServiceInstaller): Promise<Service
 }
 
 async function detectDaemon(installer: ServiceInstaller): Promise<DetectionResult> {
-  const [healthOk, serviceStatus] = await Promise.all([
+  const [healthResult, serviceStatus] = await Promise.all([
     checkDaemonHealth(),
     detectServiceStatus(installer),
   ]);
-  return { healthOk, serviceStatus };
+  return { healthOk: healthResult.ok, serviceStatus, diagnostic: healthResult.diagnostic };
 }
 
 // ---------------------------------------------------------------------------
@@ -233,6 +367,7 @@ export function DaemonInstallStepView({ tokens, engineState: _engineState, onSte
   const [detail, setDetail] = useState<string | null>(null);
   const [serviceInfo, setServiceInfo] = useState<string | null>(null);
   const [functionalityInfo, setFunctionalityInfo] = useState<FunctionalityResult | null>(null);
+  const [diagnosticInfo, setDiagnosticInfo] = useState<NetworkDiagnostic | null>(null);
   const [retryCount, setRetryCount] = useState(0);
 
   // Remote endpoint state
@@ -266,6 +401,7 @@ export function DaemonInstallStepView({ tokens, engineState: _engineState, onSte
       setDetail(null);
       setServiceInfo(null);
       setFunctionalityInfo(null);
+      setDiagnosticInfo(null);
 
       // --- Phase 1: detect current state ---
       const detection = await detectDaemon(installer);
@@ -300,7 +436,7 @@ export function DaemonInstallStepView({ tokens, engineState: _engineState, onSte
         const retry = await checkDaemonHealth();
         if (cancelled) return;
 
-        if (retry) {
+        if (retry.ok) {
           setServiceInfo("Service installed and running");
           setStatus("connected");
           onStepData({ daemonStatus: "connected", installed: true, serviceStatus: "running" });
@@ -311,6 +447,7 @@ export function DaemonInstallStepView({ tokens, engineState: _engineState, onSte
         setStatus("not-available");
         setDetail("Service is running but not responding to health checks.");
         setServiceInfo("Service status: running (unresponsive)");
+        setDiagnosticInfo(retry.diagnostic);
         onStepData({ daemonStatus: "not-available", installed: true, serviceStatus: "running" });
         return;
       }
@@ -331,13 +468,15 @@ export function DaemonInstallStepView({ tokens, engineState: _engineState, onSte
           const retry = await checkDaemonHealth();
           if (cancelled) return;
 
-          if (retry) {
+          if (retry.ok) {
             setServiceInfo("Service installed and running");
             setStatus("connected");
             onStepData({ daemonStatus: "connected", installed: true, serviceStatus: "running" });
             void runFunctionalityCheck();
             return;
           }
+
+          setDiagnosticInfo(retry.diagnostic);
         }
 
         setStatus("not-available");
@@ -351,6 +490,7 @@ export function DaemonInstallStepView({ tokens, engineState: _engineState, onSte
       // as writing a service file with incorrect paths can break an
       // existing installation. Show guidance instead.
       setStatus("not-available");
+      setDiagnosticInfo(detection.diagnostic);
       if (detection.serviceStatus === "not-installed") {
         setDetail("No daemon service detected. See docs to install.");
         setServiceInfo("Service status: not installed");
@@ -546,7 +686,17 @@ export function DaemonInstallStepView({ tokens, engineState: _engineState, onSte
                 style={{ color: tokens["status.error"] }}
               />
             </Box>
-            {detail !== null ? (
+            {diagnosticInfo !== null ? (
+              <Box style={{ flexDirection: "column", marginTop: 1, paddingLeft: 2 }}>
+                <Box>
+                  <Text content={diagnosticInfo.message} style={{ color: tokens["status.warning"] }} />
+                </Box>
+                <Box style={{ marginTop: 1 }}>
+                  <Text content={diagnosticInfo.hint} style={{ color: tokens["text.secondary"] }} />
+                </Box>
+              </Box>
+            ) : null}
+            {detail !== null && diagnosticInfo === null ? (
               <Box style={{ marginTop: 1, paddingLeft: 2 }}>
                 <Text content={detail} style={{ color: tokens["text.muted"] }} />
               </Box>
@@ -556,6 +706,12 @@ export function DaemonInstallStepView({ tokens, engineState: _engineState, onSte
                 <Text content={serviceInfo} style={{ color: tokens["text.muted"] }} />
               </Box>
             ) : null}
+            <Box style={{ marginTop: 1, paddingLeft: 2 }}>
+              <Text
+                content={`Logs: ${getDaemonLogPath()}`}
+                style={{ color: tokens["text.muted"] }}
+              />
+            </Box>
             <Box style={{ marginTop: 1, paddingLeft: 2 }}>
               <Text
                 content="You can continue setup, start the daemon later, or configure a remote endpoint."
