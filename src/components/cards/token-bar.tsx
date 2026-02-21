@@ -83,6 +83,11 @@ export interface TokenBarProps {
   limit: number;
   /** Utilisation ratio (0–1). */
   utilisation: number;
+  /**
+   * When true, overrides the colour to red+bold regardless of actual
+   * utilisation. Used to flash the bar during auto-compaction events.
+   */
+  isCompacting?: boolean;
 }
 
 /**
@@ -91,7 +96,7 @@ export interface TokenBarProps {
  *
  * Format: `1,247 / 200,000 tokens  ▓░░░░░░░░░`
  */
-export function TokenBar({ used, limit, utilisation }: TokenBarProps) {
+export function TokenBar({ used, limit, utilisation, isCompacting = false }: TokenBarProps) {
   const { tokens } = useThemeTokens();
 
   const tier = getTokenBarTier(utilisation);
@@ -105,7 +110,10 @@ export function TokenBar({ used, limit, utilisation }: TokenBarProps) {
     danger: { color: tokens["status.error"], fontWeight: "bold" },
   };
 
-  const style = tierStyles[tier];
+  // During compaction, override to red+bold regardless of actual utilisation
+  const style = isCompacting
+    ? { color: tokens["status.error"], fontWeight: "bold" as const }
+    : tierStyles[tier];
 
   return (
     <Box style={{ flexDirection: "row" }}>

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { TokenUsageInfo } from "./input-area";
 
 import type { DaemonConnectionStatus } from "../daemon/contracts";
 import type { DaemonMode } from "../daemon/daemon-context";
@@ -72,6 +73,9 @@ export function getPanelBorderColors(focusedPanel: FocusedPanel, focusColor: str
   };
 }
 
+/** Duration (ms) for the compaction flash on the token bar and status bar. */
+export const COMPACTION_FLASH_DURATION_MS = 2_000;
+
 export interface LayoutProps {
   version: string;
   dimensions: TerminalDimensions;
@@ -79,6 +83,14 @@ export interface LayoutProps {
   suppressMainInput?: boolean;
   connectionStatus: DaemonConnectionStatus;
   daemonMode?: DaemonMode;
+  /**
+   * When true, triggers the compaction visual indicators:
+   * token bar flashes red and status bar shows a compaction message.
+   * The indicators auto-clear after `COMPACTION_FLASH_DURATION_MS`.
+   */
+  compactionActive?: boolean;
+  /** Token usage info passed through to the input area token bar. */
+  tokenUsage?: TokenUsageInfo;
   onSubmitMessage(text: string): void;
   onCancelPrompt?(): void | Promise<void>;
 }
@@ -185,6 +197,8 @@ export function Layout({
   suppressMainInput = false,
   connectionStatus,
   daemonMode,
+  compactionActive: compactionProp,
+  tokenUsage,
   onSubmitMessage,
   onCancelPrompt,
 }: LayoutProps) {
@@ -194,6 +208,37 @@ export function Layout({
   const breakpoint = useBreakpointConstraints(dimensions.width);
 
   const panelBorders = getPanelBorderColors(state.focusedPanel, tokens["border.focus"], tokens["border.subtle"]);
+
+  // --- Compaction flash state ---
+  // When compactionProp transitions to true, flash the token bar red
+  // and show a status bar message for COMPACTION_FLASH_DURATION_MS.
+  const [isCompacting, setIsCompacting] = useState(false);
+  const [compactionMessage, setCompactionMessage] = useState<string | undefined>(undefined);
+  const compactionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    if (compactionProp) {
+      setIsCompacting(true);
+      setCompactionMessage("\u27F3 Auto-compacting context\u2026");
+
+      if (compactionTimerRef.current !== null) {
+        clearTimeout(compactionTimerRef.current);
+      }
+
+      compactionTimerRef.current = setTimeout(() => {
+        setIsCompacting(false);
+        setCompactionMessage(undefined);
+        compactionTimerRef.current = null;
+      }, COMPACTION_FLASH_DURATION_MS);
+    }
+
+    return () => {
+      if (compactionTimerRef.current !== null) {
+        clearTimeout(compactionTimerRef.current);
+        compactionTimerRef.current = null;
+      }
+    };
+  }, [compactionProp]);
 
   const dismissDrawer = useCallback(() => {
     dispatch({ type: "DISMISS_PANEL", payload: "drawer" });
@@ -222,6 +267,8 @@ export function Layout({
           showActivityPanel={false}
           showExpandedPanel={false}
           breakpoint={breakpoint}
+          tokenUsage={tokenUsage}
+          isCompacting={isCompacting}
           onSubmitMessage={onSubmitMessage}
           onCancelPrompt={onCancelPrompt}
         />
@@ -269,7 +316,7 @@ export function Layout({
         backgroundColor={tokens["surface.secondary"]}
         style={{ flexShrink: 0 }}
       >
-        <StatusBar version={version} dimensions={dimensions} showHelp={showHelp} connectionStatus={connectionStatus} daemonMode={daemonMode} />
+        <StatusBar version={version} dimensions={dimensions} showHelp={showHelp} connectionStatus={connectionStatus} daemonMode={daemonMode} compactionActive={compactionProp} compactionMessage={compactionMessage} />
       </ZoneShell>
     </Box>
   );

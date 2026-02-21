@@ -7,6 +7,7 @@ import { useThemeTokens } from "../theme";
 import { Box, Text, ZoneShell } from "../ui";
 import { ConversationPanel } from "../components/conversation-panel";
 import { InputArea } from "../components/input-area";
+import type { TokenUsageInfo } from "../components/input-area";
 import type { PanelBorderColors } from "../components/layout";
 
 export interface ChatScreenProps {
@@ -17,6 +18,10 @@ export interface ChatScreenProps {
   showActivityPanel: boolean;
   showExpandedPanel: boolean;
   breakpoint: BreakpointState;
+  /** Token usage info for the input area token bar. */
+  tokenUsage?: TokenUsageInfo;
+  /** When true, the token bar flashes red to indicate compaction in progress. */
+  isCompacting?: boolean;
   onSubmitMessage: (text: string) => void;
   onCancelPrompt?: () => void | Promise<void>;
 }
@@ -36,6 +41,8 @@ export function ChatScreen({
   showActivityPanel,
   showExpandedPanel,
   breakpoint,
+  tokenUsage,
+  isCompacting,
   onSubmitMessage,
   onCancelPrompt,
 }: ChatScreenProps) {
@@ -68,6 +75,8 @@ export function ChatScreen({
             isFocused={mainWindowFocusedPanel === "input"}
             onSubmit={onSubmitMessage}
             onCancelPrompt={onCancelPrompt}
+            tokenUsage={tokenUsage}
+            isCompacting={isCompacting}
           />
         </ZoneShell>
       </Box>

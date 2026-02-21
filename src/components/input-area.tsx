@@ -69,6 +69,8 @@ export interface InputAreaProps {
   onSubmit(text: string): void;
   onCancelPrompt?(): void | Promise<void>;
   tokenUsage?: TokenUsageInfo;
+  /** When true, the token bar flashes red to indicate compaction in progress. */
+  isCompacting?: boolean;
 }
 
 export type InputSubmissionKind = "empty" | "command" | "message";
@@ -251,7 +253,7 @@ function toDate(value: Date | string | number): Date {
   return asDate;
 }
 
-export function InputArea({ isFocused, onSubmit, onCancelPrompt, tokenUsage }: InputAreaProps) {
+export function InputArea({ isFocused, onSubmit, onCancelPrompt, tokenUsage, isCompacting }: InputAreaProps) {
   const { state, dispatch } = useApp();
   const conversations = useConversations();
   const { client: daemonClient, mode: daemonMode, isConnected } = useDaemon();
@@ -760,6 +762,7 @@ export function InputArea({ isFocused, onSubmit, onCancelPrompt, tokenUsage }: I
             used={tokenUsage.used}
             limit={tokenUsage.limit}
             utilisation={tokenUsage.utilisation}
+            isCompacting={isCompacting}
           />
         ) : null}
       </FramedBlock>
