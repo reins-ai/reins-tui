@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "../daemon/client";
+import type { ActivityEvent } from "../state/activity-store";
 import { useThemeTokens } from "../theme";
 import type { ThemeTokens } from "../theme/theme-schema";
-import { Box, Text } from "../ui";
+import { Box, ScrollBox, Text } from "../ui";
+import { StepCard } from "./cards/step-card";
 
 // --- Constants ---
 
@@ -546,4 +548,80 @@ export function TaskPanel(props: TaskPanelProps) {
       <Text style={{ color: tokens["accent.primary"] }}>{bottomBorder}</Text>
     </Box>
   );
+}
+
+// --- ActivityPanel ---
+
+const ACTIVITY_CARD_WIDTH = 44;
+const ACTIVITY_HEADER_LABEL = "Activity";
+const ACTIVITY_HEADER_ICON = "\u2699"; // ⚙
+const ACTIVITY_MAX_VISIBLE = 10;
+
+export interface ActivityPanelProps {
+  events: ActivityEvent[];
+  width?: number;
+  maxVisible?: number;
+}
+
+/**
+ * ActivityPanel renders a live scrollable list of activity events.
+ *
+ * Each event is rendered as a StepCard showing the step number,
+ * tool category icon, truncated args/result preview, and duration.
+ * Events are displayed newest-first (as returned by ActivityStore.getAll()).
+ *
+ * This component is a pure render — it receives events as a prop
+ * and does not manage its own subscription to ActivityStore.
+ */
+export function ActivityPanel(props: ActivityPanelProps) {
+  const { events, width = ACTIVITY_CARD_WIDTH, maxVisible = ACTIVITY_MAX_VISIBLE } = props;
+  const { tokens } = useThemeTokens();
+
+  const headerText = `\u2500 ${ACTIVITY_HEADER_ICON} ${ACTIVITY_HEADER_LABEL} `;
+  const headerFill = "\u2500".repeat(Math.max(0, width - headerText.length - 2));
+  const topBorder = `\u256D${headerText}${headerFill}\u256E`;
+  const bottomBorder = `\u2570${"\u2500".repeat(width - 2)}\u256F`;
+
+  const visibleEvents = events.slice(0, maxVisible);
+  const totalEvents = events.length;
+
+  return (
+    <Box style={{ flexDirection: "column", marginTop: 1, marginBottom: 1 }}>
+      <Text style={{ color: tokens["accent.primary"] }}>{topBorder}</Text>
+      {visibleEvents.length === 0 ? (
+        <Text style={{ color: tokens["text.muted"] }}>
+          {padActivityLine("No activity yet", width)}
+        </Text>
+      ) : (
+        <ScrollBox>
+          {visibleEvents.map((event, index) => {
+            // Step numbers are based on total event count (newest first)
+            // so the first visible event has the highest step number
+            const stepNumber = totalEvents - index;
+            return (
+              <StepCard
+                key={event.id}
+                event={event}
+                stepNumber={stepNumber}
+                width={width}
+              />
+            );
+          })}
+        </ScrollBox>
+      )}
+      <Text style={{ color: tokens["accent.primary"] }}>{bottomBorder}</Text>
+    </Box>
+  );
+}
+
+/**
+ * Pads a content line to fit within the activity panel border.
+ */
+function padActivityLine(content: string, width: number): string {
+  const available = width - 4; // "│ " + " │"
+  const truncated = content.length > available
+    ? `${content.slice(0, available - 1)}\u2026`
+    : content;
+
+  return `\u2502 ${truncated}${" ".repeat(Math.max(0, available - truncated.length))} \u2502`;
 }
