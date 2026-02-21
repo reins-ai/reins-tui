@@ -21,6 +21,8 @@ import {
 } from "@reins/core";
 import { useThemeTokens } from "../../theme";
 import { Box, ScrollBox, Text, useKeyboard } from "../../ui";
+import { getActiveDaemonUrl } from "../../daemon/actions";
+import { logger } from "../../lib/debug-logger";
 import { ProgressBar, STEP_LABELS } from "./progress-bar";
 import { STEP_VIEW_MAP } from "./steps";
 
@@ -52,6 +54,7 @@ type WizardPhase =
   | "loading"
   | "resume-prompt"
   | "active"
+  | "skip-confirm"
   | "completing"
   | "complete";
 
@@ -62,6 +65,10 @@ interface WizardState {
   engineState: EngineState | null;
   error: string | null;
   resumeSelectedIndex: number;
+  /** Phase to return to when user cancels skip confirmation. */
+  skipConfirmReturnPhase: WizardPhase | null;
+  /** True while checking daemon for a configured provider before skip. */
+  providerCheckPending: boolean;
 }
 
 type WizardAction =
@@ -73,7 +80,10 @@ type WizardAction =
   | { type: "WIZARD_COMPLETE" }
   | { type: "RESUME_NAVIGATE_UP" }
   | { type: "RESUME_NAVIGATE_DOWN" }
-  | { type: "SET_ERROR"; error: string };
+  | { type: "SET_ERROR"; error: string }
+  | { type: "SHOW_SKIP_CONFIRM"; returnPhase: WizardPhase }
+  | { type: "CANCEL_SKIP_CONFIRM" }
+  | { type: "SET_PROVIDER_CHECK_PENDING"; pending: boolean };
 
 const INITIAL_STATE: WizardState = {
   phase: "loading",
@@ -82,6 +92,8 @@ const INITIAL_STATE: WizardState = {
   engineState: null,
   error: null,
   resumeSelectedIndex: 0,
+  skipConfirmReturnPhase: null,
+  providerCheckPending: false,
 };
 
 const RESUME_OPTIONS = [
@@ -173,6 +185,24 @@ function wizardReducer(state: WizardState, action: WizardAction): WizardState {
 
     case "SET_ERROR":
       return { ...state, error: action.error };
+
+    case "SHOW_SKIP_CONFIRM":
+      return {
+        ...state,
+        phase: "skip-confirm",
+        skipConfirmReturnPhase: action.returnPhase,
+        providerCheckPending: false,
+      };
+
+    case "CANCEL_SKIP_CONFIRM":
+      return {
+        ...state,
+        phase: state.skipConfirmReturnPhase ?? "loading",
+        skipConfirmReturnPhase: null,
+      };
+
+    case "SET_PROVIDER_CHECK_PENDING":
+      return { ...state, providerCheckPending: action.pending };
 
     default:
       return state;
@@ -426,6 +456,104 @@ function ErrorView({ tokens, error }: { tokens: Record<string, string>; error: s
   );
 }
 
+function SkipConfirmView({ tokens }: { tokens: Record<string, string> }) {
+  return (
+    <WizardFrame title="Reins Setup" tokens={tokens} engineState={null}>
+      <Box style={{ flexDirection: "column" }}>
+        <Box style={{ flexDirection: "row" }}>
+          <Text content="! " style={{ color: tokens["status.warning"] }} />
+          <Text
+            content="No AI provider configured"
+            style={{ color: tokens["text.primary"] }}
+          />
+        </Box>
+        <Box style={{ marginTop: 1 }}>
+          <Text
+            content="Reins won't be able to chat until you set up a provider."
+            style={{ color: tokens["text.secondary"] }}
+          />
+        </Box>
+        <Box style={{ marginTop: 1 }}>
+          <Text
+            content="Are you sure you want to skip setup?"
+            style={{ color: tokens["text.secondary"] }}
+          />
+        </Box>
+        <Box style={{ marginTop: 2 }}>
+          <Text
+            content="[y] Skip anyway  [n] Continue setup"
+            style={{ color: tokens["text.muted"] }}
+          />
+        </Box>
+      </Box>
+    </WizardFrame>
+  );
+}
+
+function ProviderCheckPendingView({ tokens }: { tokens: Record<string, string> }) {
+  return (
+    <WizardFrame title="Reins Setup" tokens={tokens} engineState={null}>
+      <Box style={{ flexDirection: "row" }}>
+        <Text content="* " style={{ color: tokens["glyph.tool.running"] }} />
+        <Text content="Checking provider configuration..." style={{ color: tokens["text.secondary"] }} />
+      </Box>
+    </WizardFrame>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Provider configuration check
+// ---------------------------------------------------------------------------
+
+const SKIP_CHECK_TIMEOUT_MS = 2_000;
+
+export interface ProviderCheckDeps {
+  fetchFn?: typeof fetch;
+  getBaseUrl?: () => Promise<string>;
+}
+
+/**
+ * Check whether at least one AI provider is configured by querying the daemon.
+ * Returns `true` if a provider is configured, `false` if not.
+ * Fails open (returns `true` — allows skip) if the daemon is unreachable,
+ * so the check never blocks the user from exiting.
+ */
+export async function checkAnyProviderConfigured(
+  deps?: ProviderCheckDeps,
+): Promise<boolean> {
+  try {
+    const resolveFetch = deps?.fetchFn ?? fetch;
+    const baseUrl = deps?.getBaseUrl
+      ? await deps.getBaseUrl()
+      : await getActiveDaemonUrl();
+    const response = await resolveFetch(`${baseUrl}/api/providers/auth/list`, {
+      signal: AbortSignal.timeout(SKIP_CHECK_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      // Daemon responded but with error — fail-open
+      return true;
+    }
+
+    const data = await response.json() as
+      | { providers?: { configured?: boolean }[] }
+      | { configured?: boolean }[];
+
+    const providerList = Array.isArray(data)
+      ? data
+      : (data as { providers?: unknown[] }).providers ?? [];
+
+    return providerList.some((entry) => {
+      const raw = entry as Record<string, unknown>;
+      return raw.configured === true;
+    });
+  } catch {
+    // Daemon unreachable or timeout — fail-open, allow skip
+    logger.app.warn("Skip protection: daemon unreachable, allowing skip");
+    return true;
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Main component
 // ---------------------------------------------------------------------------
@@ -641,15 +769,54 @@ export function OnboardingWizard({ onComplete, forceRerun = false }: OnboardingW
     onComplete({ completed: false, skipped: true });
   }, [onComplete]);
 
+  /**
+   * Attempt to skip onboarding with provider protection.
+   * Checks if any provider is configured via the daemon. If yes, skip
+   * immediately. If no provider is configured, show a confirmation prompt.
+   * If the daemon is unreachable, fail-open and allow skip.
+   */
+  const requestSkipWithProtection = useCallback(async (returnPhase: WizardPhase) => {
+    dispatch({ type: "SET_PROVIDER_CHECK_PENDING", pending: true });
+
+    const hasProvider = await checkAnyProviderConfigured();
+
+    if (hasProvider) {
+      // Provider is configured (or daemon unreachable) — safe to skip
+      handleSkipToChat();
+    } else {
+      // No provider — show confirmation prompt
+      dispatch({ type: "SHOW_SKIP_CONFIRM", returnPhase });
+    }
+  }, [handleSkipToChat]);
+
   // Keyboard handler
   useKeyboard((event) => {
     const keyName = event.name ?? "";
+    const sequence = event.sequence ?? "";
 
     if (state.phase === "loading" || state.phase === "completing" || state.phase === "complete") {
       return;
     }
 
-    // Error state: Enter retries, Esc skips to chat
+    // Ignore input while checking provider status
+    if (state.providerCheckPending) {
+      return;
+    }
+
+    // Skip confirmation: y confirms skip, n/Esc returns to setup
+    if (state.phase === "skip-confirm") {
+      if (sequence === "y" || sequence === "Y") {
+        handleSkipToChat();
+        return;
+      }
+      if (sequence === "n" || sequence === "N" || keyName === "escape" || keyName === "esc") {
+        dispatch({ type: "CANCEL_SKIP_CONFIRM" });
+        return;
+      }
+      return;
+    }
+
+    // Error state: Enter retries, Esc skips to chat (with protection)
     if (state.error !== null) {
       if (keyName === "return" || keyName === "enter") {
         dispatch({ type: "SET_ERROR", error: "" });
@@ -661,7 +828,7 @@ export function OnboardingWizard({ onComplete, forceRerun = false }: OnboardingW
         return;
       }
       if (keyName === "escape" || keyName === "esc") {
-        handleSkipToChat();
+        void requestSkipWithProtection("loading");
         return;
       }
       return;
@@ -684,12 +851,12 @@ export function OnboardingWizard({ onComplete, forceRerun = false }: OnboardingW
         } else if (selected.action === "restart") {
           void initializeEngine(true);
         } else if (selected.action === "skip") {
-          handleSkipToChat();
+          void requestSkipWithProtection("resume-prompt");
         }
         return;
       }
       if (keyName === "escape" || keyName === "esc") {
-        handleSkipToChat();
+        void requestSkipWithProtection("resume-prompt");
         return;
       }
       return;
@@ -705,7 +872,11 @@ export function OnboardingWizard({ onComplete, forceRerun = false }: OnboardingW
     }
   });
 
-  // Render based on phase
+  // Render based on phase — provider check pending takes priority
+  if (state.providerCheckPending) {
+    return <ProviderCheckPendingView tokens={tokens} />;
+  }
+
   if (state.error !== null && state.error.length > 0) {
     return <ErrorView tokens={tokens} error={state.error} />;
   }
@@ -735,6 +906,9 @@ export function OnboardingWizard({ onComplete, forceRerun = false }: OnboardingW
           onRequestNext={() => void handleNext()}
         />
       );
+
+    case "skip-confirm":
+      return <SkipConfirmView tokens={tokens} />;
 
     case "completing":
       return <CompletingView tokens={tokens} engineState={state.engineState} />;

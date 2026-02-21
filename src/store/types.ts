@@ -126,7 +126,7 @@ export interface DisplayMessage {
   createdAt: Date;
 }
 
-export type OnboardingStatus = "checking" | "first-run" | "resume" | "complete";
+export type OnboardingStatus = "checking" | "first-run" | "resume" | "complete" | "needs-provider-setup";
 
 export interface AppState {
   conversations: ConversationSummary[];

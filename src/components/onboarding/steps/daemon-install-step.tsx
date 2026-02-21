@@ -232,7 +232,7 @@ export function DaemonInstallStepView({ tokens, engineState: _engineState, onSte
   const [status, setStatus] = useState<DaemonStatus>("detecting");
   const [detail, setDetail] = useState<string | null>(null);
   const [serviceInfo, setServiceInfo] = useState<string | null>(null);
-  const [_functionalityInfo, setFunctionalityInfo] = useState<FunctionalityResult | null>(null);
+  const [functionalityInfo, setFunctionalityInfo] = useState<FunctionalityResult | null>(null);
   const [retryCount, setRetryCount] = useState(0);
 
   // Remote endpoint state

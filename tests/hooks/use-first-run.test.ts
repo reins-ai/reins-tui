@@ -99,4 +99,40 @@ describe("detectFirstRunState", () => {
 
     expect(state).toEqual({ status: "complete" } satisfies FirstRunState);
   });
+
+  // --- Minimum viable setup check (provider configured) ---
+
+  it("returns needs-provider-setup when complete but no provider configured", async () => {
+    const detector = createMockDetector({ status: "complete" });
+    const state = await detectFirstRunState(detector, async () => false);
+
+    expect(state.status).toBe("needs-provider-setup");
+  });
+
+  it("returns complete when complete and provider is configured", async () => {
+    const detector = createMockDetector({ status: "complete" });
+    const state = await detectFirstRunState(detector, async () => true);
+
+    expect(state.status).toBe("complete");
+  });
+
+  it("returns complete when complete and no checkProvider given (no secondary check)", async () => {
+    const detector = createMockDetector({ status: "complete" });
+    const state = await detectFirstRunState(detector);
+
+    // Without a checkProvider callback, detectFirstRunState skips the check
+    expect(state.status).toBe("complete");
+  });
+
+  it("does not run provider check for first-run status", async () => {
+    let checkCalled = false;
+    const detector = createMockDetector({ status: "first-run" });
+    const state = await detectFirstRunState(detector, async () => {
+      checkCalled = true;
+      return false;
+    });
+
+    expect(state.status).toBe("first-run");
+    expect(checkCalled).toBe(false);
+  });
 });

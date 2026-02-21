@@ -15,7 +15,7 @@ import { ModelSelectorModal, type ProviderModelGroup } from "./components/model-
 import { ConnectFlow, type ConnectResult } from "./components/connect-flow";
 import { EmbeddingSetupWizard, type EmbeddingSetupResult } from "./components/setup/embedding-setup-wizard";
 import { SearchSettingsModal } from "./components/search-settings-modal";
-import { OnboardingWizard, type OnboardingWizardResult } from "./components/onboarding";
+import { OnboardingWizard, ProviderSetupPrompt, type OnboardingWizardResult } from "./components/onboarding";
 import { ChannelTokenPrompt } from "./components/channel-token-prompt";
 import { callDaemonChannelApi, maskBotToken } from "./commands/handlers/channels";
 import { resetOnboarding } from "./commands/handlers/setup";
@@ -1552,6 +1552,21 @@ function AppView({ version, dimensions }: AppViewProps) {
       <OnboardingWizard
         onComplete={handleOnboardingComplete}
         forceRerun={state.onboardingForceRerun}
+      />
+    );
+  }
+
+  // Minimum viable setup: provider missing after onboarding was completed
+  if (state.onboardingStatus === "needs-provider-setup") {
+    return (
+      <ProviderSetupPrompt
+        onRunSetup={() => {
+          dispatch({ type: "SET_ONBOARDING_RERUN" });
+        }}
+        onSkip={() => {
+          dispatch({ type: "SET_ONBOARDING_COMPLETE" });
+          dispatch({ type: "SET_STATUS", payload: "Skipped provider setup" });
+        }}
       />
     );
   }
