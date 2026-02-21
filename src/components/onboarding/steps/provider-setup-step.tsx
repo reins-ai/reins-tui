@@ -11,17 +11,95 @@ import type { StepViewProps } from "./index";
 // Provider catalog
 // ---------------------------------------------------------------------------
 
+type ProviderGroup = "cloud" | "local";
+
 interface ProviderEntry {
   id: string;
   label: string;
   description: string;
+  group: ProviderGroup;
 }
 
-const PROVIDERS: ProviderEntry[] = [
-  { id: "anthropic", label: "Anthropic", description: "Claude models (Sonnet, Opus, Haiku)" },
-  { id: "openai", label: "OpenAI", description: "GPT-4o, o1, o3 models" },
-  { id: "google", label: "Google", description: "Gemini models" },
+const FALLBACK_PROVIDERS: ProviderEntry[] = [
+  { id: "anthropic", label: "Anthropic", description: "Claude models (Sonnet, Opus, Haiku)", group: "cloud" },
+  { id: "openai", label: "OpenAI", description: "GPT-4o, o1, o3 models", group: "cloud" },
+  { id: "google", label: "Google", description: "Gemini models", group: "cloud" },
 ];
+
+/** Human-readable metadata for known provider IDs. */
+const PROVIDER_META: Record<string, { label: string; description: string; group: ProviderGroup }> = {
+  anthropic: { label: "Anthropic", description: "Claude models (Sonnet, Opus, Haiku)", group: "cloud" },
+  openai: { label: "OpenAI", description: "GPT-4o, o1, o3 models", group: "cloud" },
+  google: { label: "Google", description: "Gemini models", group: "cloud" },
+  fireworks: { label: "Fireworks", description: "Fast open-source model hosting", group: "cloud" },
+  ollama: { label: "Ollama", description: "Local models via Ollama", group: "local" },
+  vllm: { label: "vLLM", description: "Local models via vLLM", group: "local" },
+  lmstudio: { label: "LM Studio", description: "Local models via LM Studio", group: "local" },
+};
+
+const FETCH_PROVIDERS_TIMEOUT_MS = 5_000;
+
+interface DaemonProviderAuthStatus {
+  provider: string;
+  requiresAuth: boolean;
+  configured: boolean;
+  connectionState: string;
+}
+
+/**
+ * Fetch the provider list from the daemon's auth service.
+ * Returns null on any failure so the caller can fall back silently.
+ */
+async function fetchProvidersFromDaemon(
+  daemonBaseUrl: string,
+): Promise<ProviderEntry[] | null> {
+  try {
+    const url = `${daemonBaseUrl}/api/providers/auth/list`;
+    const response = await fetch(url, {
+      signal: AbortSignal.timeout(FETCH_PROVIDERS_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const payload: unknown = await response.json();
+    const rawList: unknown[] = Array.isArray(payload)
+      ? payload
+      : (typeof payload === "object" && payload !== null && Array.isArray((payload as Record<string, unknown>).providers))
+        ? (payload as Record<string, unknown>).providers as unknown[]
+        : [];
+
+    if (rawList.length === 0) {
+      return null;
+    }
+
+    const entries: ProviderEntry[] = [];
+    for (const item of rawList) {
+      if (typeof item !== "object" || item === null) {
+        continue;
+      }
+
+      const record = item as DaemonProviderAuthStatus;
+      const id = typeof record.provider === "string" ? record.provider : "";
+      if (id.length === 0) {
+        continue;
+      }
+
+      const meta = PROVIDER_META[id];
+      entries.push({
+        id,
+        label: meta?.label ?? id.charAt(0).toUpperCase() + id.slice(1),
+        description: meta?.description ?? "AI provider",
+        group: meta?.group ?? "cloud",
+      });
+    }
+
+    return entries.length > 0 ? entries : null;
+  } catch {
+    return null;
+  }
+}
 
 function extractInputValue(value: unknown): string {
   if (typeof value === "string") return value;
@@ -118,6 +196,8 @@ function hintForState(isBusy: boolean, validation: ValidationState): string {
 export function ProviderSetupStepView({ tokens, engineState: _engineState, onStepData, onRequestNext }: StepViewProps) {
   const { client: daemonClient } = useDaemon();
   const connectService = useMemo(() => new ConnectService({ daemonClient }), [daemonClient]);
+  const [providers, setProviders] = useState<ProviderEntry[]>(FALLBACK_PROVIDERS);
+  const [isLoadingProviders, setIsLoadingProviders] = useState(true);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [configuredProviders, setConfiguredProviders] = useState<Set<string>>(new Set());
@@ -129,7 +209,36 @@ export function ProviderSetupStepView({ tokens, engineState: _engineState, onSte
   // Track the provider being validated so retry works correctly
   const validatingProviderRef = useRef<string | null>(null);
 
-  const selectedProvider = PROVIDERS[selectedIndex];
+  // Fetch dynamic provider list from daemon on mount
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadProviders(): Promise<void> {
+      const daemonBaseUrl = await getActiveDaemonUrl();
+      const fetched = await fetchProvidersFromDaemon(daemonBaseUrl);
+
+      if (cancelled) {
+        return;
+      }
+
+      if (fetched !== null && fetched.length > 0) {
+        setProviders(fetched);
+        logger.connect.info("Loaded dynamic provider list from daemon", {
+          count: fetched.length,
+        });
+      }
+
+      setIsLoadingProviders(false);
+    }
+
+    void loadProviders();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const selectedProvider = providers[selectedIndex];
 
   const isValidating = validationState === "validating";
   const isBusy = isSubmitting || isValidating;
@@ -224,7 +333,7 @@ export function ProviderSetupStepView({ tokens, engineState: _engineState, onSte
       if (keyName === "tab") {
         const providerId = validatingProviderRef.current;
         if (providerId) {
-          const entry = PROVIDERS.find((p) => p.id === providerId);
+          const entry = providers.find((p) => p.id === providerId);
           if (entry) {
             void runValidation(entry.id, entry.label);
           }
@@ -267,7 +376,7 @@ export function ProviderSetupStepView({ tokens, engineState: _engineState, onSte
 
     if (keyName === "up") {
       setSelectedIndex((prev) =>
-        prev <= 0 ? PROVIDERS.length - 1 : prev - 1,
+        prev <= 0 ? providers.length - 1 : prev - 1,
       );
       setErrorMessage(null);
       setStatusMessage(null);
@@ -276,7 +385,7 @@ export function ProviderSetupStepView({ tokens, engineState: _engineState, onSte
     }
     if (keyName === "down") {
       setSelectedIndex((prev) =>
-        (prev + 1) % PROVIDERS.length,
+        (prev + 1) % providers.length,
       );
       setErrorMessage(null);
       setStatusMessage(null);
@@ -294,6 +403,10 @@ export function ProviderSetupStepView({ tokens, engineState: _engineState, onSte
     }
   });
 
+  const hasCloudProviders = providers.some((p) => p.group === "cloud");
+  const hasLocalProviders = providers.some((p) => p.group === "local");
+  const showGroupHeaders = hasCloudProviders && hasLocalProviders;
+
   return (
     <Box style={{ flexDirection: "column" }}>
       <Text
@@ -309,53 +422,80 @@ export function ProviderSetupStepView({ tokens, engineState: _engineState, onSte
 
       {/* Provider list */}
       <Box style={{ marginTop: 2, flexDirection: "column" }}>
-        {PROVIDERS.map((provider, index) => {
-          const isSelected = index === selectedIndex;
-          const isConfigured = configuredProviders.has(provider.id);
+        {isLoadingProviders ? (
+          <Box style={{ paddingLeft: 1 }}>
+            <Text
+              content="Loading providers..."
+              style={{ color: tokens["text.muted"] }}
+            />
+          </Box>
+        ) : (
+          providers.map((provider, index) => {
+            const isSelected = index === selectedIndex;
+            const isConfigured = configuredProviders.has(provider.id);
 
-          return (
-            <Box
-              key={provider.id}
-              style={{
-                flexDirection: "column",
-                paddingLeft: 1,
-                marginBottom: 1,
-                backgroundColor: isSelected
-                  ? tokens["surface.elevated"]
-                  : "transparent",
-              }}
-            >
-              <Box style={{ flexDirection: "row" }}>
-                <Text
-                  content={isSelected ? "> " : "  "}
-                  style={{ color: tokens["accent.primary"] }}
-                />
-                <Text
-                  content={isConfigured ? "* " : "o "}
+            // Show group header before the first provider in each group
+            const showHeader = showGroupHeaders && (
+              index === 0 ||
+              providers[index - 1].group !== provider.group
+            );
+
+            return (
+              <Box
+                key={provider.id}
+                style={{ flexDirection: "column" }}
+              >
+                {showHeader ? (
+                  <Box style={{ paddingLeft: 1, marginBottom: 1, marginTop: index > 0 ? 1 : 0 }}>
+                    <Text
+                      content={provider.group === "cloud" ? "Cloud" : "Local"}
+                      style={{ color: tokens["text.secondary"] }}
+                    />
+                  </Box>
+                ) : null}
+                <Box
                   style={{
-                    color: isConfigured
-                      ? tokens["status.success"]
-                      : tokens["text.muted"],
+                    flexDirection: "column",
+                    paddingLeft: 1,
+                    marginBottom: 1,
+                    backgroundColor: isSelected
+                      ? tokens["surface.elevated"]
+                      : "transparent",
                   }}
-                />
-                <Text
-                  content={provider.label}
-                  style={{
-                    color: isSelected
-                      ? tokens["text.primary"]
-                      : tokens["text.secondary"],
-                  }}
-                />
+                >
+                  <Box style={{ flexDirection: "row" }}>
+                    <Text
+                      content={isSelected ? "> " : "  "}
+                      style={{ color: tokens["accent.primary"] }}
+                    />
+                    <Text
+                      content={isConfigured ? "* " : "o "}
+                      style={{
+                        color: isConfigured
+                          ? tokens["status.success"]
+                          : tokens["text.muted"],
+                      }}
+                    />
+                    <Text
+                      content={provider.label}
+                      style={{
+                        color: isSelected
+                          ? tokens["text.primary"]
+                          : tokens["text.secondary"],
+                      }}
+                    />
+                  </Box>
+                  <Box style={{ paddingLeft: 6 }}>
+                    <Text
+                      content={provider.description}
+                      style={{ color: tokens["text.muted"] }}
+                    />
+                  </Box>
+                </Box>
               </Box>
-              <Box style={{ paddingLeft: 6 }}>
-                <Text
-                  content={provider.description}
-                  style={{ color: tokens["text.muted"] }}
-                />
-              </Box>
-            </Box>
-          );
-        })}
+            );
+          })
+        )}
       </Box>
 
       <Box style={{ marginTop: 1, flexDirection: "column" }}>
