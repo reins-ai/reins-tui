@@ -6,6 +6,9 @@ import {
   type OnboardingStep,
 } from "@reins/core";
 
+import { checkAnyProviderConfigured } from "../components/onboarding/wizard-shell";
+import { logger } from "../lib/debug-logger";
+
 /**
  * Resolved first-run detection state for the app entry point.
  *
@@ -13,16 +16,21 @@ import {
  * - `first-run`: No prior setup — launch the onboarding wizard.
  * - `resume`: Partial onboarding — offer to continue from `resumeStep`.
  * - `complete`: Setup is finished — proceed to chat.
+ * - `needs-provider-setup`: Setup was marked complete but no provider is
+ *   configured — re-surface a targeted provider setup flow.
  */
 export type FirstRunState =
   | { status: "checking" }
   | { status: "first-run" }
   | { status: "resume"; resumeStep: OnboardingStep | undefined }
-  | { status: "complete" };
+  | { status: "complete" }
+  | { status: "needs-provider-setup" };
 
 export interface UseFirstRunOptions {
   /** Override detector for testing. */
   detector?: FirstRunDetector;
+  /** Override provider check for testing. Returns true if a provider is configured. */
+  checkProvider?: () => Promise<boolean>;
 }
 
 /**
@@ -30,6 +38,10 @@ export interface UseFirstRunOptions {
  *
  * Runs detection once on mount and returns the resolved state.
  * On error, defaults to "complete" so the app is never blocked.
+ *
+ * When detection returns "complete", a secondary check verifies that at
+ * least one AI provider is configured. If not, returns "needs-provider-setup"
+ * so the app can re-surface a targeted setup flow.
  */
 export function useFirstRun(options?: UseFirstRunOptions): FirstRunState {
   const [state, setState] = useState<FirstRunState>({ status: "checking" });
@@ -66,9 +78,21 @@ export function useFirstRun(options?: UseFirstRunOptions): FirstRunState {
           case "resume":
             setState({ status: "resume", resumeStep: detection.resumeStep });
             break;
-          case "complete":
-            setState({ status: "complete" });
+          case "complete": {
+            // Secondary check: verify minimum viable config (provider configured)
+            const checkFn = options?.checkProvider ?? checkAnyProviderConfigured;
+            const hasProvider = await checkFn();
+
+            if (cancelled) return;
+
+            if (hasProvider) {
+              setState({ status: "complete" });
+            } else {
+              logger.app.info("Setup complete but no provider configured — surfacing provider setup");
+              setState({ status: "needs-provider-setup" });
+            }
             break;
+          }
         }
       } catch {
         // Unexpected error — default to complete so the app isn't blocked
@@ -81,7 +105,7 @@ export function useFirstRun(options?: UseFirstRunOptions): FirstRunState {
     return () => {
       cancelled = true;
     };
-  }, [options?.detector]);
+  }, [options?.detector, options?.checkProvider]);
 
   return state;
 }
@@ -93,6 +117,7 @@ export function useFirstRun(options?: UseFirstRunOptions): FirstRunState {
  */
 export async function detectFirstRunState(
   detector: FirstRunDetector,
+  checkProvider?: () => Promise<boolean>,
 ): Promise<FirstRunState> {
   try {
     const result = await detector.detect();
@@ -108,8 +133,15 @@ export async function detectFirstRunState(
         return { status: "first-run" };
       case "resume":
         return { status: "resume", resumeStep: detection.resumeStep };
-      case "complete":
+      case "complete": {
+        if (checkProvider) {
+          const hasProvider = await checkProvider();
+          if (!hasProvider) {
+            return { status: "needs-provider-setup" };
+          }
+        }
         return { status: "complete" };
+      }
     }
   } catch {
     return { status: "complete" };

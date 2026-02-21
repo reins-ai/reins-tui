@@ -15,10 +15,12 @@ import { ModelSelectorModal, type ProviderModelGroup } from "./components/model-
 import { ConnectFlow, type ConnectResult } from "./components/connect-flow";
 import { EmbeddingSetupWizard, type EmbeddingSetupResult } from "./components/setup/embedding-setup-wizard";
 import { SearchSettingsModal } from "./components/search-settings-modal";
-import { OnboardingWizard, type OnboardingWizardResult } from "./components/onboarding";
+import { OnboardingWizard, ProviderSetupPrompt, type OnboardingWizardResult } from "./components/onboarding";
 import { ChannelTokenPrompt } from "./components/channel-token-prompt";
 import { callDaemonChannelApi, maskBotToken } from "./commands/handlers/channels";
 import { resetOnboarding } from "./commands/handlers/setup";
+import { handleBriefingCommand, handleNudgesWithDeps } from "./commands/handlers/proactive";
+import { handleTasksCommand } from "./commands/handlers/tasks";
 import { DaemonPanel } from "./components/daemon-panel";
 import { IntegrationPanel } from "./components/integration-panel";
 import { BrowserPanel } from "./components/BrowserPanel";
@@ -1368,6 +1370,48 @@ function AppView({ version, dimensions }: AppViewProps) {
           }
         });
         break;
+      // Proactive Intelligence — nudges persist to config, briefing requires daemon
+      case "trigger-briefing": {
+        // TODO: Wire to BriefingService when daemon briefing endpoint is available
+        const briefingResult = handleBriefingCommand(
+          { positional: [], flags: {} },
+          null as unknown as Parameters<typeof handleBriefingCommand>[1],
+        );
+        const resolved = briefingResult instanceof Promise ? briefingResult : Promise.resolve(briefingResult);
+        void resolved.then((r) => {
+          dispatch({ type: "SET_STATUS", payload: r.ok ? r.value.statusMessage : r.error.message });
+        });
+        break;
+      }
+      case "nudges-on":
+        void handleNudgesWithDeps(["on"]).then((result) => {
+          dispatch({ type: "SET_STATUS", payload: result.ok ? result.value.statusMessage : result.error.message });
+        });
+        break;
+      case "nudges-off":
+        void handleNudgesWithDeps(["off"]).then((result) => {
+          dispatch({ type: "SET_STATUS", payload: result.ok ? result.value.statusMessage : result.error.message });
+        });
+        break;
+      // Background Tasks — requires daemon connection
+      case "tasks-list": {
+        // TODO: Wire to TaskManager when daemon task endpoints are available
+        const tasksResult = handleTasksCommand(
+          { positional: [], flags: {} },
+          null as unknown as Parameters<typeof handleTasksCommand>[1],
+        );
+        const tasksResolved = tasksResult instanceof Promise ? tasksResult : Promise.resolve(tasksResult);
+        void tasksResolved.then((r) => {
+          dispatch({ type: "SET_STATUS", payload: r.ok ? r.value.statusMessage : r.error.message });
+        });
+        break;
+      }
+      case "tasks-cancel":
+        dispatch({ type: "SET_STATUS", payload: "Task cancellation requires a task ID — use /tasks cancel <id>" });
+        break;
+      case "tasks-retry":
+        dispatch({ type: "SET_STATUS", payload: "Task retry requires a task ID — use /tasks retry <id>" });
+        break;
       default:
         dispatch({ type: "SET_STATUS", payload: `Action: ${actionKey}` });
     }
@@ -1552,6 +1596,21 @@ function AppView({ version, dimensions }: AppViewProps) {
       <OnboardingWizard
         onComplete={handleOnboardingComplete}
         forceRerun={state.onboardingForceRerun}
+      />
+    );
+  }
+
+  // Minimum viable setup: provider missing after onboarding was completed
+  if (state.onboardingStatus === "needs-provider-setup") {
+    return (
+      <ProviderSetupPrompt
+        onRunSetup={() => {
+          dispatch({ type: "SET_ONBOARDING_RERUN" });
+        }}
+        onSkip={() => {
+          dispatch({ type: "SET_ONBOARDING_COMPLETE" });
+          dispatch({ type: "SET_STATUS", payload: "Skipped provider setup" });
+        }}
       />
     );
   }

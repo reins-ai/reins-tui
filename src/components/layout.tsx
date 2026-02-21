@@ -160,8 +160,6 @@ const TODAY_PANEL_WIDTH = 34;
  * has been provided yet.
  */
 function TodayPanelContent() {
-  const { tokens } = useThemeTokens();
-
   // Briefing state — populated when the daemon delivers a morning briefing
   // via WebSocket. Null until a briefing is received.
   const [briefing] = useState<import("./briefing-panel").BriefingData | null>(null);
@@ -184,8 +182,8 @@ function TodayPanelContent() {
         tasks={tasks}
         selectedIndex={selectedTaskIndex}
       />
-      <Text content="Activity" style={{ color: tokens["text.secondary"] }} />
-      <Text content="Tool calls and events" style={{ color: tokens["text.muted"] }} />
+      {/* TODO: Wire ActivityPanel here when ActivityStore events are
+          propagated to the Today drawer via context or props */}
     </Box>
   );
 }

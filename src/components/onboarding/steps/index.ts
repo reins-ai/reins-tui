@@ -6,6 +6,7 @@ import { ProviderSetupStepView } from "./provider-setup-step";
 import { ModelSelectionStepView } from "./model-selection-step";
 import { WorkspaceStepView } from "./workspace-step";
 import { PersonalityStepView } from "./personality-step";
+import { FeatureDiscoveryStepView } from "./feature-discovery-step";
 
 // ---------------------------------------------------------------------------
 // Shared step view props
@@ -36,6 +37,7 @@ export const STEP_VIEW_MAP: Record<OnboardingStep, StepViewComponent> = {
   "model-select": ModelSelectionStepView,
   "workspace": WorkspaceStepView,
   "personality": PersonalityStepView,
+  "feature-discovery": FeatureDiscoveryStepView,
 };
 
 // ---------------------------------------------------------------------------
@@ -48,3 +50,4 @@ export { ProviderSetupStepView } from "./provider-setup-step";
 export { ModelSelectionStepView } from "./model-selection-step";
 export { WorkspaceStepView } from "./workspace-step";
 export { PersonalityStepView } from "./personality-step";
+export { FeatureDiscoveryStepView } from "./feature-discovery-step";

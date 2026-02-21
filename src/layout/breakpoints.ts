@@ -22,14 +22,19 @@ import type { LayoutMode } from "../state/layout-mode";
 
 export type BreakpointBand = "compact" | "narrow" | "standard" | "wide";
 
-/**
- * Fixed panel width constants.
- * SIDEBAR_WIDTH matches SIDEBAR_CONTEXT_WIDTH from the contextual info panel.
- */
+/** Sidebar (contextual info) panel width in terminal columns. Matches SIDEBAR_CONTEXT_WIDTH in the sidebar component. */
 export const SIDEBAR_WIDTH = 40;
+
+/** Activity panel width in terminal columns. Matches the activity panel's fixed layout width. */
 export const ACTIVITY_WIDTH = 32;
+
+/** Expanded panel width in terminal columns. Only rendered in the "wide" breakpoint band. */
 export const EXPANDED_WIDTH = 36;
+
+/** Minimum conversation area width in terminal columns. Below this, panels auto-collapse. */
 export const MIN_CONVERSATION_WIDTH = 30;
+
+/** Gap in terminal columns between adjacent panels. Applied once per panel boundary. */
 export const PANEL_GAP = 1;
 
 export const BREAKPOINT_THRESHOLDS = {
