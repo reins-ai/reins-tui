@@ -1,13 +1,18 @@
+import { useState } from "react";
 import type {
   ActivityEvent,
+  ChildAgentActivityEvent,
+  CompactionActivityEvent,
+  ErrorActivityEvent,
   ToolCallActivityEvent,
 } from "../../state/activity-store";
 import { useThemeTokens } from "../../theme";
-import { Box, Text } from "../../ui";
+import { Box, Text, useKeyboard } from "../../ui";
 
 // --- Constants ---
 
 const DEFAULT_PREVIEW_LENGTH = 60;
+const MAX_EXPANDED_LINES = 10;
 
 // --- Exported helpers (pure functions for testability) ---
 
@@ -158,12 +163,142 @@ function getEventIcon(event: ActivityEvent): string {
   return getEventStatusGlyph(event);
 }
 
+// --- Expanded content helpers ---
+
+/**
+ * Wraps a string into lines of at most `maxWidth` characters.
+ * Splits on word boundaries when possible.
+ */
+function wrapText(text: string, maxWidth: number): string[] {
+  if (maxWidth <= 0) return [];
+  const lines: string[] = [];
+  const rawLines = text.split("\n");
+
+  for (const rawLine of rawLines) {
+    if (rawLine.length <= maxWidth) {
+      lines.push(rawLine);
+    } else {
+      let remaining = rawLine;
+      while (remaining.length > maxWidth) {
+        let breakAt = remaining.lastIndexOf(" ", maxWidth);
+        if (breakAt <= 0) breakAt = maxWidth;
+        lines.push(remaining.slice(0, breakAt));
+        remaining = remaining.slice(breakAt).trimStart();
+      }
+      if (remaining.length > 0) {
+        lines.push(remaining);
+      }
+    }
+  }
+
+  return lines;
+}
+
+/**
+ * Formats a section header line for the expanded view.
+ * Example: "── Args ──────────────────────"
+ */
+function formatSectionHeader(label: string, innerWidth: number): string {
+  const prefix = `\u2500\u2500 ${label} `;
+  const fillLen = Math.max(0, innerWidth - prefix.length);
+  return `${prefix}${"\u2500".repeat(fillLen)}`;
+}
+
+/**
+ * Stringifies a value for display in the expanded view.
+ * Objects are pretty-printed with 2-space indent.
+ */
+function stringifyValue(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+/**
+ * Produces the expanded content lines for an activity event.
+ * Each line is at most `innerWidth` characters.
+ * Returns at most MAX_EXPANDED_LINES lines.
+ */
+export function formatExpandedLines(event: ActivityEvent, innerWidth: number): string[] {
+  const lines: string[] = [];
+
+  switch (event.kind) {
+    case "tool_call": {
+      const tc = event as ToolCallActivityEvent;
+      const argsStr = stringifyValue(tc.toolArgs);
+      if (argsStr) {
+        lines.push(formatSectionHeader("Args", innerWidth));
+        lines.push(...wrapText(argsStr, innerWidth).map((l) => `  ${l}`));
+      }
+      if (tc.status === "error" && tc.error) {
+        lines.push(formatSectionHeader("Error", innerWidth));
+        lines.push(...wrapText(tc.error, innerWidth - 2).map((l) => `  ${l}`));
+      } else if (tc.status === "success" && tc.result) {
+        lines.push(formatSectionHeader("Result", innerWidth));
+        lines.push(...wrapText(tc.result, innerWidth - 2).map((l) => `  ${l}`));
+      }
+      break;
+    }
+    case "compaction": {
+      const ce = event as CompactionActivityEvent;
+      lines.push(formatSectionHeader("Summary", innerWidth));
+      lines.push(...wrapText(ce.summary, innerWidth - 2).map((l) => `  ${l}`));
+      lines.push(`  Before: ~${ce.beforeTokenEstimate.toLocaleString()} tokens`);
+      lines.push(`  After:  ~${ce.afterTokenEstimate.toLocaleString()} tokens`);
+      break;
+    }
+    case "error": {
+      const ee = event as ErrorActivityEvent;
+      lines.push(formatSectionHeader("Error", innerWidth));
+      lines.push(...wrapText(ee.error.message, innerWidth - 2).map((l) => `  ${l}`));
+      if (ee.code) lines.push(`  Code: ${ee.code}`);
+      if (ee.retryable !== undefined) lines.push(`  Retryable: ${ee.retryable ? "yes" : "no"}`);
+      break;
+    }
+    case "done":
+      lines.push(formatSectionHeader("Details", innerWidth));
+      lines.push(`  Finish reason: ${event.finishReason}`);
+      if (event.totalTokensUsed !== undefined) {
+        lines.push(`  Tokens used: ${event.totalTokensUsed.toLocaleString()}`);
+      }
+      break;
+    case "aborted":
+      lines.push(formatSectionHeader("Details", innerWidth));
+      lines.push(`  Reason: ${event.reason ?? "No reason"}`);
+      lines.push(`  Initiated by: ${event.initiatedBy}`);
+      break;
+    case "child_agent": {
+      const ca = event as ChildAgentActivityEvent;
+      lines.push(formatSectionHeader("Child Agent", innerWidth));
+      lines.push(`  ID: ${ca.childId}`);
+      lines.push(`  Event: ${ca.eventType}`);
+      const payloadStr = stringifyValue(ca.payload);
+      if (payloadStr) {
+        lines.push(...wrapText(payloadStr, innerWidth - 2).map((l) => `  ${l}`));
+      }
+      break;
+    }
+    case "thinking":
+      lines.push(formatSectionHeader("Thinking", innerWidth));
+      lines.push(...wrapText(event.content, innerWidth - 2).map((l) => `  ${l}`));
+      lines.push(`  ~${event.estimatedTokens} tokens`);
+      break;
+  }
+
+  return lines.slice(0, MAX_EXPANDED_LINES);
+}
+
 // --- Props ---
 
 export interface StepCardProps {
   event: ActivityEvent;
   stepNumber: number;
   width: number;
+  isFocused?: boolean;
   isExpanded?: boolean;
   onToggle?: () => void;
 }
@@ -171,19 +306,39 @@ export interface StepCardProps {
 // --- Component ---
 
 /**
- * StepCard renders a single activity event as a compact card line.
+ * StepCard renders a single activity event as a compact card.
  *
  * Collapsed view (single line):
  *   🔧 [42] tool_name  args preview  ✓ 1.2s
  *
- * For non-tool-call events, the format adapts:
- *   ⚡ [3] Compacted  summary preview
- *   ✗ [5] Error  message preview
- *   ✓ [7] Done · 1,234 tokens
+ * Expanded view (multi-line):
+ *   🔧 [42] tool_name  ✓ 1.2s  ▼
+ *   ── Args ──────────────────────
+ *     { "command": "ls -la" }
+ *   ── Result ─────────────────────
+ *     total 8
+ *     drwxr-xr-x ...
+ *
+ * Toggle: Enter or e key when focused.
+ * Expanded state persists until manually collapsed.
  */
 export function StepCard(props: StepCardProps) {
-  const { event, stepNumber, width } = props;
+  const { event, stepNumber, width, isFocused = false, onToggle } = props;
   const { tokens } = useThemeTokens();
+
+  const [expanded, setExpanded] = useState(props.isExpanded ?? false);
+
+  useKeyboard((keyEvent) => {
+    if (!isFocused) return;
+
+    const keyName = keyEvent.name ?? "";
+    const sequence = keyEvent.sequence ?? "";
+
+    if (keyName === "return" || sequence === "e") {
+      setExpanded((prev) => !prev);
+      onToggle?.();
+    }
+  });
 
   const icon = getEventIcon(event);
   const label = getEventLabel(event);
@@ -192,10 +347,12 @@ export function StepCard(props: StepCardProps) {
   const isError = event.kind === "error" ||
     (event.kind === "tool_call" && (event as ToolCallActivityEvent).status === "error");
 
-  // Build the right-side suffix: status glyph + duration
+  // Build the right-side suffix: status glyph + duration + expand indicator
   const suffixParts: string[] = [];
   if (statusGlyph) suffixParts.push(statusGlyph);
   if (duration) suffixParts.push(duration);
+  const expandIndicator = expanded ? "\u25BC" : "\u25B6"; // ▼ or ▶
+  suffixParts.push(expandIndicator);
   const suffix = suffixParts.join(" ");
 
   // Build the left-side prefix: icon + [stepNumber] + label
@@ -208,7 +365,7 @@ export function StepCard(props: StepCardProps) {
   const usedWidth = borderChars + prefix.length + gapChars + suffix.length;
   const previewWidth = Math.max(0, width - usedWidth);
 
-  const preview = previewWidth > 3
+  const preview = !expanded && previewWidth > 3
     ? formatEventPreview(event, previewWidth)
     : "";
 
@@ -240,9 +397,28 @@ export function StepCard(props: StepCardProps) {
         ? tokens["status.warning"]
         : tokens["text.secondary"];
 
+  // Focus highlight: slightly different color for the focused card
+  const headerColor = isFocused ? tokens["accent.primary"] : textColor;
+
+  // Build expanded content lines
+  const expandedLines: string[] = expanded
+    ? formatExpandedLines(event, innerWidth - 2)
+    : [];
+
   return (
     <Box style={{ flexDirection: "column" }}>
-      <Text style={{ color: textColor }}>{padded}</Text>
+      <Text style={{ color: headerColor }}>{padded}</Text>
+      {expandedLines.map((line, idx) => {
+        const paddedLine = line.length > innerWidth
+          ? `${line.slice(0, innerWidth - 1)}\u2026`
+          : line;
+        const expandedPadded = `\u2502 ${paddedLine}${" ".repeat(Math.max(0, innerWidth - paddedLine.length))} \u2502`;
+        return (
+          <Text key={idx} style={{ color: tokens["text.secondary"] }}>
+            {expandedPadded}
+          </Text>
+        );
+      })}
     </Box>
   );
 }
