@@ -1,7 +1,12 @@
-// Migrated from components/help-screen.tsx — screen-level overlay for keyboard shortcuts and greeting.
+// Screen-level overlay for keyboard shortcuts and greeting.
+// Shortcut list is auto-generated from the centralized keyboard registry
+// so it can never contain dead or missing entries.
+
+import { useMemo } from "react";
 
 import { LogoAscii } from "../components/logo-ascii";
 import { ModalPanel } from "../components/modal-panel";
+import { buildHelpCategories } from "../keyboard-registry";
 import type { StartupContent } from "../personalization/greeting-service";
 import { useThemeTokens } from "../theme";
 import { Box, ScrollBox, Text } from "../ui";
@@ -16,51 +21,15 @@ export interface HelpShortcutCategory {
   shortcuts: HelpShortcut[];
 }
 
-export const HELP_SHORTCUT_CATEGORIES: HelpShortcutCategory[] = [
-  {
-    title: "NAVIGATION",
-    shortcuts: [
-      { key: "Tab", description: "Next panel" },
-      { key: "Shift+Tab", description: "Previous panel" },
-      { key: "Ctrl+1/2/3", description: "Jump to panel" },
-    ],
-  },
-  {
-    title: "CONVERSATION",
-    shortcuts: [
-      { key: "Enter", description: "Send message" },
-      { key: "Shift+Enter", description: "New line" },
-      { key: "Ctrl+N", description: "New conversation" },
-      { key: "Up/Down", description: "Message history" },
-    ],
-  },
-  {
-    title: "SIDEBAR",
-    shortcuts: [
-      { key: "R", description: "Rename conversation" },
-      { key: "D", description: "Delete conversation" },
-      { key: "M", description: "Cycle model" },
-    ],
-  },
-  {
-    title: "MODEL & THINKING",
-    shortcuts: [
-      { key: "Ctrl+T", description: "Cycle thinking level" },
-      { key: "/thinking", description: "Toggle thinking visibility" },
-    ],
-  },
-  {
-    title: "APPLICATION",
-    shortcuts: [
-      { key: "Ctrl+K", description: "Command palette" },
-      { key: "?", description: "Toggle this help" },
-      { key: "q", description: "Quit" },
-    ],
-  },
-];
+/**
+ * Auto-generated from the keyboard registry.
+ * Kept as a module-level constant so existing imports (tests, barrel exports)
+ * continue to work without changes.
+ */
+export const HELP_SHORTCUT_CATEGORIES: HelpShortcutCategory[] = buildHelpCategories();
 
 function formatShortcutRow(shortcut: HelpShortcut): string {
-  return `${shortcut.key.padEnd(12, " ")}${shortcut.description}`;
+  return `${shortcut.key.padEnd(14, " ")}${shortcut.description}`;
 }
 
 export function formatGreetingLines(startup: StartupContent): string[] {
@@ -108,6 +77,7 @@ export interface HelpScreenProps {
 
 export function HelpScreen({ isOpen, startup = null }: HelpScreenProps) {
   const { tokens } = useThemeTokens();
+  const categories = useMemo(() => buildHelpCategories(), []);
 
   if (!isOpen) {
     return null;
@@ -121,7 +91,7 @@ export function HelpScreen({ isOpen, startup = null }: HelpScreenProps) {
       closeOnEscape={false}
       onClose={() => {}}
       width={108}
-      height={32}
+      height={36}
     >
       <ScrollBox style={{ flexGrow: 1 }} contentOptions={{ flexDirection: "column" }} scrollbarOptions={{ visible: false }}>
         <Box style={{ flexDirection: "column", marginBottom: 1 }}>
@@ -129,7 +99,7 @@ export function HelpScreen({ isOpen, startup = null }: HelpScreenProps) {
         </Box>
         {startup && <WelcomeGreeting startup={startup} />}
         <Box style={{ flexDirection: "column" }}>
-          {HELP_SHORTCUT_CATEGORIES.map((category) => (
+          {categories.map((category) => (
             <Box key={category.title} style={{ flexDirection: "column" }}>
               <Text style={{ color: tokens["accent.primary"] }}>{category.title}</Text>
               {category.shortcuts.map((shortcut) => (
