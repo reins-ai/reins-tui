@@ -7,3 +7,4 @@ export { StepCard, getToolCategoryIcon, formatEventDuration, getEventStatusGlyph
 export { ThinkingBlockCard, wrapThinkingContent, padCardLine, buildThinkingHeader, type ThinkingBlockCardProps } from "./thinking-block-card";
 export { SubAgentGrid, deriveAgentStates, type SubAgentGridProps, type AgentState } from "./sub-agent-grid";
 export { ErrorCard, extractErrorMessage, truncateErrorMessage, formatErrorToolName, buildErrorCardHeader, buildErrorDetailLine, buildActionHints, getErrorCardStyle, isErrorCardCandidate, type ErrorCardProps } from "./error-card";
+export { ConversationContextMenu, type ConversationContextMenuProps, type ContextMenuAction, type ContextMenuMode } from "./conversation-context-menu";
