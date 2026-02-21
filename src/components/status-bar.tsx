@@ -357,6 +357,12 @@ export interface StatusBarProps {
   tokenCount?: number;
   cost?: string | null;
   compactionActive?: boolean;
+  /**
+   * Prominent compaction status message shown during auto-compaction.
+   * When provided, displayed in warning colour alongside the lifecycle segment.
+   * Example: `"⟳ Auto-compacting context…"`
+   */
+  compactionMessage?: string;
   /** Optional persona display name (e.g. "Alex"). Shown in header when provided. */
   personaName?: string;
   /** Optional persona avatar emoji (e.g. "🤖"). Shown alongside persona name. */
@@ -369,6 +375,7 @@ export function StatusBar({
   tokenCount,
   cost = null,
   compactionActive: compactionProp,
+  compactionMessage,
   personaName,
   personaAvatar,
 }: StatusBarProps) {
@@ -461,6 +468,18 @@ export function StatusBar({
     return <Text key={seg.id} content={`${seg.content}${separator}`} style={{ color }} />;
   });
 
+  // Compaction message — shown prominently in warning colour when active
+  const compactionElement = compactionMessage ? (
+    <>
+      <Text key="compaction-sep" content={SEGMENT_SEPARATOR} style={{ color: tokens["text.muted"] }} />
+      <Text
+        key="compaction-msg"
+        content={compactionMessage}
+        style={{ color: tokens["status.warning"], fontWeight: "bold" }}
+      />
+    </>
+  ) : null;
+
   // Right group: hints in muted color
   const hasRight = right.length > 0;
 
@@ -483,6 +502,7 @@ export function StatusBar({
           </>
         )}
         {leftElements}
+        {compactionElement}
       </Box>
       {hasRight && (
         <Box>

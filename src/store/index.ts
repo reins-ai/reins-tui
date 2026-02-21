@@ -63,6 +63,7 @@ export type AppAction =
   | { type: "ADD_CONVERSATION"; payload: AppState["conversations"][number] }
   | { type: "REMOVE_CONVERSATION"; payload: string }
   | { type: "RENAME_CONVERSATION"; payload: { id: string; title: string } }
+  | { type: "ARCHIVE_CONVERSATION"; payload: string }
   | { type: "SET_ACTIVE_CONVERSATION"; payload: string | null }
   | { type: "SET_CONVERSATION_FILTER"; payload: string }
   | { type: "SET_FOCUSED_PANEL"; payload: FocusedPanel }
@@ -208,6 +209,8 @@ function streamToolCallsToDisplay(toolCalls: StreamToolCall[]): DisplayToolCall[
       args: tc.args,
       result: tc.result,
       isError: tc.status === "error",
+      startedAt: tc.startedAt,
+      completedAt: tc.completedAt,
     }));
 }
 
@@ -324,6 +327,8 @@ function areDisplayToolCallsEqual(
       || prev.status !== curr.status
       || prev.result !== curr.result
       || prev.isError !== curr.isError
+      || prev.startedAt !== curr.startedAt
+      || prev.completedAt !== curr.completedAt
     ) {
       return false;
     }
@@ -407,6 +412,19 @@ export function appReducer(state: AppState, action: AppAction): AppState {
           conversation.id === action.payload.id ? { ...conversation, title: action.payload.title } : conversation,
         ),
       };
+    case "ARCHIVE_CONVERSATION": {
+      const archivedConversations = state.conversations.filter(
+        (conversation) => conversation.id !== action.payload,
+      );
+      const archivedActiveId =
+        state.activeConversationId === action.payload ? null : state.activeConversationId;
+
+      return {
+        ...state,
+        conversations: archivedConversations,
+        activeConversationId: archivedActiveId,
+      };
+    }
     case "SET_ACTIVE_CONVERSATION":
       return {
         ...state,

@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
 import type { DisplayMessage, DisplayToolCall } from "../store";
 import { useApp } from "../store";
@@ -9,8 +9,13 @@ import type { MessageRole } from "../theme/use-theme-tokens";
 import type { ToolCall, ToolCallStatus, ToolVisualState } from "../tools/tool-lifecycle";
 import { displayToolCallToVisualState } from "../tools/tool-lifecycle";
 import type { FramedBlockStyle } from "../ui/types";
-import { Box, ScrollBox, Text } from "../ui";
+import { Box, ScrollBox, Text, useKeyboard } from "../ui";
 import { FramedBlock, SUBTLE_BORDER_CHARS } from "../ui/primitives";
+import { ContextWarningBanner } from "./cards/context-warning-banner";
+import { ErrorCard } from "./cards/error-card";
+import { isErrorCardCandidate } from "./cards/error-card";
+import { SummaryReviewModal } from "./cards/summary-review-modal";
+import type { TokenUsageInfo } from "./input-area";
 import { LogoAscii } from "./logo-ascii";
 import { getMessageBlockStyle, getMessageBorderChars, Message } from "./message";
 import { ThinkingBlock } from "./thinking-block";
@@ -33,6 +38,26 @@ export function isExchangeBoundary(messages: readonly DisplayMessage[], index: n
   }
 
   return false;
+}
+
+// --- Context warning banner thresholds ---
+
+/** Utilisation ratio at or above which the warning banner appears. */
+export const CONTEXT_WARNING_SHOW_THRESHOLD = 0.85;
+
+/** Utilisation ratio below which the warning banner is hidden after compaction. */
+export const CONTEXT_WARNING_HIDE_THRESHOLD = 0.70;
+
+/**
+ * Determine whether the context warning banner should be visible.
+ * The banner appears at ≥ 85% utilisation and disappears only after
+ * compaction drops utilisation below 70%.
+ */
+export function shouldShowContextWarning(
+  utilisation: number | undefined,
+): boolean {
+  if (utilisation === undefined) return false;
+  return utilisation >= CONTEXT_WARNING_SHOW_THRESHOLD;
 }
 
 /** Spacing (in lines) between messages within the same exchange. */
@@ -132,12 +157,63 @@ function MemoryNotificationBar({
   );
 }
 
+// ---------------------------------------------------------------------------
+// Post-compaction summary types and notification
+// ---------------------------------------------------------------------------
+
+/**
+ * Data passed from the parent after a compaction event completes.
+ * `text` is the generated summary. `preCompactionMessages` is a deep
+ * copy of the message list taken before compaction ran, enabling full
+ * rollback via the Reject action.
+ */
+export interface PostCompactionSummary {
+  text: string;
+  preCompactionMessages: DisplayMessage[];
+}
+
+/**
+ * Build the compaction notification message.
+ * Format: "✓ Compacted — [v] view summary"
+ */
+export function buildCompactionNotificationMessage(): string {
+  return "\u2713 Compacted \u2014 [v] view summary";
+}
+
+function CompactionNotificationBar({
+  tokens,
+}: {
+  tokens: Readonly<ThemeTokens>;
+}) {
+  const message = buildCompactionNotificationMessage();
+
+  return (
+    <Box style={{ flexDirection: "row", marginTop: 0 }}>
+      <Text content="[summary] " style={{ color: tokens["status.success"] }} />
+      <Text
+        content={message}
+        style={{ color: tokens["text.secondary"] }}
+      />
+    </Box>
+  );
+}
+
 export interface ConversationPanelProps {
   isFocused: boolean;
   borderColor: string;
   version: string;
   onViewMemory?: (memoryId: string) => void;
   onUndoMemory?: (memoryId: string) => void;
+  tokenUsage?: TokenUsageInfo;
+  onCompact?: () => void;
+  /** Data from the most recent compaction event. Cleared after dismiss. */
+  postCompactionSummary?: PostCompactionSummary;
+  /** Called when the user edits the summary text in the review modal. */
+  onEditSummary?: (newText: string) => void;
+  /** Called when the user rejects the compaction (reverts messages). */
+  onRejectCompaction?: (preCompactionMessages: DisplayMessage[]) => void;
+  /** Called when the notification/modal is dismissed (accept or close). */
+  onDismissCompaction?: () => void;
 }
 
 const DISPLAY_TO_LIFECYCLE_STATUS: Record<DisplayToolCall["status"], ToolCallStatus> = {
@@ -226,25 +302,54 @@ export interface ToolBlockListProps {
 }
 
 /**
+ * Determine whether a completed tool call should auto-collapse to a
+ * single summary line. Tool calls auto-collapse after completion
+ * unless the user has explicitly toggled them open. Running tool
+ * calls stay expanded; error-state blocks always stay expanded.
+ */
+export function shouldAutoCollapse(dtc: DisplayToolCall, expandedSet: ReadonlySet<string>): boolean {
+  if (shouldAutoExpand(dtc)) {
+    return false;
+  }
+  if (dtc.status === "pending" || dtc.status === "running") {
+    return false;
+  }
+  // Completed — collapse unless user explicitly expanded
+  return !expandedSet.has(dtc.id);
+}
+
+/**
  * Renders a list of tool calls as standalone ToolBlock components.
  * Each block gets its own FramedBlock with lifecycle-aware styling.
  * Used when tool calls should appear as distinct visual blocks
  * rather than inline anchors within a message.
  *
- * Error-state blocks are always expanded to preserve diagnostics
- * visibility. Other blocks respect the expandedSet toggle state.
+ * Running blocks are expanded to show progress. Completed blocks
+ * auto-collapse to a single summary line with timing. Error-state
+ * blocks are always expanded to preserve diagnostics visibility.
+ * Users can toggle individual blocks via the expandedSet.
  */
 export function ToolBlockList({ toolCalls, expandedSet }: ToolBlockListProps) {
-  const visualStates = toolCalls.map((dtc) => {
-    const expanded = shouldAutoExpand(dtc) || dtc.status === "complete" || expandedSet.has(dtc.id);
-    return displayToolCallToVisualState(dtc, expanded);
+  const entries = toolCalls.map((dtc) => {
+    const isAutoExpand = shouldAutoExpand(dtc);
+    const isRunning = dtc.status === "pending" || dtc.status === "running";
+    const expanded = isAutoExpand || isRunning || expandedSet.has(dtc.id);
+    const collapsed = shouldAutoCollapse(dtc, expandedSet);
+    const visualState = displayToolCallToVisualState(dtc, expanded);
+    const showErrorCard = isErrorCardCandidate(dtc);
+    return { dtc, visualState, collapsed, showErrorCard };
   });
 
   return (
     <>
-      {visualStates.map((vs, index) => (
-        <Box key={vs.id} style={{ marginTop: index === 0 ? 0 : adjustedBlockGap(MESSAGE_GAP) }}>
-          <ToolBlock visualState={vs} />
+      {entries.map(({ dtc, visualState, collapsed, showErrorCard }, index) => (
+        <Box key={visualState.id} style={{ flexDirection: "column", marginTop: index === 0 ? 0 : adjustedBlockGap(MESSAGE_GAP) }}>
+          <ToolBlock visualState={visualState} collapsed={collapsed} />
+          {showErrorCard ? (
+            <Box style={{ marginTop: adjustedBlockGap(MESSAGE_GAP) }}>
+              <ErrorCard toolCall={dtc} />
+            </Box>
+          ) : null}
         </Box>
       ))}
     </>
@@ -281,6 +386,12 @@ export function ConversationPanel({
   version,
   onViewMemory,
   onUndoMemory,
+  tokenUsage,
+  onCompact,
+  postCompactionSummary,
+  onEditSummary,
+  onRejectCompaction,
+  onDismissCompaction,
 }: ConversationPanelProps) {
   const { messages, isStreaming, lifecycleStatus } = useConversation();
   const { state } = useApp();
@@ -291,6 +402,60 @@ export function ConversationPanel({
   const hasContent = messages.some(
     (message) => message.content.trim().length > 0 || (message.toolCalls && message.toolCalls.length > 0),
   );
+
+  // --- Post-compaction notification and modal state ---
+  const [showCompactionNotification, setShowCompactionNotification] = useState(false);
+  const [showSummaryModal, setShowSummaryModal] = useState(false);
+
+  // Show notification when a new compaction summary arrives
+  const lastSummaryRef = useRef<PostCompactionSummary | undefined>(undefined);
+  if (postCompactionSummary && postCompactionSummary !== lastSummaryRef.current) {
+    lastSummaryRef.current = postCompactionSummary;
+    // Trigger notification display on new summary (ref-based to avoid effect)
+    if (!showCompactionNotification && !showSummaryModal) {
+      setShowCompactionNotification(true);
+    }
+  }
+
+  const handleDismissCompaction = useCallback(() => {
+    setShowCompactionNotification(false);
+    setShowSummaryModal(false);
+    onDismissCompaction?.();
+  }, [onDismissCompaction]);
+
+  const handleViewSummary = useCallback(() => {
+    setShowCompactionNotification(false);
+    setShowSummaryModal(true);
+  }, []);
+
+  const handleAcceptSummary = useCallback(() => {
+    setShowSummaryModal(false);
+    setShowCompactionNotification(false);
+    onDismissCompaction?.();
+  }, [onDismissCompaction]);
+
+  const handleEditSummary = useCallback((newText: string) => {
+    setShowSummaryModal(false);
+    setShowCompactionNotification(false);
+    onEditSummary?.(newText);
+    onDismissCompaction?.();
+  }, [onEditSummary, onDismissCompaction]);
+
+  const handleRejectCompaction = useCallback(() => {
+    setShowSummaryModal(false);
+    setShowCompactionNotification(false);
+    if (postCompactionSummary) {
+      onRejectCompaction?.(postCompactionSummary.preCompactionMessages);
+    }
+    onDismissCompaction?.();
+  }, [postCompactionSummary, onRejectCompaction, onDismissCompaction]);
+
+  const handleCloseModal = useCallback(() => {
+    // Close without action is same as accept — summary already applied
+    setShowSummaryModal(false);
+    setShowCompactionNotification(false);
+    onDismissCompaction?.();
+  }, [onDismissCompaction]);
 
   // Track dismissed memory notifications across renders
   const dismissedNotificationsRef = useRef<Set<string>>(new Set());
@@ -352,6 +517,33 @@ export function ConversationPanel({
     }
     return map;
   }, [memoryNotifications, messages]);
+
+  const showContextWarning = shouldShowContextWarning(tokenUsage?.utilisation);
+
+  useKeyboard((keyEvent) => {
+    if (!isFocused) return;
+
+    const sequence = keyEvent.sequence ?? "";
+
+    // Compaction notification keybindings
+    if (showCompactionNotification && !showSummaryModal) {
+      if (sequence === "v") {
+        handleViewSummary();
+        return;
+      }
+      if (sequence === "d") {
+        handleDismissCompaction();
+        return;
+      }
+    }
+
+    // Context warning keybinding
+    if (!showContextWarning) return;
+
+    if (sequence === "c" && onCompact) {
+      onCompact();
+    }
+  });
 
   return (
     <Box style={{ flexGrow: 1, minHeight: 0, flexDirection: "column", paddingLeft: 1, paddingRight: 1, paddingTop: 1 }}>
@@ -442,14 +634,24 @@ export function ConversationPanel({
                     }
 
                     renderedToolIds.add(toolCall.id);
-                    const expanded = shouldAutoExpand(toolCall) || toolCall.status === "complete" || expandedToolCalls.has(toolCall.id);
+                    const isAutoExpand = shouldAutoExpand(toolCall);
+                    const isRunning = toolCall.status === "pending" || toolCall.status === "running";
+                    const expanded = isAutoExpand || isRunning || expandedToolCalls.has(toolCall.id);
+                    const collapsed = shouldAutoCollapse(toolCall, expandedToolCalls);
                     const visualState = displayToolCallToVisualState(toolCall, expanded);
                     const marginTop = renderedBlockCount === 0 ? 0 : adjustedBlockGap(MESSAGE_GAP);
                     renderedBlockCount += 1;
 
+                    const showErrorCard = isErrorCardCandidate(toolCall);
+
                     return (
                       <Box key={`${message.id}-tool-${toolCall.id}`} style={{ flexDirection: "column", marginTop }}>
-                        <ToolBlock visualState={visualState} />
+                        <ToolBlock visualState={visualState} collapsed={collapsed} />
+                        {showErrorCard ? (
+                          <Box style={{ marginTop: adjustedBlockGap(MESSAGE_GAP) }}>
+                            <ErrorCard toolCall={toolCall} />
+                          </Box>
+                        ) : null}
                       </Box>
                     );
                   }
@@ -526,6 +728,35 @@ export function ConversationPanel({
           })}
           </Box>
         ) : null}
+
+      {showContextWarning && tokenUsage ? (
+        <Box style={{ marginTop: adjustedBlockGap(MESSAGE_GAP) }}>
+          <ContextWarningBanner
+            utilisation={tokenUsage.utilisation}
+            onCompact={onCompact ?? (() => {})}
+          />
+        </Box>
+      ) : null}
+
+      {/* Post-compaction notification */}
+      {showCompactionNotification && postCompactionSummary && !showSummaryModal ? (
+        <Box style={{ marginTop: adjustedBlockGap(MESSAGE_GAP) }}>
+          <CompactionNotificationBar tokens={tokens} />
+        </Box>
+      ) : null}
+
+      {/* Summary review modal */}
+      {showSummaryModal && postCompactionSummary ? (
+        <Box style={{ marginTop: adjustedBlockGap(MESSAGE_GAP) }}>
+          <SummaryReviewModal
+            summaryText={postCompactionSummary.text}
+            onAccept={handleAcceptSummary}
+            onEdit={handleEditSummary}
+            onReject={handleRejectCompaction}
+            onClose={handleCloseModal}
+          />
+        </Box>
+      ) : null}
 
       {isStreaming && !hasContent ? (
         <Box style={{ marginTop: adjustedBlockGap(MESSAGE_GAP) }}>

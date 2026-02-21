@@ -38,6 +38,7 @@ describe("slash command registry", () => {
       "import-memories",
       "export-persona",
       "import-persona",
+      "summarise",
     ]);
   });
 
@@ -74,6 +75,7 @@ describe("slash command registry", () => {
       "import-memories": "memory",
       "export-persona": "environment",
       "import-persona": "environment",
+      summarise: "conversation",
     });
   });
 
@@ -233,6 +235,7 @@ describe("getCommandAutocomplete", () => {
       "setup",
       "skills",
       "status",
+      "summarise",
       "tasks",
       "theme",
       "thinking",

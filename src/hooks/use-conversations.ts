@@ -13,6 +13,7 @@ export interface ConversationsManager {
   switchConversation(id: string): void;
   renameConversation(id: string, title: string): void;
   deleteConversation(id: string): void;
+  archiveConversation(id: string): void;
   setFilter(query: string): void;
 }
 
@@ -130,6 +131,22 @@ export function createConversationsManager(options: ConversationsManagerOptions)
       const nextActiveConversationId = resolveNextActiveConversationId(nextConversations, removedIndex);
       options.dispatch({ type: "SET_ACTIVE_CONVERSATION", payload: nextActiveConversationId });
       options.dispatch({ type: "CLEAR_MESSAGES" });
+    },
+    archiveConversation(id) {
+      if (id.length === 0) {
+        return;
+      }
+
+      const state = options.getState();
+      options.dispatch({ type: "ARCHIVE_CONVERSATION", payload: id });
+
+      if (state.activeConversationId === id) {
+        const removedIndex = state.conversations.findIndex((conversation) => conversation.id === id);
+        const nextConversations = state.conversations.filter((conversation) => conversation.id !== id);
+        const nextActiveConversationId = resolveNextActiveConversationId(nextConversations, removedIndex);
+        options.dispatch({ type: "SET_ACTIVE_CONVERSATION", payload: nextActiveConversationId });
+        options.dispatch({ type: "CLEAR_MESSAGES" });
+      }
     },
     setFilter(query) {
       options.dispatch({ type: "SET_CONVERSATION_FILTER", payload: query });

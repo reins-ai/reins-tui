@@ -19,12 +19,58 @@ import { Box, Input, Text, useKeyboard, useRenderer } from "../ui";
 import { ACCENT_BORDER_CHARS, FramedBlock, SUBTLE_BORDER_CHARS } from "../ui/primitives";
 import { useConversations } from "../hooks";
 import { CompletionPopup } from "./completion-popup";
+import { TokenBar } from "./cards/token-bar";
 import type { ConversationLifecycleStatus } from "../state/status-machine";
+
+/**
+ * Maximum number of visible lines before the input area switches to
+ * internal scroll. Lines beyond this cap are still stored but only
+ * the most recent MAX_VISIBLE_LINES are rendered.
+ */
+export const MAX_VISIBLE_LINES = 8;
+
+/**
+ * Strip ANSI terminal escape sequences from pasted text.
+ * Covers CSI sequences (\x1b[...X), OSC sequences (\x1b]...BEL/ST),
+ * and two-character escapes (\x1b followed by a single char).
+ */
+export function stripAnsiEscapes(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/\x1b(?:\[[0-9;]*[A-Za-z]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[A-Za-z])/g, "");
+}
+
+/**
+ * Count the total number of lines in a multi-line input.
+ * A single line (no newlines) returns 1.
+ */
+export function countInputLines(previousLines: readonly string[], currentLine: string): number {
+  return previousLines.length + 1 + (currentLine.split("\n").length - 1);
+}
+
+/**
+ * Format the line count indicator shown when the input exceeds 3 lines.
+ * Returns an empty string for 3 or fewer lines.
+ */
+export function formatLineCount(lineCount: number): string {
+  if (lineCount <= 3) {
+    return "";
+  }
+  return `[${lineCount} lines]`;
+}
+
+export interface TokenUsageInfo {
+  used: number;
+  limit: number;
+  utilisation: number;
+}
 
 export interface InputAreaProps {
   isFocused: boolean;
   onSubmit(text: string): void;
   onCancelPrompt?(): void | Promise<void>;
+  tokenUsage?: TokenUsageInfo;
+  /** When true, the token bar flashes red to indicate compaction in progress. */
+  isCompacting?: boolean;
 }
 
 export type InputSubmissionKind = "empty" | "command" | "message";
@@ -207,7 +253,7 @@ function toDate(value: Date | string | number): Date {
   return asDate;
 }
 
-export function InputArea({ isFocused, onSubmit, onCancelPrompt }: InputAreaProps) {
+export function InputArea({ isFocused, onSubmit, onCancelPrompt, tokenUsage, isCompacting }: InputAreaProps) {
   const { state, dispatch } = useApp();
   const conversations = useConversations();
   const { client: daemonClient, mode: daemonMode, isConnected } = useDaemon();
@@ -216,12 +262,24 @@ export function InputArea({ isFocused, onSubmit, onCancelPrompt }: InputAreaProp
   const renderer = useRenderer();
   const history = useRef(new InputHistory());
   const [input, setInput] = useState("");
+  const [previousLines, setPreviousLines] = useState<string[]>([]);
   const [validationError, setValidationError] = useState<string | null>(null);
   const [compactMode, setCompactMode] = useState(false);
   const [cancelPromptArmed, setCancelPromptArmed] = useState(false);
   const [daemonUrl, setDaemonUrl] = useState(DEFAULT_DAEMON_HTTP_BASE_URL);
   const cancelPromptTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shiftEnterRef = useRef(false);
   const isPromptCancellable = isPromptCancellableLifecycle(state.streamingLifecycleStatus);
+
+  /** Assemble the full multi-line text from previous lines + current input. */
+  const getFullText = (): string => {
+    if (previousLines.length === 0) {
+      return input;
+    }
+    return [...previousLines, input].join("\n");
+  };
+
+  const totalLineCount = countInputLines(previousLines, input);
 
   const clearCancelPromptTimer = () => {
     if (cancelPromptTimerRef.current !== null) {
@@ -432,8 +490,15 @@ export function InputArea({ isFocused, onSubmit, onCancelPrompt }: InputAreaProp
       return;
     }
 
-    // --- Completion keyboard handling ---
     const keyName = event.name ?? "";
+
+    // --- Shift+Enter: insert newline instead of submitting ---
+    if (keyName === "return" && event.shift) {
+      shiftEnterRef.current = true;
+      return;
+    }
+
+    // --- Completion keyboard handling ---
 
     // Tab: accept the selected completion suggestion
     if (keyName === "tab" && !event.shift && completionState.isOpen) {
@@ -490,26 +555,42 @@ export function InputArea({ isFocused, onSubmit, onCancelPrompt }: InputAreaProp
 
     // --- Original history navigation (only when popup is NOT open) ---
     if (isUpKey(keyName)) {
-      if (input.trim().length > 0) {
+      if (input.trim().length > 0 || previousLines.length > 0) {
         return;
       }
 
       history.current.setDraft(input);
       const previous = history.current.navigateUp();
       if (previous !== null) {
-        setInput(previous);
+        // Restore multi-line history entries
+        const lines = previous.split("\n");
+        if (lines.length > 1) {
+          setPreviousLines(lines.slice(0, -1));
+          setInput(lines[lines.length - 1]);
+        } else {
+          setPreviousLines([]);
+          setInput(previous);
+        }
       }
       return;
     }
 
     if (isDownKey(keyName)) {
-      if (input.trim().length > 0) {
+      if (input.trim().length > 0 || previousLines.length > 0) {
         return;
       }
 
       const next = history.current.navigateDown();
       if (next !== null) {
-        setInput(next);
+        // Restore multi-line history entries
+        const lines = next.split("\n");
+        if (lines.length > 1) {
+          setPreviousLines(lines.slice(0, -1));
+          setInput(lines[lines.length - 1]);
+        } else {
+          setPreviousLines([]);
+          setInput(next);
+        }
       }
     }
   });
@@ -519,12 +600,18 @@ export function InputArea({ isFocused, onSubmit, onCancelPrompt }: InputAreaProp
       return;
     }
 
-    const next = clampText(normalizeInputValue(value));
+    // Sanitise pasted content: strip ANSI escape sequences
+    const sanitised = stripAnsiEscapes(normalizeInputValue(value));
+    const next = clampText(sanitised);
     if (cancelPromptArmed) {
       disarmCancelPrompt();
     }
     setInput(next);
-    history.current.setDraft(next);
+    // Store the full multi-line text as the history draft
+    const draft = previousLines.length > 0
+      ? [...previousLines, next].join("\n")
+      : next;
+    history.current.setDraft(draft);
     completionActions.update(next);
 
     if (validationError !== null) {
@@ -537,13 +624,22 @@ export function InputArea({ isFocused, onSubmit, onCancelPrompt }: InputAreaProp
       return;
     }
 
-    const kind = classifyInputSubmission(input);
+    // Shift+Enter: insert newline instead of submitting
+    if (shiftEnterRef.current) {
+      shiftEnterRef.current = false;
+      setPreviousLines((prev) => [...prev, input]);
+      setInput("");
+      return;
+    }
+
+    const fullText = getFullText();
+    const kind = classifyInputSubmission(fullText);
     if (kind === "empty") {
       setValidationError("Message cannot be empty");
       return;
     }
 
-    const error = validateMessage(input);
+    const error = validateMessage(fullText);
     if (error) {
       setValidationError(error);
       return;
@@ -551,17 +647,19 @@ export function InputArea({ isFocused, onSubmit, onCancelPrompt }: InputAreaProp
 
     if (kind === "command") {
       disarmCancelPrompt();
-      void handleCommand(input);
-      history.current.push(input);
+      void handleCommand(fullText);
+      history.current.push(fullText);
       setInput("");
+      setPreviousLines([]);
       completionActions.update("");
       return;
     }
 
-    onSubmit(input);
+    onSubmit(fullText);
     disarmCancelPrompt();
-    history.current.push(input);
+    history.current.push(fullText);
     setInput("");
+    setPreviousLines([]);
     completionActions.update("");
     setValidationError(null);
   };
@@ -569,7 +667,16 @@ export function InputArea({ isFocused, onSubmit, onCancelPrompt }: InputAreaProp
   const frameState = resolveInputFrameState(isFocused, daemonMode);
   const blockStyle = getInputBlockStyle(frameState, tokens);
   const borderChars = getInputBorderChars(frameState);
-  const charCount = formatCharCount(input.length, MAX_INPUT_LENGTH);
+  const fullText = getFullText();
+  const charCount = formatCharCount(fullText.length, MAX_INPUT_LENGTH);
+  const lineCountLabel = formatLineCount(totalLineCount);
+
+  // Determine which previous lines to render (cap at MAX_VISIBLE_LINES - 1
+  // since the Input component itself occupies one line)
+  const maxPreviousVisible = MAX_VISIBLE_LINES - 1;
+  const visiblePreviousLines = previousLines.length > maxPreviousVisible
+    ? previousLines.slice(previousLines.length - maxPreviousVisible)
+    : previousLines;
 
   // Build contextual hint text
   const completionHintParts: string[] = [];
@@ -579,7 +686,7 @@ export function InputArea({ isFocused, onSubmit, onCancelPrompt }: InputAreaProp
   if (completionState.isOpen) {
     completionHintParts.push("Tab complete · ↑↓ select · Esc dismiss");
   } else if (isFocused) {
-    const focusedHintParts = ["Enter to send"];
+    const focusedHintParts = ["\u21B5 send \u00B7 Shift+\u21B5 newline"];
     if (isPromptCancellable) {
       focusedHintParts.push(getCancelPromptHint(cancelPromptArmed));
     }
@@ -611,6 +718,18 @@ export function InputArea({ isFocused, onSubmit, onCancelPrompt }: InputAreaProp
         selectedIndex={completionState.selectedIndex}
       />
       <FramedBlock style={blockStyle} borderChars={borderChars}>
+        {/* Render previous lines for multi-line input (auto-expand up to MAX_VISIBLE_LINES) */}
+        {visiblePreviousLines.length > 0 ? (
+          <Box style={{ flexDirection: "column", maxHeight: maxPreviousVisible }}>
+            {visiblePreviousLines.map((line, idx) => (
+              <Text
+                key={idx}
+                content={line || " "}
+                style={{ color: tokens["text.primary"] }}
+              />
+            ))}
+          </Box>
+        ) : null}
         <Input
           focused={isFocused}
           placeholder={daemonMode === "mock" ? "⚠ Daemon offline — responses are simulated" : "Type a message... (Enter to send)"}
@@ -625,6 +744,12 @@ export function InputArea({ isFocused, onSubmit, onCancelPrompt }: InputAreaProp
               style={{ color: hintColor }}
             />
           </Box>
+          {lineCountLabel ? (
+            <Text
+              content={lineCountLabel + (charCount ? "  " : "")}
+              style={{ color: tokens["text.muted"] }}
+            />
+          ) : null}
           {charCount ? (
             <Text
               content={charCount}
@@ -632,6 +757,14 @@ export function InputArea({ isFocused, onSubmit, onCancelPrompt }: InputAreaProp
             />
           ) : null}
         </Box>
+        {tokenUsage ? (
+          <TokenBar
+            used={tokenUsage.used}
+            limit={tokenUsage.limit}
+            utilisation={tokenUsage.utilisation}
+            isCompacting={isCompacting}
+          />
+        ) : null}
       </FramedBlock>
     </>
   );

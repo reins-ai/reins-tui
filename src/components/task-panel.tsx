@@ -1,9 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "../daemon/client";
+import type { ActivityEvent, ActivityStats } from "../state/activity-store";
 import { useThemeTokens } from "../theme";
 import type { ThemeTokens } from "../theme/theme-schema";
-import { Box, Text } from "../ui";
+import { Box, ScrollBox, Text, useKeyboard } from "../ui";
+import type { ExportFormat } from "../util/activity-export";
+import { exportActivityLog } from "../util/activity-export";
+import { Clipboard } from "../util/clipboard";
+import { StepCard } from "./cards/step-card";
 
 // --- Constants ---
 
@@ -546,4 +551,209 @@ export function TaskPanel(props: TaskPanelProps) {
       <Text style={{ color: tokens["accent.primary"] }}>{bottomBorder}</Text>
     </Box>
   );
+}
+
+// --- ActivityPanel ---
+
+const ACTIVITY_CARD_WIDTH = 44;
+const ACTIVITY_HEADER_LABEL = "Activity";
+const ACTIVITY_HEADER_ICON = "\u2699"; // ⚙
+const ACTIVITY_MAX_VISIBLE = 10;
+
+export interface ActivityPanelProps {
+  events: ActivityEvent[];
+  stats?: ActivityStats;
+  onClear?: () => void;
+  onExport?: (format: ExportFormat) => void;
+  width?: number;
+  maxVisible?: number;
+  focusedCardIndex?: number;
+}
+
+/**
+ * Returns true if any event is a "done" event with doom loop termination.
+ */
+export function hasDoomLoop(events: ActivityEvent[]): boolean {
+  return events.some(
+    (e) => e.kind === "done" && e.finishReason === "doom_loop_detected",
+  );
+}
+
+/**
+ * Formats activity stats into a compact summary string.
+ * Format: "N tool calls · X tokens · Y.Ys total"
+ */
+export function formatStats(stats: ActivityStats): string {
+  const calls = `${stats.totalToolCalls} tool call${stats.totalToolCalls === 1 ? "" : "s"}`;
+  const tokens = stats.totalTokensUsed > 0
+    ? ` \u00B7 ${stats.totalTokensUsed.toLocaleString()} tokens`
+    : "";
+  const wallMs = stats.totalWallMs > 0
+    ? ` \u00B7 ${(stats.totalWallMs / 1000).toFixed(1)}s total`
+    : "";
+  return `${calls}${tokens}${wallMs}`;
+}
+
+/**
+ * Builds the keybinding hint line for the activity panel footer.
+ * Shows available actions: [y] copy, [x] export, [c] clear.
+ */
+export function formatKeybindingHints(hasFocusedCard: boolean): string {
+  const hints: string[] = [];
+  if (hasFocusedCard) hints.push("[y] copy");
+  hints.push("[x] export");
+  hints.push("[c] clear");
+  return hints.join("  ");
+}
+
+/**
+ * ActivityPanel renders a live scrollable list of activity events.
+ *
+ * Each event is rendered as a StepCard showing the step number,
+ * tool category icon, truncated args/result preview, and duration.
+ * Events are displayed newest-first (as returned by ActivityStore.getAll()).
+ *
+ * This component is a pure render — it receives events as a prop
+ * and does not manage its own subscription to ActivityStore.
+ */
+export function ActivityPanel(props: ActivityPanelProps) {
+  const {
+    events,
+    stats,
+    onClear,
+    onExport,
+    width = ACTIVITY_CARD_WIDTH,
+    maxVisible = ACTIVITY_MAX_VISIBLE,
+    focusedCardIndex,
+  } = props;
+  const { tokens } = useThemeTokens();
+  const [exportStatus, setExportStatus] = useState<string | null>(null);
+  const exportTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Clear export status timer on unmount
+  useEffect(() => {
+    return () => {
+      if (exportTimerRef.current !== null) {
+        clearTimeout(exportTimerRef.current);
+      }
+    };
+  }, []);
+
+  const headerText = `\u2500 ${ACTIVITY_HEADER_ICON} ${ACTIVITY_HEADER_LABEL} `;
+  const headerFill = "\u2500".repeat(Math.max(0, width - headerText.length - 2));
+  const topBorder = `\u256D${headerText}${headerFill}\u256E`;
+  const bottomBorder = `\u2570${"\u2500".repeat(width - 2)}\u256F`;
+
+  const innerWidth = width - 4; // "│ " + " │"
+  const separatorLine = padActivityLine("\u2500".repeat(innerWidth), width);
+
+  const visibleEvents = events.slice(0, maxVisible);
+  const totalEvents = events.length;
+  const isDoomLoop = hasDoomLoop(events);
+  const hasFocusedCard = focusedCardIndex !== undefined && focusedCardIndex >= 0 && focusedCardIndex < visibleEvents.length;
+
+  useKeyboard((keyEvent) => {
+    const seq = keyEvent.sequence ?? "";
+
+    // [c] — clear activity log
+    if (seq === "c" && !keyEvent.ctrl && onClear) {
+      onClear();
+      return;
+    }
+
+    // [y] — copy focused card's full event JSON to clipboard
+    if (seq === "y" && hasFocusedCard) {
+      const event = visibleEvents[focusedCardIndex!];
+      if (event) {
+        void Clipboard.copy(JSON.stringify(event, null, 2));
+      }
+      return;
+    }
+
+    // [x] — export full session log to file
+    if (seq === "x" && !keyEvent.ctrl) {
+      if (onExport) {
+        onExport("json");
+      } else if (events.length > 0) {
+        void exportActivityLog(events, "json").then((result) => {
+          if (result.ok && result.filePath) {
+            setExportStatus(`\u2713 Exported to ${result.filePath}`);
+          } else {
+            setExportStatus(`\u2717 Export failed: ${result.error ?? "unknown error"}`);
+          }
+          // Clear status after 3 seconds
+          if (exportTimerRef.current !== null) {
+            clearTimeout(exportTimerRef.current);
+          }
+          exportTimerRef.current = setTimeout(() => {
+            setExportStatus(null);
+            exportTimerRef.current = null;
+          }, 3000);
+        });
+      }
+      return;
+    }
+  });
+
+  return (
+    <Box style={{ flexDirection: "column", marginTop: 1, marginBottom: 1 }}>
+      <Text style={{ color: tokens["accent.primary"] }}>{topBorder}</Text>
+      {isDoomLoop && (
+        <Text style={{ color: tokens["status.error"] }}>
+          {padActivityLine("\u26A0  Loop detected: repeated tool calls with identical args.", width)}
+        </Text>
+      )}
+      {exportStatus !== null && (
+        <Text style={{ color: exportStatus.startsWith("\u2713") ? tokens["status.success"] : tokens["status.error"] }}>
+          {padActivityLine(exportStatus, width)}
+        </Text>
+      )}
+      {visibleEvents.length === 0 ? (
+        <Text style={{ color: tokens["text.muted"] }}>
+          {padActivityLine("No activity yet", width)}
+        </Text>
+      ) : (
+        <ScrollBox>
+          {visibleEvents.map((event, index) => {
+            // Step numbers are based on total event count (newest first)
+            // so the first visible event has the highest step number
+            const stepNumber = totalEvents - index;
+            return (
+              <StepCard
+                key={event.id}
+                event={event}
+                stepNumber={stepNumber}
+                width={width}
+                isFocused={focusedCardIndex === index}
+              />
+            );
+          })}
+        </ScrollBox>
+      )}
+      {stats !== undefined && (
+        <>
+          <Text style={{ color: tokens["text.muted"] }}>{separatorLine}</Text>
+          <Text style={{ color: tokens["text.muted"] }}>
+            {padActivityLine(formatStats(stats), width)}
+          </Text>
+          <Text style={{ color: tokens["text.muted"] }}>
+            {padActivityLine(formatKeybindingHints(hasFocusedCard), width)}
+          </Text>
+        </>
+      )}
+      <Text style={{ color: tokens["accent.primary"] }}>{bottomBorder}</Text>
+    </Box>
+  );
+}
+
+/**
+ * Pads a content line to fit within the activity panel border.
+ */
+function padActivityLine(content: string, width: number): string {
+  const available = width - 4; // "│ " + " │"
+  const truncated = content.length > available
+    ? `${content.slice(0, available - 1)}\u2026`
+    : content;
+
+  return `\u2502 ${truncated}${" ".repeat(Math.max(0, available - truncated.length))} \u2502`;
 }
