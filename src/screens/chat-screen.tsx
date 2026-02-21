@@ -3,12 +3,15 @@
 // Each region is wrapped in a ZoneShell for explicit visual boundaries.
 
 import type { BreakpointState } from "../layout/breakpoints";
+import type { ActivityEvent, ActivityStats } from "../state/activity-store";
 import { useThemeTokens } from "../theme";
 import { Box, Text, ZoneShell } from "../ui";
 import { ConversationPanel } from "../components/conversation-panel";
 import { InputArea } from "../components/input-area";
 import type { TokenUsageInfo } from "../components/input-area";
 import type { PanelBorderColors } from "../components/layout";
+import { ActivityPanel } from "../components/task-panel";
+import type { ExportFormat } from "../util/activity-export";
 
 export interface ChatScreenProps {
   version: string;
@@ -22,6 +25,14 @@ export interface ChatScreenProps {
   tokenUsage?: TokenUsageInfo;
   /** When true, the token bar flashes red to indicate compaction in progress. */
   isCompacting?: boolean;
+  /** Live activity events from the ActivityStore (newest-first). */
+  activityEvents?: ActivityEvent[];
+  /** Aggregated activity stats (tool call count, tokens, wall time). */
+  activityStats?: ActivityStats;
+  /** Called when the user clears the activity log. */
+  onActivityClear?: () => void;
+  /** Called when the user exports the activity log. */
+  onActivityExport?: (format: ExportFormat) => void;
   onSubmitMessage: (text: string) => void;
   onCancelPrompt?: () => void | Promise<void>;
 }
@@ -43,6 +54,10 @@ export function ChatScreen({
   breakpoint,
   tokenUsage,
   isCompacting,
+  activityEvents,
+  activityStats,
+  onActivityClear,
+  onActivityExport,
   onSubmitMessage,
   onCancelPrompt,
 }: ChatScreenProps) {
@@ -86,15 +101,21 @@ export function ChatScreen({
           borderSides={["left"]}
           borderColor={tokens["border.subtle"]}
           backgroundColor={tokens["surface.secondary"]}
-          style={{ paddingLeft: 1, paddingRight: 1, paddingTop: 1 }}
+          style={{ paddingLeft: 1, paddingRight: 1, paddingTop: 0 }}
         >
           <Box style={{ width: breakpoint.panelWidths.activity, flexDirection: "column" }}>
-            <Text content="Activity" style={{ color: tokens["text.secondary"] }} />
-            <Text content="Tool calls and events" style={{ color: tokens["text.muted"] }} />
+            <ActivityPanel
+              events={activityEvents ?? []}
+              stats={activityStats}
+              onClear={onActivityClear}
+              onExport={onActivityExport}
+              width={breakpoint.panelWidths.activity}
+            />
           </Box>
         </ZoneShell>
       ) : null}
 
+      {/* TODO: Implement expanded details panel when event selection is wired up */}
       {showExpandedPanel ? (
         <ZoneShell
           borderSides={["left"]}
@@ -103,8 +124,7 @@ export function ChatScreen({
           style={{ paddingLeft: 1, paddingRight: 1, paddingTop: 1 }}
         >
           <Box style={{ width: breakpoint.panelWidths.expanded, flexDirection: "column" }}>
-            <Text content="Details" style={{ color: tokens["text.secondary"] }} />
-            <Text content="Expanded view" style={{ color: tokens["text.muted"] }} />
+            <Text content="No event selected" style={{ color: tokens["text.muted"] }} />
           </Box>
         </ZoneShell>
       ) : null}
