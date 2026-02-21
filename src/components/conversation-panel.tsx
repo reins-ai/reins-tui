@@ -11,6 +11,8 @@ import { displayToolCallToVisualState } from "../tools/tool-lifecycle";
 import type { FramedBlockStyle } from "../ui/types";
 import { Box, ScrollBox, Text } from "../ui";
 import { FramedBlock, SUBTLE_BORDER_CHARS } from "../ui/primitives";
+import { ErrorCard } from "./cards/error-card";
+import { isErrorCardCandidate } from "./cards/error-card";
 import { LogoAscii } from "./logo-ascii";
 import { getMessageBlockStyle, getMessageBorderChars, Message } from "./message";
 import { ThinkingBlock } from "./thinking-block";
@@ -260,14 +262,20 @@ export function ToolBlockList({ toolCalls, expandedSet }: ToolBlockListProps) {
     const expanded = isAutoExpand || isRunning || expandedSet.has(dtc.id);
     const collapsed = shouldAutoCollapse(dtc, expandedSet);
     const visualState = displayToolCallToVisualState(dtc, expanded);
-    return { visualState, collapsed };
+    const showErrorCard = isErrorCardCandidate(dtc);
+    return { dtc, visualState, collapsed, showErrorCard };
   });
 
   return (
     <>
-      {entries.map(({ visualState, collapsed }, index) => (
-        <Box key={visualState.id} style={{ marginTop: index === 0 ? 0 : adjustedBlockGap(MESSAGE_GAP) }}>
+      {entries.map(({ dtc, visualState, collapsed, showErrorCard }, index) => (
+        <Box key={visualState.id} style={{ flexDirection: "column", marginTop: index === 0 ? 0 : adjustedBlockGap(MESSAGE_GAP) }}>
           <ToolBlock visualState={visualState} collapsed={collapsed} />
+          {showErrorCard ? (
+            <Box style={{ marginTop: adjustedBlockGap(MESSAGE_GAP) }}>
+              <ErrorCard toolCall={dtc} />
+            </Box>
+          ) : null}
         </Box>
       ))}
     </>
@@ -473,9 +481,16 @@ export function ConversationPanel({
                     const marginTop = renderedBlockCount === 0 ? 0 : adjustedBlockGap(MESSAGE_GAP);
                     renderedBlockCount += 1;
 
+                    const showErrorCard = isErrorCardCandidate(toolCall);
+
                     return (
                       <Box key={`${message.id}-tool-${toolCall.id}`} style={{ flexDirection: "column", marginTop }}>
                         <ToolBlock visualState={visualState} collapsed={collapsed} />
+                        {showErrorCard ? (
+                          <Box style={{ marginTop: adjustedBlockGap(MESSAGE_GAP) }}>
+                            <ErrorCard toolCall={toolCall} />
+                          </Box>
+                        ) : null}
                       </Box>
                     );
                   }
