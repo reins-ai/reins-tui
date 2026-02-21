@@ -103,6 +103,10 @@ export interface DisplayToolCall {
   args?: Record<string, unknown>;
   result?: string;
   isError?: boolean;
+  /** ISO timestamp when the tool call started running. */
+  startedAt?: string;
+  /** ISO timestamp when the tool call completed or failed. */
+  completedAt?: string;
 }
 
 export interface DisplayContentBlock {

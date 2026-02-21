@@ -208,6 +208,8 @@ function streamToolCallsToDisplay(toolCalls: StreamToolCall[]): DisplayToolCall[
       args: tc.args,
       result: tc.result,
       isError: tc.status === "error",
+      startedAt: tc.startedAt,
+      completedAt: tc.completedAt,
     }));
 }
 
@@ -324,6 +326,8 @@ function areDisplayToolCallsEqual(
       || prev.status !== curr.status
       || prev.result !== curr.result
       || prev.isError !== curr.isError
+      || prev.startedAt !== curr.startedAt
+      || prev.completedAt !== curr.completedAt
     ) {
       return false;
     }

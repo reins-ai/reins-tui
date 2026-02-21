@@ -352,6 +352,10 @@ export interface DisplayToolCallLike {
   args?: Record<string, unknown>;
   result?: string;
   isError?: boolean;
+  /** ISO timestamp when the tool call started running. */
+  startedAt?: string;
+  /** ISO timestamp when the tool call completed or failed. */
+  completedAt?: string;
 }
 
 /**
@@ -365,8 +369,9 @@ export function displayToolCallToVisualState(
   const visualStatus = normalizeDisplayStatus(displayCall.status);
   const toolLabel = formatToolLabel(displayCall.name);
   const glyph = getToolGlyph(visualStatus);
+  const duration = computeStreamDuration(displayCall.startedAt, displayCall.completedAt);
 
-  const label = buildDisplayLabel(visualStatus, toolLabel, displayCall);
+  const label = buildDisplayLabel(visualStatus, toolLabel, displayCall, duration);
   const detail = buildDisplayDetail(displayCall);
 
   return {
@@ -379,7 +384,7 @@ export function displayToolCallToVisualState(
     detail,
     expanded: expanded && detail !== undefined,
     hasDetail: detail !== undefined,
-    duration: undefined,
+    duration,
   };
 }
 
@@ -473,6 +478,7 @@ function buildDisplayLabel(
   status: ToolVisualStatus,
   toolLabel: string,
   call: DisplayToolCallLike,
+  duration?: number,
 ): string {
   switch (status) {
     case "queued":
@@ -480,10 +486,14 @@ function buildDisplayLabel(
     case "running":
       return `Running ${toolLabel}...`;
     case "success":
-      return `${toolLabel} complete`;
+      return duration !== undefined
+        ? `${toolLabel} complete (${duration}ms)`
+        : `${toolLabel} complete`;
     case "error": {
       const errorText = call.result && call.isError ? call.result : "unknown error";
-      return `${toolLabel} failed: ${errorText}`;
+      return duration !== undefined
+        ? `${toolLabel} failed (${duration}ms): ${errorText}`
+        : `${toolLabel} failed: ${errorText}`;
     }
   }
 }

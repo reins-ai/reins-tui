@@ -120,6 +120,12 @@ const TOOL_BLOCK_DETAIL_MAX = 500;
 
 export interface ToolBlockProps {
   visualState: ToolVisualState;
+  /**
+   * When true, the tool block renders as a single collapsed summary line
+   * regardless of the expanded flag in visualState. Used for auto-collapse
+   * after a tool call completes in the chat stream.
+   */
+  collapsed?: boolean;
 }
 
 /**
@@ -230,7 +236,7 @@ export function getToolBlockStatusSuffix(visualState: ToolVisualState): string {
  *   ┃ Tool write  failed
  *   ┃   Permission denied
  */
-export function ToolBlock({ visualState }: ToolBlockProps) {
+export function ToolBlock({ visualState, collapsed }: ToolBlockProps) {
   const { tokens } = useThemeTokens();
   const blockStyle = getToolBlockStyle(visualState, tokens);
   const formattedDetail = formatToolBlockDetail(visualState.detail);
@@ -241,17 +247,26 @@ export function ToolBlock({ visualState }: ToolBlockProps) {
       ? tokens["glyph.tool.done"]
       : tokens["glyph.tool.running"];
 
+  // When explicitly collapsed, suppress detail body regardless of expand state
+  const showDetail = collapsed === true ? false : (formattedDetail !== undefined);
+  const expandIndicator = formattedDetail !== undefined
+    ? (showDetail ? " [-]" : " [+]")
+    : undefined;
+
   return (
     <FramedBlock style={blockStyle} borderChars={SUBTLE_BORDER_CHARS}>
-      {/* Header: tool name */}
+      {/* Header: tool name + status + expand indicator */}
       <Box style={{ flexDirection: "row" }}>
         <Text style={{ color: tokens["text.muted"] }}>Tool</Text>
         <Text style={{ color: tokens["text.secondary"] }}>{` ${visualState.toolName}`}</Text>
         <Text style={{ color: statusColor }}>{`  ${statusSuffix}`}</Text>
+        {expandIndicator !== undefined ? (
+          <Text style={{ color: tokens["text.muted"] }}>{expandIndicator}</Text>
+        ) : null}
       </Box>
 
       {/* Detail body: args, result, or error content */}
-      {formattedDetail ? (
+      {showDetail && formattedDetail ? (
         <Box style={{ flexDirection: "column", marginTop: 0, paddingLeft: 2 }}>
           {formattedDetail.split("\n").map((line, i) => (
             <Text

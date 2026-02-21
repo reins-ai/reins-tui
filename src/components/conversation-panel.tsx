@@ -226,25 +226,48 @@ export interface ToolBlockListProps {
 }
 
 /**
+ * Determine whether a completed tool call should auto-collapse to a
+ * single summary line. Tool calls auto-collapse after completion
+ * unless the user has explicitly toggled them open. Running tool
+ * calls stay expanded; error-state blocks always stay expanded.
+ */
+export function shouldAutoCollapse(dtc: DisplayToolCall, expandedSet: ReadonlySet<string>): boolean {
+  if (shouldAutoExpand(dtc)) {
+    return false;
+  }
+  if (dtc.status === "pending" || dtc.status === "running") {
+    return false;
+  }
+  // Completed — collapse unless user explicitly expanded
+  return !expandedSet.has(dtc.id);
+}
+
+/**
  * Renders a list of tool calls as standalone ToolBlock components.
  * Each block gets its own FramedBlock with lifecycle-aware styling.
  * Used when tool calls should appear as distinct visual blocks
  * rather than inline anchors within a message.
  *
- * Error-state blocks are always expanded to preserve diagnostics
- * visibility. Other blocks respect the expandedSet toggle state.
+ * Running blocks are expanded to show progress. Completed blocks
+ * auto-collapse to a single summary line with timing. Error-state
+ * blocks are always expanded to preserve diagnostics visibility.
+ * Users can toggle individual blocks via the expandedSet.
  */
 export function ToolBlockList({ toolCalls, expandedSet }: ToolBlockListProps) {
-  const visualStates = toolCalls.map((dtc) => {
-    const expanded = shouldAutoExpand(dtc) || dtc.status === "complete" || expandedSet.has(dtc.id);
-    return displayToolCallToVisualState(dtc, expanded);
+  const entries = toolCalls.map((dtc) => {
+    const isAutoExpand = shouldAutoExpand(dtc);
+    const isRunning = dtc.status === "pending" || dtc.status === "running";
+    const expanded = isAutoExpand || isRunning || expandedSet.has(dtc.id);
+    const collapsed = shouldAutoCollapse(dtc, expandedSet);
+    const visualState = displayToolCallToVisualState(dtc, expanded);
+    return { visualState, collapsed };
   });
 
   return (
     <>
-      {visualStates.map((vs, index) => (
-        <Box key={vs.id} style={{ marginTop: index === 0 ? 0 : adjustedBlockGap(MESSAGE_GAP) }}>
-          <ToolBlock visualState={vs} />
+      {entries.map(({ visualState, collapsed }, index) => (
+        <Box key={visualState.id} style={{ marginTop: index === 0 ? 0 : adjustedBlockGap(MESSAGE_GAP) }}>
+          <ToolBlock visualState={visualState} collapsed={collapsed} />
         </Box>
       ))}
     </>
@@ -442,14 +465,17 @@ export function ConversationPanel({
                     }
 
                     renderedToolIds.add(toolCall.id);
-                    const expanded = shouldAutoExpand(toolCall) || toolCall.status === "complete" || expandedToolCalls.has(toolCall.id);
+                    const isAutoExpand = shouldAutoExpand(toolCall);
+                    const isRunning = toolCall.status === "pending" || toolCall.status === "running";
+                    const expanded = isAutoExpand || isRunning || expandedToolCalls.has(toolCall.id);
+                    const collapsed = shouldAutoCollapse(toolCall, expandedToolCalls);
                     const visualState = displayToolCallToVisualState(toolCall, expanded);
                     const marginTop = renderedBlockCount === 0 ? 0 : adjustedBlockGap(MESSAGE_GAP);
                     renderedBlockCount += 1;
 
                     return (
                       <Box key={`${message.id}-tool-${toolCall.id}`} style={{ flexDirection: "column", marginTop }}>
-                        <ToolBlock visualState={visualState} />
+                        <ToolBlock visualState={visualState} collapsed={collapsed} />
                       </Box>
                     );
                   }
