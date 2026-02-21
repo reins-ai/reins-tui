@@ -123,6 +123,30 @@ export function truncateContent(content: string, maxChars = 60): string {
 }
 
 // ---------------------------------------------------------------------------
+// Stale detection (exported for tests)
+// ---------------------------------------------------------------------------
+
+const STALE_THRESHOLD_DAYS = 90;
+const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+/**
+ * Determines whether a memory record is stale based on its `accessedAt` date.
+ * Uses `accessedAt` as the primary signal; falls back to `createdAt` only when
+ * `accessedAt` is missing or empty. A memory is stale when it has not been
+ * accessed within 90 days.
+ */
+export function isStaleMemory(record: MemoryRecordDisplay, thresholdDays: number = STALE_THRESHOLD_DAYS): boolean {
+  const dateStr = record.accessedAt || record.createdAt;
+  if (!dateStr) return false;
+
+  const accessedMs = new Date(dateStr).getTime();
+  if (Number.isNaN(accessedMs)) return false;
+
+  const elapsedMs = Date.now() - accessedMs;
+  return elapsedMs >= thresholdDays * MS_PER_DAY;
+}
+
+// ---------------------------------------------------------------------------
 // Filtering logic (exported for tests)
 // ---------------------------------------------------------------------------
 
@@ -497,6 +521,7 @@ function MemoryRow({
   const content = truncateContent(memory.content);
   const tagsText = memory.tags.length > 0 ? memory.tags.join(", ") : "";
   const timeText = formatRelativeTime(memory.createdAt);
+  const stale = isStaleMemory(memory);
 
   return (
     <Box style={{ flexDirection: "row" }}>
@@ -507,6 +532,9 @@ function MemoryRow({
         content={content}
         style={{ color: isSelected ? tokens["text.primary"] : tokens["text.secondary"] }}
       />
+      {stale ? (
+        <Text content=" ⚠ stale" style={{ color: tokens["status.warning"] }} />
+      ) : null}
       {tagsText ? (
         <Text content={`  ${tagsText}`} style={{ color: tokens["text.muted"] }} />
       ) : null}
