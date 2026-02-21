@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { DEFAULT_DAEMON_HTTP_BASE_URL } from "../daemon/client";
-import type { ActivityEvent } from "../state/activity-store";
+import type { ActivityEvent, ActivityStats } from "../state/activity-store";
 import { useThemeTokens } from "../theme";
 import type { ThemeTokens } from "../theme/theme-schema";
-import { Box, ScrollBox, Text } from "../ui";
+import { Box, ScrollBox, Text, useKeyboard } from "../ui";
 import { StepCard } from "./cards/step-card";
 
 // --- Constants ---
@@ -559,8 +559,34 @@ const ACTIVITY_MAX_VISIBLE = 10;
 
 export interface ActivityPanelProps {
   events: ActivityEvent[];
+  stats?: ActivityStats;
+  onClear?: () => void;
   width?: number;
   maxVisible?: number;
+}
+
+/**
+ * Returns true if any event is a "done" event with doom loop termination.
+ */
+export function hasDoomLoop(events: ActivityEvent[]): boolean {
+  return events.some(
+    (e) => e.kind === "done" && e.finishReason === "doom_loop_detected",
+  );
+}
+
+/**
+ * Formats activity stats into a compact summary string.
+ * Format: "N tool calls · X tokens · Y.Ys total  [c] clear"
+ */
+export function formatStats(stats: ActivityStats): string {
+  const calls = `${stats.totalToolCalls} tool call${stats.totalToolCalls === 1 ? "" : "s"}`;
+  const tokens = stats.totalTokensUsed > 0
+    ? ` \u00B7 ${stats.totalTokensUsed.toLocaleString()} tokens`
+    : "";
+  const wallMs = stats.totalWallMs > 0
+    ? ` \u00B7 ${(stats.totalWallMs / 1000).toFixed(1)}s total`
+    : "";
+  return `${calls}${tokens}${wallMs}  [c] clear`;
 }
 
 /**
@@ -574,7 +600,13 @@ export interface ActivityPanelProps {
  * and does not manage its own subscription to ActivityStore.
  */
 export function ActivityPanel(props: ActivityPanelProps) {
-  const { events, width = ACTIVITY_CARD_WIDTH, maxVisible = ACTIVITY_MAX_VISIBLE } = props;
+  const {
+    events,
+    stats,
+    onClear,
+    width = ACTIVITY_CARD_WIDTH,
+    maxVisible = ACTIVITY_MAX_VISIBLE,
+  } = props;
   const { tokens } = useThemeTokens();
 
   const headerText = `\u2500 ${ACTIVITY_HEADER_ICON} ${ACTIVITY_HEADER_LABEL} `;
@@ -582,12 +614,27 @@ export function ActivityPanel(props: ActivityPanelProps) {
   const topBorder = `\u256D${headerText}${headerFill}\u256E`;
   const bottomBorder = `\u2570${"\u2500".repeat(width - 2)}\u256F`;
 
+  const innerWidth = width - 4; // "│ " + " │"
+  const separatorLine = padActivityLine("\u2500".repeat(innerWidth), width);
+
   const visibleEvents = events.slice(0, maxVisible);
   const totalEvents = events.length;
+  const isDoomLoop = hasDoomLoop(events);
+
+  useKeyboard((keyEvent) => {
+    if (keyEvent.sequence === "c" && !keyEvent.ctrl && onClear) {
+      onClear();
+    }
+  });
 
   return (
     <Box style={{ flexDirection: "column", marginTop: 1, marginBottom: 1 }}>
       <Text style={{ color: tokens["accent.primary"] }}>{topBorder}</Text>
+      {isDoomLoop && (
+        <Text style={{ color: tokens["status.error"] }}>
+          {padActivityLine("\u26A0  Loop detected: repeated tool calls with identical args.", width)}
+        </Text>
+      )}
       {visibleEvents.length === 0 ? (
         <Text style={{ color: tokens["text.muted"] }}>
           {padActivityLine("No activity yet", width)}
@@ -608,6 +655,14 @@ export function ActivityPanel(props: ActivityPanelProps) {
             );
           })}
         </ScrollBox>
+      )}
+      {stats !== undefined && (
+        <>
+          <Text style={{ color: tokens["text.muted"] }}>{separatorLine}</Text>
+          <Text style={{ color: tokens["text.muted"] }}>
+            {padActivityLine(formatStats(stats), width)}
+          </Text>
+        </>
       )}
       <Text style={{ color: tokens["accent.primary"] }}>{bottomBorder}</Text>
     </Box>
