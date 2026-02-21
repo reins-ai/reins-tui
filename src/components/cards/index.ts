@@ -10,3 +10,4 @@ export { ErrorCard, extractErrorMessage, truncateErrorMessage, formatErrorToolNa
 export { ConversationContextMenu, type ConversationContextMenuProps, type ContextMenuAction, type ContextMenuMode } from "./conversation-context-menu";
 export { TokenBar, buildProgressBar, formatTokenCount, buildTokenLabel, getTokenBarTier, type TokenBarProps, type TokenBarTier } from "./token-bar";
 export { ContextWarningBanner, formatUtilisationPercent, buildWarningMessage, getWarningBannerStyle, type ContextWarningBannerProps } from "./context-warning-banner";
+export { SummaryReviewModal, buildModalHeader, buildReviewLegend, buildEditLegend, getModalStyle, type SummaryReviewModalProps } from "./summary-review-modal";
