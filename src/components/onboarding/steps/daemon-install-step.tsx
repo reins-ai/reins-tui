@@ -24,6 +24,28 @@ interface DetectionResult {
   serviceStatus: ServiceState;
 }
 
+/**
+ * Parsed daemon health response used for functionality assessment.
+ * Mirrors the HealthResponse shape from reins-core/src/daemon/server.ts.
+ */
+interface DaemonHealthDetail {
+  status: string;
+  version: string;
+  capabilities: string[];
+}
+
+/**
+ * Result of the extended functionality check performed after the basic
+ * health check passes. Provides informational context about the daemon's
+ * readiness without blocking the user from proceeding.
+ */
+interface FunctionalityResult {
+  /** Whether the daemon is fully functional (all core capabilities present). */
+  fullyFunctional: boolean;
+  /** Human-readable informational messages about missing capabilities. */
+  notices: string[];
+}
+
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
@@ -75,6 +97,75 @@ async function checkDaemonHealth(): Promise<boolean> {
   return results.some(
     (r) => r.status === "fulfilled" && r.value === true,
   );
+}
+
+/**
+ * Fetch and parse the daemon /health response body to assess functionality.
+ * Tries all loopback addresses in parallel (same as checkDaemonHealth) and
+ * returns the first successful parsed response.
+ *
+ * Returns null if no address responds or the body cannot be parsed.
+ */
+async function fetchDaemonHealthDetail(): Promise<DaemonHealthDetail | null> {
+  const results = await Promise.allSettled(
+    HEALTH_URLS.map(async (url) => {
+      const response = await fetch(url, { signal: AbortSignal.timeout(HEALTH_TIMEOUT_MS) });
+      if (!response.ok) return null;
+      const body = await response.json() as Record<string, unknown>;
+      return body;
+    }),
+  );
+
+  for (const result of results) {
+    if (result.status !== "fulfilled" || result.value === null) continue;
+    const body = result.value;
+
+    const status = typeof body.status === "string" ? body.status : "unknown";
+    const version = typeof body.version === "string" ? body.version : "unknown";
+
+    // Capabilities live at discovery.capabilities in the health response
+    let capabilities: string[] = [];
+    const discovery = body.discovery;
+    if (discovery && typeof discovery === "object" && !Array.isArray(discovery)) {
+      const disc = discovery as Record<string, unknown>;
+      if (Array.isArray(disc.capabilities)) {
+        capabilities = disc.capabilities.filter((c): c is string => typeof c === "string");
+      }
+    }
+
+    return { status, version, capabilities };
+  }
+
+  return null;
+}
+
+/**
+ * Assess daemon functionality from the parsed health detail.
+ * Returns informational notices about missing capabilities — these are
+ * NON-BLOCKING and do not prevent the user from proceeding.
+ */
+function assessFunctionality(detail: DaemonHealthDetail): FunctionalityResult {
+  const notices: string[] = [];
+  const caps = new Set(detail.capabilities);
+
+  if (!caps.has("conversations.crud") || !caps.has("messages.send")) {
+    notices.push("Conversation services are not active — chat may not work until the daemon is restarted.");
+  }
+
+  if (!caps.has("memory.crud")) {
+    notices.push("Memory services are not active — memory features will be unavailable.");
+  }
+
+  // providers.auth and providers.models are always present when the daemon
+  // starts, so their absence would indicate a serious issue
+  if (!caps.has("providers.auth") || !caps.has("providers.models")) {
+    notices.push("Provider services are not fully initialized.");
+  }
+
+  return {
+    fullyFunctional: notices.length === 0,
+    notices,
+  };
 }
 
 /**
@@ -141,6 +232,7 @@ export function DaemonInstallStepView({ tokens, engineState: _engineState, onSte
   const [status, setStatus] = useState<DaemonStatus>("detecting");
   const [detail, setDetail] = useState<string | null>(null);
   const [serviceInfo, setServiceInfo] = useState<string | null>(null);
+  const [_functionalityInfo, setFunctionalityInfo] = useState<FunctionalityResult | null>(null);
   const [retryCount, setRetryCount] = useState(0);
 
   // Remote endpoint state
@@ -155,10 +247,25 @@ export function DaemonInstallStepView({ tokens, engineState: _engineState, onSte
     let cancelled = false;
     const installer = new ServiceInstaller();
 
+    /**
+     * Run the extended functionality check after health passes.
+     * This is non-blocking — it only sets informational state.
+     */
+    const runFunctionalityCheck = async (): Promise<void> => {
+      const healthDetail = await fetchDaemonHealthDetail();
+      if (cancelled) return;
+
+      if (healthDetail) {
+        const result = assessFunctionality(healthDetail);
+        setFunctionalityInfo(result);
+      }
+    };
+
     void (async () => {
       setStatus("detecting");
       setDetail(null);
       setServiceInfo(null);
+      setFunctionalityInfo(null);
 
       // --- Phase 1: detect current state ---
       const detection = await detectDaemon(installer);
@@ -174,6 +281,8 @@ export function DaemonInstallStepView({ tokens, engineState: _engineState, onSte
         setServiceInfo(info);
         setStatus("connected");
         onStepData({ daemonStatus: "connected", installed: true, serviceStatus: detection.serviceStatus });
+        // Run extended functionality check (non-blocking)
+        void runFunctionalityCheck();
         return;
       }
 
@@ -195,6 +304,7 @@ export function DaemonInstallStepView({ tokens, engineState: _engineState, onSte
           setServiceInfo("Service installed and running");
           setStatus("connected");
           onStepData({ daemonStatus: "connected", installed: true, serviceStatus: "running" });
+          void runFunctionalityCheck();
           return;
         }
 
@@ -225,6 +335,7 @@ export function DaemonInstallStepView({ tokens, engineState: _engineState, onSte
             setServiceInfo("Service installed and running");
             setStatus("connected");
             onStepData({ daemonStatus: "connected", installed: true, serviceStatus: "running" });
+            void runFunctionalityCheck();
             return;
           }
         }
@@ -396,6 +507,32 @@ export function DaemonInstallStepView({ tokens, engineState: _engineState, onSte
             {serviceInfo !== null ? (
               <Box style={{ marginTop: 1, paddingLeft: 2 }}>
                 <Text content={serviceInfo} style={{ color: tokens["text.muted"] }} />
+              </Box>
+            ) : null}
+            {functionalityInfo !== null && functionalityInfo.fullyFunctional ? (
+              <Box style={{ marginTop: 1, paddingLeft: 2 }}>
+                <Text
+                  content="All services active"
+                  style={{ color: tokens["text.muted"] }}
+                />
+              </Box>
+            ) : null}
+            {functionalityInfo !== null && !functionalityInfo.fullyFunctional ? (
+              <Box style={{ flexDirection: "column", marginTop: 1, paddingLeft: 2 }}>
+                {functionalityInfo.notices.map((notice, i) => (
+                  <Box key={i}>
+                    <Text
+                      content={`! ${notice}`}
+                      style={{ color: tokens["status.warning"] }}
+                    />
+                  </Box>
+                ))}
+                <Box style={{ marginTop: 1 }}>
+                  <Text
+                    content="These will be resolved as you continue setup."
+                    style={{ color: tokens["text.muted"] }}
+                  />
+                </Box>
               </Box>
             ) : null}
           </Box>
