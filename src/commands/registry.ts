@@ -27,7 +27,10 @@ export type SlashCommandHandlerKey =
   | "NUDGES"
   | "TASKS"
   | "BROWSER"
-  | "SCHEDULE";
+  | "SCHEDULE"
+  | "IMPORT_MEMORIES"
+  | "EXPORT_PERSONA"
+  | "IMPORT_PERSONA";
 
 export interface SlashCommandDefinition {
   readonly name: string;
@@ -258,6 +261,30 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     usage: "/schedule",
     category: "system",
     handlerKey: "SCHEDULE",
+  }),
+  Object.freeze({
+    name: "import-memories",
+    aliases: Object.freeze(["import-mem"]),
+    description: "Import memories from a JSON file or a directory of Markdown files.",
+    usage: "/import-memories <path>",
+    category: "memory",
+    handlerKey: "IMPORT_MEMORIES",
+  }),
+  Object.freeze({
+    name: "export-persona",
+    aliases: Object.freeze([]),
+    description: "Export the active persona (PERSONA.yaml + PERSONALITY.md) as a zip archive.",
+    usage: "/export-persona [output-path]",
+    category: "environment",
+    handlerKey: "EXPORT_PERSONA",
+  }),
+  Object.freeze({
+    name: "import-persona",
+    aliases: Object.freeze([]),
+    description: "Import a persona pack (zip) into the active environment.",
+    usage: "/import-persona <path-to-zip>",
+    category: "environment",
+    handlerKey: "IMPORT_PERSONA",
   }),
 ]);
 

@@ -82,6 +82,7 @@ export type AppAction =
   | { type: "SET_SKILL_PANEL_OPEN"; payload: boolean }
   | { type: "SET_BROWSER_PANEL_OPEN"; payload: boolean }
   | { type: "SET_SCHEDULE_PANEL_OPEN"; payload: boolean }
+  | { type: "SET_PERSONA_EDITOR_OPEN"; payload: boolean }
   | { type: "SET_CHANNEL_TOKEN_PROMPT"; payload: { open: boolean; platform?: string } }
   | { type: "SET_ONBOARDING_STATUS"; payload: OnboardingStatus }
   | { type: "SET_ONBOARDING_RERUN" }
@@ -90,6 +91,7 @@ export type AppAction =
   | { type: "SET_PROVIDER"; payload: string }
   | { type: "SET_AVAILABLE_MODELS"; payload: string[] }
   | { type: "SET_ENVIRONMENT"; payload: string | null }
+  | { type: "SET_PERSONA"; payload: { name: string | null; avatar: string | null } }
   | { type: "ADD_MESSAGE"; payload: DisplayMessage }
   | { type: "SET_MESSAGES"; payload: DisplayMessage[] }
   | { type: "APPEND_TOKEN"; payload: { messageId: string; token: string } }
@@ -486,6 +488,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
       return typeof action.payload === "boolean"
         ? { ...state, isSchedulePanelOpen: action.payload }
         : state;
+    case "SET_PERSONA_EDITOR_OPEN":
+      return typeof action.payload === "boolean"
+        ? { ...state, isPersonaEditorOpen: action.payload }
+        : state;
     case "SET_CHANNEL_TOKEN_PROMPT":
       return {
         ...state,
@@ -512,6 +518,12 @@ export function appReducer(state: AppState, action: AppAction): AppState {
         : state;
     case "SET_ENVIRONMENT":
       return { ...state, activeEnvironment: action.payload };
+    case "SET_PERSONA":
+      return {
+        ...state,
+        personaName: action.payload.name,
+        personaAvatar: action.payload.avatar,
+      };
     case "ADD_MESSAGE":
       return {
         ...state,

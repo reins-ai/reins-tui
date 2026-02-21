@@ -146,6 +146,7 @@ export interface AppState {
   isSkillPanelOpen: boolean;
   isBrowserPanelOpen: boolean;
   isSchedulePanelOpen: boolean;
+  isPersonaEditorOpen: boolean;
   isChannelTokenPromptOpen: boolean;
   channelTokenPromptPlatform: string | null;
   onboardingStatus: OnboardingStatus;
@@ -155,6 +156,8 @@ export interface AppState {
   currentProvider: string;
   availableModels: string[];
   activeEnvironment: string | null;
+  personaName: string | null;
+  personaAvatar: string | null;
   status: string;
   focusedPanel: FocusedPanel;
   thinkingLevel: ThinkingLevel;
@@ -185,6 +188,7 @@ export const DEFAULT_STATE: AppState = {
   isSkillPanelOpen: false,
   isBrowserPanelOpen: false,
   isSchedulePanelOpen: false,
+  isPersonaEditorOpen: false,
   isChannelTokenPromptOpen: false,
   channelTokenPromptPlatform: null,
   onboardingStatus: "checking",
@@ -193,6 +197,8 @@ export const DEFAULT_STATE: AppState = {
   currentProvider: "",
   availableModels: [],
   activeEnvironment: null,
+  personaName: null,
+  personaAvatar: null,
   status: "Ready",
   focusedPanel: "conversation",
   thinkingLevel: "none",
