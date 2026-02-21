@@ -30,7 +30,8 @@ export type SlashCommandHandlerKey =
   | "SCHEDULE"
   | "IMPORT_MEMORIES"
   | "EXPORT_PERSONA"
-  | "IMPORT_PERSONA";
+  | "IMPORT_PERSONA"
+  | "SUMMARISE_CONTEXT";
 
 export interface SlashCommandDefinition {
   readonly name: string;
@@ -285,6 +286,14 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     usage: "/import-persona <path-to-zip>",
     category: "environment",
     handlerKey: "IMPORT_PERSONA",
+  }),
+  Object.freeze({
+    name: "summarise",
+    aliases: Object.freeze(["sum"]),
+    description: "Compact conversation context by summarising older messages.",
+    usage: "/summarise [--keep N]",
+    category: "conversation",
+    handlerKey: "SUMMARISE_CONTEXT",
   }),
 ]);
 

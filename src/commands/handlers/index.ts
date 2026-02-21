@@ -18,6 +18,7 @@ import { handleModelCommand } from "./model";
 import { handleBriefingCommand, handleNudgesCommand } from "./proactive";
 import { handleTasksCommand } from "./tasks";
 import { handleSearchSettingsCommand } from "./search-settings";
+import { handleSummariseCommand } from "./summarise";
 import {
   handleClearConversationCommand,
   handleExportConversationCommand,
@@ -60,6 +61,7 @@ const HANDLER_MAP: Record<SlashCommandHandlerKey, CommandHandler> = {
   IMPORT_MEMORIES: handleImportMemoriesCommand,
   EXPORT_PERSONA: handleExportPersonaCommand,
   IMPORT_PERSONA: handleImportPersonaCommand,
+  SUMMARISE_CONTEXT: handleSummariseCommand,
 };
 
 export async function dispatchCommand(
