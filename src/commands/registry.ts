@@ -19,6 +19,7 @@ export type SlashCommandHandlerKey =
   | "MEMORY_SETUP"
   | "DAEMON"
   | "CHANNELS"
+  | "ONBOARD"
   | "SETUP"
   | "TOGGLE_THINKING"
   | "INTEGRATIONS"
@@ -192,9 +193,17 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     handlerKey: "CHANNELS",
   }),
   Object.freeze({
+    name: "onboard",
+    aliases: Object.freeze(["onboarding"]),
+    description: "Run the onboarding setup wizard.",
+    usage: "/onboard [reset-onboarding]",
+    category: "system",
+    handlerKey: "ONBOARD",
+  }),
+  Object.freeze({
     name: "setup",
-    aliases: Object.freeze(["onboarding", "personality"]),
-    description: "Re-run the onboarding setup wizard.",
+    aliases: Object.freeze(["personality"]),
+    description: "Alias for /onboard — re-run the onboarding setup wizard.",
     usage: "/setup [reset-onboarding]",
     category: "system",
     handlerKey: "SETUP",

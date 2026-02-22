@@ -24,6 +24,7 @@ import {
   handleExportConversationCommand,
   handleNewConversationCommand,
 } from "./session";
+import { handleOnboardCommand } from "./onboard";
 import { handleSetupCommand } from "./setup";
 import { handleCompactCommand, handleHelpCommand, handleQuitCommand, handleSettingsCommand, handleStatusCommand } from "./system";
 import { handleThemeCommand } from "./theme";
@@ -49,6 +50,7 @@ const HANDLER_MAP: Record<SlashCommandHandlerKey, CommandHandler> = {
   MEMORY_SETUP: handleMemorySetupCommand,
   DAEMON: handleDaemonCommand,
   CHANNELS: handleChannelsCommand,
+  ONBOARD: handleOnboardCommand,
   SETUP: handleSetupCommand,
   TOGGLE_THINKING: handleThinkingCommand,
   INTEGRATIONS: handleIntegrationsCommand,
