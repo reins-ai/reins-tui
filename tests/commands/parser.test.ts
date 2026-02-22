@@ -41,6 +41,8 @@ describe("slash command registry", () => {
       "export-persona",
       "import-persona",
       "summarise",
+      "auth",
+      "deauth",
     ]);
   });
 
@@ -80,6 +82,8 @@ describe("slash command registry", () => {
       "export-persona": "environment",
       "import-persona": "environment",
       summarise: "conversation",
+      auth: "system",
+      deauth: "system",
     });
   });
 
@@ -213,6 +217,7 @@ describe("getCommandAutocomplete", () => {
 
     expect(result.length).toBe(SLASH_COMMANDS.length);
     expect(result.map((item) => item.name)).toEqual([
+      "auth",
       "briefing",
       "browser",
       "channels",
@@ -221,6 +226,7 @@ describe("getCommandAutocomplete", () => {
       "connect",
       "convert",
       "daemon",
+      "deauth",
       "env",
       "export",
       "export-persona",

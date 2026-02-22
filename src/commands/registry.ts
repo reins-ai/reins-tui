@@ -33,7 +33,9 @@ export type SlashCommandHandlerKey =
   | "EXPORT_PERSONA"
   | "IMPORT_PERSONA"
   | "SUMMARISE_CONTEXT"
-  | "CONVERT";
+  | "CONVERT"
+  | "AUTH"
+  | "DEAUTH";
 
 export interface SlashCommandDefinition {
   readonly name: string;
@@ -312,6 +314,22 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     usage: "/summarise [--keep N]",
     category: "conversation",
     handlerKey: "SUMMARISE_CONTEXT",
+  }),
+  Object.freeze({
+    name: "auth",
+    aliases: Object.freeze(["authenticate"]),
+    description: "Manage authorized users for a channel. Use 'list' subcommand to view users.",
+    usage: "/auth <channel> <userId> | /auth list <channel>",
+    category: "system",
+    handlerKey: "AUTH",
+  }),
+  Object.freeze({
+    name: "deauth",
+    aliases: Object.freeze([]),
+    description: "Remove an authorized user from a channel.",
+    usage: "/deauth <channel> <userId>",
+    category: "system",
+    handlerKey: "DEAUTH",
   }),
 ]);
 

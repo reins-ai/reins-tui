@@ -1,6 +1,7 @@
 import { err, type Result } from "../../daemon/contracts";
 import type { ParsedCommand } from "../parser";
 import type { SlashCommandHandlerKey } from "../registry";
+import { handleAuthCommand, handleDeauthCommand } from "./auth";
 import { handleBrowserCommand } from "./browser";
 import { handleExportPersonaCommand } from "./export-persona";
 import { handleImportMemoriesCommand } from "./import-memories";
@@ -66,6 +67,8 @@ const HANDLER_MAP: Record<SlashCommandHandlerKey, CommandHandler> = {
   EXPORT_PERSONA: handleExportPersonaCommand,
   IMPORT_PERSONA: handleImportPersonaCommand,
   SUMMARISE_CONTEXT: handleSummariseCommand,
+  AUTH: handleAuthCommand,
+  DEAUTH: handleDeauthCommand,
 };
 
 export async function dispatchCommand(
