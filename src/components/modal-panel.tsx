@@ -103,6 +103,7 @@ export function ModalPanel({
         width: "100%",
         height: "100%",
         flexDirection: "column",
+        backgroundColor: tokens["surface.primary"],
       }}
     >
       <Box

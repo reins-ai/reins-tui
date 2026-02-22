@@ -115,7 +115,8 @@ export function ConversionReport({
     );
   }
 
-  const rawLines = reportContent.split("\n");
+  // Normalize line endings — strip \r to handle CRLF content from OpenClaw.
+  const rawLines = reportContent.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
   const parsed = rawLines.map(parseLine).filter((l) => l.kind !== "table-sep");
   const truncated = parsed.length > MAX_DISPLAY_LINES;
   const displayLines = truncated ? parsed.slice(0, MAX_DISPLAY_LINES) : parsed;
