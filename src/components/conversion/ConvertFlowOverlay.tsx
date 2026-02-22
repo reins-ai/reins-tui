@@ -1,14 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
-import { Box, Text, useKeyboard } from "../../../ui";
-import { getActiveDaemonUrl } from "../../../daemon/actions";
-import { logger } from "../../../lib/debug-logger";
-import { ConflictPrompt, type ConflictStrategy } from "../../conversion/ConflictPrompt";
-import { ConversionProgress } from "../../conversion/ConversionProgress";
-import type { StepViewProps } from "./index";
+import { Box, Text, useKeyboard } from "../../ui";
+import { useThemeTokens } from "../../theme";
+import { getActiveDaemonUrl } from "../../daemon/actions";
+import { logger } from "../../lib/debug-logger";
+import { ConversionProgress } from "./ConversionProgress";
+import { ConflictPrompt, type ConflictStrategy } from "./ConflictPrompt";
+import { ConversionReport } from "./ConversionReport";
 
 // ---------------------------------------------------------------------------
-// Conversion categories
+// Conversion categories (mirrors OpenClawMigrationStepView)
 // ---------------------------------------------------------------------------
 
 const CONVERSION_CATEGORIES = [
@@ -38,47 +39,23 @@ const CATEGORY_LABELS: Record<ConversionCategory, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Detection
+// Types
 // ---------------------------------------------------------------------------
 
-const FETCH_TIMEOUT_MS = 5_000;
+type FlowPhase =
+  | "detecting"
+  | "not-found"
+  | "checklist"
+  | "migrating"
+  | "conflict"
+  | "done"
+  | "error";
 
 interface DetectionResponse {
   found: boolean;
   path?: string;
   version?: string;
 }
-
-async function detectOpenClaw(): Promise<DetectionResponse> {
-  try {
-    const baseUrl = await getActiveDaemonUrl();
-    const response = await fetch(`${baseUrl}/api/openclaw/detect`, {
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    });
-
-    if (!response.ok) {
-      return { found: false };
-    }
-
-    const data = (await response.json()) as DetectionResponse;
-    return data;
-  } catch {
-    logger.app.warn("OpenClaw detection failed — daemon unreachable, advancing");
-    return { found: false };
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Component
-// ---------------------------------------------------------------------------
-
-type MigrationPhase = "detecting" | "not-found" | "checklist" | "migrating" | "conflict" | "done";
-
-// ---------------------------------------------------------------------------
-// Daemon polling helpers
-// ---------------------------------------------------------------------------
-
-const POLL_INTERVAL_MS = 500;
 
 interface ConversionStatusResponse {
   status: "idle" | "running" | "complete" | "error" | "conflict";
@@ -93,20 +70,33 @@ interface ConversionStatusResponse {
   };
 }
 
-async function pollConversionStatus(): Promise<ConversionStatusResponse> {
+export interface ConvertFlowOverlayProps {
+  visible: boolean;
+  onClose: () => void;
+}
+
+// ---------------------------------------------------------------------------
+// Daemon helpers
+// ---------------------------------------------------------------------------
+
+const FETCH_TIMEOUT_MS = 5_000;
+const POLL_INTERVAL_MS = 500;
+
+async function detectOpenClaw(): Promise<DetectionResponse> {
   try {
     const baseUrl = await getActiveDaemonUrl();
-    const response = await fetch(`${baseUrl}/api/convert/status`, {
+    const response = await fetch(`${baseUrl}/api/openclaw/detect`, {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
 
     if (!response.ok) {
-      return { status: "error", error: `HTTP ${response.status}` };
+      return { found: false };
     }
 
-    return (await response.json()) as ConversionStatusResponse;
+    return (await response.json()) as DetectionResponse;
   } catch {
-    return { status: "error", error: "Daemon unreachable" };
+    logger.app.warn("OpenClaw detection failed — daemon unreachable");
+    return { found: false };
   }
 }
 
@@ -126,6 +116,23 @@ async function startConversion(categories: string[]): Promise<boolean> {
   }
 }
 
+async function pollConversionStatus(): Promise<ConversionStatusResponse> {
+  try {
+    const baseUrl = await getActiveDaemonUrl();
+    const response = await fetch(`${baseUrl}/api/convert/status`, {
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      return { status: "error", error: `HTTP ${response.status}` };
+    }
+
+    return (await response.json()) as ConversionStatusResponse;
+  } catch {
+    return { status: "error", error: "Daemon unreachable" };
+  }
+}
+
 async function resolveConflict(strategy: ConflictStrategy): Promise<boolean> {
   try {
     const baseUrl = await getActiveDaemonUrl();
@@ -142,13 +149,31 @@ async function resolveConflict(strategy: ConflictStrategy): Promise<boolean> {
   }
 }
 
-export function OpenClawMigrationStepView({
-  tokens,
-  engineState: _engineState,
-  onStepData,
-  onRequestNext,
-}: StepViewProps) {
-  const [phase, setPhase] = useState<MigrationPhase>("detecting");
+async function fetchReport(): Promise<string | null> {
+  try {
+    const baseUrl = await getActiveDaemonUrl();
+    const response = await fetch(`${baseUrl}/api/convert/report`, {
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      return null;
+    }
+
+    const body = (await response.json()) as { report: string | null };
+    return body.report ?? null;
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+export function ConvertFlowOverlay({ visible, onClose }: ConvertFlowOverlayProps) {
+  const { tokens } = useThemeTokens();
+  const [phase, setPhase] = useState<FlowPhase>("detecting");
   const [detectedPath, setDetectedPath] = useState<string | null>(null);
   const [detectedVersion, setDetectedVersion] = useState<string | null>(null);
   const [selectedCategories, setSelectedCategories] = useState<Set<ConversionCategory>>(
@@ -156,27 +181,56 @@ export function OpenClawMigrationStepView({
   );
   const [focusedIndex, setFocusedIndex] = useState(0);
 
-  // Progress state
+  // Migration progress state
   const [progressCategory, setProgressCategory] = useState<string | null>(null);
   const [progressProcessed, setProgressProcessed] = useState(0);
   const [progressTotal, setProgressTotal] = useState(0);
   const [progressElapsedMs, setProgressElapsedMs] = useState(0);
-  const [migrationError, setMigrationError] = useState<string | undefined>(undefined);
+  const [errorMessage, setErrorMessage] = useState<string | undefined>(undefined);
 
   // Conflict state
   const [conflictItemName, setConflictItemName] = useState("");
   const [conflictCategory, setConflictCategory] = useState("");
 
-  const advancedRef = useRef(false);
+  // Report state
+  const [reportContent, setReportContent] = useState<string | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+
   const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Run detection on mount
+  // Reset state when overlay becomes visible
   useEffect(() => {
+    if (visible) {
+      setPhase("detecting");
+      setDetectedPath(null);
+      setDetectedVersion(null);
+      setSelectedCategories(new Set(CONVERSION_CATEGORIES));
+      setFocusedIndex(0);
+      setProgressCategory(null);
+      setProgressProcessed(0);
+      setProgressTotal(0);
+      setProgressElapsedMs(0);
+      setErrorMessage(undefined);
+      setReportContent(null);
+      setReportLoading(false);
+    }
+
+    return () => {
+      if (pollTimerRef.current !== null) {
+        clearTimeout(pollTimerRef.current);
+        pollTimerRef.current = null;
+      }
+    };
+  }, [visible]);
+
+  // Run detection when overlay opens
+  useEffect(() => {
+    if (!visible || phase !== "detecting") return;
+
     let cancelled = false;
 
     void (async () => {
       const result = await detectOpenClaw();
-
       if (cancelled) return;
 
       if (!result.found) {
@@ -192,80 +246,14 @@ export function OpenClawMigrationStepView({
     return () => {
       cancelled = true;
     };
-  }, []);
-
-  // Auto-advance when not found (after brief display)
-  useEffect(() => {
-    if (phase !== "not-found") return;
-
-    const timer = setTimeout(() => {
-      if (!advancedRef.current) {
-        advancedRef.current = true;
-        onStepData({
-          migrationDetectionDone: true,
-          migrationSkip: true,
-        });
-        onRequestNext();
-      }
-    }, 1_200);
-
-    return () => clearTimeout(timer);
-  }, [phase, onStepData, onRequestNext]);
-
-  const handleStartMigration = useCallback(async () => {
-    const categories = [...selectedCategories];
-    setPhase("migrating");
-
-    const started = await startConversion(categories);
-    if (!started) {
-      setMigrationError("Failed to start conversion. Is the daemon running?");
-      // Fall through to done with error info
-      onStepData({
-        migrationDetectionDone: true,
-        migrationDetected: true,
-        migrationPath: detectedPath,
-        migrationSelectedCategories: categories,
-        migrationSkip: false,
-        migrationError: "Failed to start conversion",
-      });
-      setPhase("done");
-    }
-  }, [selectedCategories, detectedPath, onStepData]);
-
-  const handleSkip = useCallback(() => {
-    onStepData({
-      migrationDetectionDone: true,
-      migrationSkip: true,
-    });
-    onRequestNext();
-  }, [onStepData, onRequestNext]);
-
-  const toggleCategory = useCallback((index: number) => {
-    const category = CONVERSION_CATEGORIES[index];
-    setSelectedCategories((prev) => {
-      const next = new Set(prev);
-      if (next.has(category)) {
-        next.delete(category);
-      } else {
-        next.add(category);
-      }
-      return next;
-    });
-  }, []);
-
-  const handleConflictResolve = useCallback(async (strategy: ConflictStrategy) => {
-    const resolved = await resolveConflict(strategy);
-    if (resolved) {
-      setPhase("migrating");
-    } else {
-      setMigrationError("Failed to send conflict resolution to daemon");
-      setPhase("done");
-    }
-  }, []);
+  }, [visible, phase]);
 
   // Poll conversion status during migrating phase
   useEffect(() => {
-    if (phase !== "migrating") return;
+    if (!visible || (phase !== "migrating" && phase !== "conflict")) return;
+
+    // Only poll during migrating, not conflict (user is choosing)
+    if (phase === "conflict") return;
 
     let cancelled = false;
 
@@ -288,21 +276,23 @@ export function OpenClawMigrationStepView({
       }
 
       if (status.status === "complete") {
-        onStepData({
-          migrationDetectionDone: true,
-          migrationDetected: true,
-          migrationPath: detectedPath,
-          migrationSelectedCategories: [...selectedCategories],
-          migrationSkip: false,
-          migrationComplete: true,
-        });
-        setPhase("done");
+        setProgressCategory(null);
+        setProgressProcessed(status.processed ?? progressTotal);
+        setProgressTotal(status.total ?? progressTotal);
+        setProgressElapsedMs(status.elapsedMs ?? 0);
+        setReportLoading(true);
+        const report = await fetchReport();
+        if (!cancelled) {
+          setReportContent(report);
+          setReportLoading(false);
+          setPhase("done");
+        }
         return;
       }
 
       if (status.status === "error") {
-        setMigrationError(status.error ?? "Unknown error");
-        setPhase("done");
+        setErrorMessage(status.error ?? "Unknown error");
+        setPhase("error");
         return;
       }
 
@@ -323,26 +313,61 @@ export function OpenClawMigrationStepView({
         pollTimerRef.current = null;
       }
     };
-  }, [phase, detectedPath, selectedCategories, onStepData]);
+  }, [visible, phase, progressTotal]);
+
+  const toggleCategory = useCallback((index: number) => {
+    const category = CONVERSION_CATEGORIES[index];
+    setSelectedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(category)) {
+        next.delete(category);
+      } else {
+        next.add(category);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleStartMigration = useCallback(async () => {
+    const categories = [...selectedCategories];
+    setPhase("migrating");
+    const started = await startConversion(categories);
+    if (!started) {
+      setErrorMessage("Failed to start conversion. Is the daemon running?");
+      setPhase("error");
+    }
+  }, [selectedCategories]);
+
+  const handleConflictResolve = useCallback(async (strategy: ConflictStrategy) => {
+    const resolved = await resolveConflict(strategy);
+    if (resolved) {
+      setPhase("migrating");
+    } else {
+      setErrorMessage("Failed to send conflict resolution to daemon");
+      setPhase("error");
+    }
+  }, []);
 
   useKeyboard((event) => {
+    if (!visible) return;
+
     const keyName = event.name ?? "";
     const sequence = event.sequence ?? "";
 
-    if (phase === "not-found") {
-      if (!advancedRef.current) {
-        advancedRef.current = true;
-        onStepData({
-          migrationDetectionDone: true,
-          migrationSkip: true,
-        });
-        onRequestNext();
+    // Escape always closes (except during active migration)
+    if (keyName === "escape" || keyName === "esc") {
+      if (phase === "migrating" || phase === "conflict") {
+        // Don't close during active migration
+        return;
       }
+      onClose();
       return;
     }
 
-    // During conflict phase, ConflictPrompt handles its own keyboard
-    if (phase === "conflict" || phase === "migrating") {
+    if (phase === "not-found" || phase === "error") {
+      if (keyName === "return" || keyName === "enter") {
+        onClose();
+      }
       return;
     }
 
@@ -367,27 +392,37 @@ export function OpenClawMigrationStepView({
         void handleStartMigration();
         return;
       }
-      if (keyName === "escape" || keyName === "esc" || sequence === "s" || sequence === "S") {
-        handleSkip();
-        return;
-      }
       return;
     }
 
     if (phase === "done") {
       if (keyName === "return" || keyName === "enter") {
-        onRequestNext();
+        onClose();
       }
     }
   });
 
-  // --- Render ---
+  if (!visible) {
+    return null;
+  }
+
+  // --- Render phases ---
 
   if (phase === "detecting") {
     return (
-      <Box style={{ flexDirection: "column" }}>
+      <Box
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "100%",
+          height: "100%",
+          flexDirection: "column",
+          padding: 2,
+        }}
+      >
         <Text
-          content="OpenClaw Migration"
+          content="OpenClaw Conversion"
           style={{ color: tokens["accent.primary"] }}
         />
         <Box style={{ marginTop: 1, flexDirection: "row" }}>
@@ -397,22 +432,44 @@ export function OpenClawMigrationStepView({
             style={{ color: tokens["text.secondary"] }}
           />
         </Box>
+        <Box style={{ marginTop: 2 }}>
+          <Text
+            content="Esc to cancel"
+            style={{ color: tokens["text.muted"] }}
+          />
+        </Box>
       </Box>
     );
   }
 
   if (phase === "not-found") {
     return (
-      <Box style={{ flexDirection: "column" }}>
+      <Box
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "100%",
+          height: "100%",
+          flexDirection: "column",
+          padding: 2,
+        }}
+      >
         <Text
-          content="OpenClaw Migration"
+          content="OpenClaw Conversion"
           style={{ color: tokens["accent.primary"] }}
         />
         <Box style={{ marginTop: 1, flexDirection: "row" }}>
           <Text content="- " style={{ color: tokens["text.muted"] }} />
           <Text
-            content="No OpenClaw installation found. Skipping migration."
+            content="No OpenClaw installation found."
             style={{ color: tokens["text.secondary"] }}
+          />
+        </Box>
+        <Box style={{ marginTop: 2 }}>
+          <Text
+            content="Press Enter to close"
+            style={{ color: tokens["text.muted"] }}
           />
         </Box>
       </Box>
@@ -421,9 +478,19 @@ export function OpenClawMigrationStepView({
 
   if (phase === "checklist") {
     return (
-      <Box style={{ flexDirection: "column" }}>
+      <Box
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "100%",
+          height: "100%",
+          flexDirection: "column",
+          padding: 2,
+        }}
+      >
         <Text
-          content="OpenClaw Migration"
+          content="OpenClaw Conversion"
           style={{ color: tokens["accent.primary"] }}
         />
         <Box style={{ marginTop: 1, flexDirection: "column" }}>
@@ -510,7 +577,7 @@ export function OpenClawMigrationStepView({
 
         <Box style={{ marginTop: 1 }}>
           <Text
-            content="Up/Down navigate  ·  Space toggle  ·  Enter start migration  ·  s skip"
+            content="Up/Down navigate  ·  Space toggle  ·  Enter start  ·  Esc cancel"
             style={{ color: tokens["text.muted"] }}
           />
         </Box>
@@ -520,9 +587,19 @@ export function OpenClawMigrationStepView({
 
   if (phase === "migrating") {
     return (
-      <Box style={{ flexDirection: "column" }}>
+      <Box
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "100%",
+          height: "100%",
+          flexDirection: "column",
+          padding: 2,
+        }}
+      >
         <Text
-          content="OpenClaw Migration"
+          content="OpenClaw Conversion"
           style={{ color: tokens["accent.primary"] }}
         />
         <Box style={{ marginTop: 1 }}>
@@ -541,9 +618,19 @@ export function OpenClawMigrationStepView({
 
   if (phase === "conflict") {
     return (
-      <Box style={{ flexDirection: "column" }}>
+      <Box
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "100%",
+          height: "100%",
+          flexDirection: "column",
+          padding: 2,
+        }}
+      >
         <Text
-          content="OpenClaw Migration"
+          content="OpenClaw Conversion"
           style={{ color: tokens["accent.primary"] }}
         />
         <Box style={{ marginTop: 1 }}>
@@ -561,31 +648,69 @@ export function OpenClawMigrationStepView({
     );
   }
 
+  if (phase === "error") {
+    return (
+      <Box
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          width: "100%",
+          height: "100%",
+          flexDirection: "column",
+          padding: 2,
+        }}
+      >
+        <Text
+          content="OpenClaw Conversion"
+          style={{ color: tokens["accent.primary"] }}
+        />
+        <Box style={{ marginTop: 1, flexDirection: "row" }}>
+          <Text content="x " style={{ color: tokens["status.error"] }} />
+          <Text
+            content={errorMessage ?? "An error occurred during conversion."}
+            style={{ color: tokens["text.primary"] }}
+          />
+        </Box>
+        <Box style={{ marginTop: 2 }}>
+          <Text
+            content="Press Enter to close"
+            style={{ color: tokens["text.muted"] }}
+          />
+        </Box>
+      </Box>
+    );
+  }
+
   // phase === "done"
   return (
-    <Box style={{ flexDirection: "column" }}>
+    <Box
+      style={{
+        position: "absolute",
+        top: 0,
+        left: 0,
+        width: "100%",
+        height: "100%",
+        flexDirection: "column",
+        padding: 2,
+      }}
+    >
       <Text
-        content="OpenClaw Migration"
+        content="OpenClaw Conversion"
         style={{ color: tokens["accent.primary"] }}
       />
-      <Box style={{ marginTop: 1, flexDirection: "row" }}>
-        {migrationError !== undefined ? (
-          <>
-            <Text content="x " style={{ color: tokens["status.error"] }} />
-            <Text
-              content={migrationError}
-              style={{ color: tokens["text.primary"] }}
-            />
-          </>
-        ) : (
-          <>
-            <Text content="* " style={{ color: tokens["status.success"] }} />
-            <Text
-              content="Migration complete. Press Enter to continue."
-              style={{ color: tokens["text.secondary"] }}
-            />
-          </>
-        )}
+      <Box style={{ marginTop: 1 }}>
+        <ConversionReport
+          reportContent={reportContent}
+          isLoading={reportLoading}
+          tokens={tokens}
+        />
+      </Box>
+      <Box style={{ marginTop: 2 }}>
+        <Text
+          content="Press Enter to close"
+          style={{ color: tokens["text.muted"] }}
+        />
       </Box>
     </Box>
   );

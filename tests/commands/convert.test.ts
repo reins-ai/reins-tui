@@ -3,6 +3,7 @@ import { describe, expect, it } from "bun:test";
 import { dispatchCommand, type CommandHandlerContext } from "../../src/commands/handlers";
 import { parseSlashCommand } from "../../src/commands/parser";
 import { SLASH_COMMANDS } from "../../src/commands/registry";
+import { appReducer, DEFAULT_STATE } from "../../src/store";
 
 function createTestContext(): CommandHandlerContext {
   return {
@@ -78,6 +79,42 @@ describe("handleConvertCommand", () => {
 
     expect(result.error.code).toBe("INVALID_ARGUMENT");
     expect(result.error.message).toContain("unknown");
+  });
+});
+
+describe("OPEN_CONVERT_FLOW signal consumption", () => {
+  it("SET_CONVERT_FLOW_OPEN action sets isConvertFlowOpen to true", () => {
+    const state = appReducer(DEFAULT_STATE, { type: "SET_CONVERT_FLOW_OPEN", payload: true });
+
+    expect(state.isConvertFlowOpen).toBe(true);
+  });
+
+  it("SET_CONVERT_FLOW_OPEN action sets isConvertFlowOpen to false", () => {
+    const openState = appReducer(DEFAULT_STATE, { type: "SET_CONVERT_FLOW_OPEN", payload: true });
+    const closedState = appReducer(openState, { type: "SET_CONVERT_FLOW_OPEN", payload: false });
+
+    expect(closedState.isConvertFlowOpen).toBe(false);
+  });
+
+  it("OPEN_CONVERT_FLOW signal maps to SET_CONVERT_FLOW_OPEN action", async () => {
+    // Verify the signal is emitted by /convert command
+    const context = createTestContext();
+    const result = await runCommand("/convert", context);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    const signals = result.value.signals ?? [];
+    const convertSignal = signals.find((s) => s.type === "OPEN_CONVERT_FLOW");
+    expect(convertSignal).toBeDefined();
+
+    // Verify the corresponding reducer action works
+    const state = appReducer(DEFAULT_STATE, { type: "SET_CONVERT_FLOW_OPEN", payload: true });
+    expect(state.isConvertFlowOpen).toBe(true);
+  });
+
+  it("isConvertFlowOpen defaults to false", () => {
+    expect(DEFAULT_STATE.isConvertFlowOpen).toBe(false);
   });
 });
 

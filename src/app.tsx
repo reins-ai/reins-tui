@@ -17,6 +17,7 @@ import { EmbeddingSetupWizard, type EmbeddingSetupResult } from "./components/se
 import { SearchSettingsModal } from "./components/search-settings-modal";
 import { OnboardingWizard, ProviderSetupPrompt, type OnboardingWizardResult } from "./components/onboarding";
 import { ChannelTokenPrompt } from "./components/channel-token-prompt";
+import { ConvertFlowOverlay } from "./components/conversion";
 import { callDaemonChannelApi, maskBotToken } from "./commands/handlers/channels";
 import { resetOnboarding } from "./commands/handlers/setup";
 import { handleBriefingCommand, handleNudgesWithDeps } from "./commands/handlers/proactive";
@@ -1638,6 +1639,7 @@ function AppView({ version, dimensions }: AppViewProps) {
     || state.isBrowserPanelOpen
     || state.isSchedulePanelOpen
     || state.isPersonaEditorOpen
+    || state.isConvertFlowOpen
     || state.isChannelTokenPromptOpen
     || state.panels.modal.visible
     || state.panels.drawer.visible
@@ -1731,6 +1733,10 @@ function AppView({ version, dimensions }: AppViewProps) {
         onClose={closeSkillPanel}
         onPromptReinsSetup={handlePromptReinsSkillSetup}
         marketplaceSource={marketplaceSource}
+      />
+      <ConvertFlowOverlay
+        visible={state.isConvertFlowOpen}
+        onClose={() => dispatch({ type: "SET_CONVERT_FLOW_OPEN", payload: false })}
       />
       {state.isChannelTokenPromptOpen && state.channelTokenPromptPlatform ? (
         <ChannelTokenPrompt
