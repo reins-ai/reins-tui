@@ -32,7 +32,8 @@ export type SlashCommandHandlerKey =
   | "IMPORT_MEMORIES"
   | "EXPORT_PERSONA"
   | "IMPORT_PERSONA"
-  | "SUMMARISE_CONTEXT";
+  | "SUMMARISE_CONTEXT"
+  | "CONVERT";
 
 export interface SlashCommandDefinition {
   readonly name: string;
@@ -191,6 +192,14 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     usage: "/channels [add|remove|enable|disable|status] [platform]",
     category: "system",
     handlerKey: "CHANNELS",
+  }),
+  Object.freeze({
+    name: "convert",
+    aliases: Object.freeze([]),
+    description: "Convert an OpenClaw installation to Reins. Use 'report' subcommand to view last report.",
+    usage: "/convert [report]",
+    category: "system",
+    handlerKey: "CONVERT",
   }),
   Object.freeze({
     name: "onboard",

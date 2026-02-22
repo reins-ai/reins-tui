@@ -8,6 +8,7 @@ import { handleImportPersonaCommand } from "./import-persona";
 import { handleScheduleCommand } from "./schedule";
 import { handleChannelsCommand } from "./channels";
 import { handleConnectCommand } from "./connect";
+import { handleConvertCommand } from "./convert";
 import { handleDaemonCommand } from "./daemon";
 import { handleEnvironmentCommand } from "./environment";
 import { handleIntegrationsCommand } from "./integrations";
@@ -50,6 +51,7 @@ const HANDLER_MAP: Record<SlashCommandHandlerKey, CommandHandler> = {
   MEMORY_SETUP: handleMemorySetupCommand,
   DAEMON: handleDaemonCommand,
   CHANNELS: handleChannelsCommand,
+  CONVERT: handleConvertCommand,
   ONBOARD: handleOnboardCommand,
   SETUP: handleSetupCommand,
   TOGGLE_THINKING: handleThinkingCommand,
