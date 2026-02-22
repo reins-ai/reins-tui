@@ -11,61 +11,48 @@ export interface LogoAsciiProps {
 }
 
 /**
- * Full-size standard bug logo (~11 lines tall, ~26 cols wide).
- * A stylized beetle/bug with antennae, shell, and legs.
+ * Full-size standard bug logo (~5 lines tall, ~7 cols wide).
+ * Polished Reins bug with antennae, @ eyes, shell, and legs.
+ * Centered: widest lines are 7 chars; 4-char lines get 1 space of left padding.
  */
 export const LOGO_FULL_STANDARD: readonly string[] = [
-  "      \\    /",
-  "       \\  /",
-  "    .--====--.",
-  "   / /      \\ \\",
-  "  | |  O  O  | |",
-  " -| |        | |-",
-  "  | |  \\__/  | |",
-  "   \\ \\      / /",
-  "  --'========`--",
-  "   /   REINS   \\",
-  "  '------+------'",
+  " \\ //",
+  "( @ @ )",
+  "--(_)--",
+  " / \\\\",
+  " REINS",
 ];
 
 /**
- * Full-size sad bug logo — droopy antennae and X eyes for error states.
+ * Full-size sad bug logo — X eyes for error states.
  */
 export const LOGO_FULL_SAD: readonly string[] = [
-  "      \\    /",
-  "       |  |",
-  "    .--====--.",
-  "   / /      \\ \\",
-  "  | |  X  X  | |",
-  " -| |        | |-",
-  "  | |  /--\\  | |",
-  "   \\ \\      / /",
-  "  --'========`--",
-  "   /   REINS   \\",
-  "  '------+------'",
+  " \\ //",
+  "( X X )",
+  "--(_)--",
+  " / \\\\",
+  " REINS",
 ];
 
 /**
- * Compact standard bug logo (~5 lines tall, ~14 cols wide).
- * Simplified for narrow terminals.
+ * Compact standard bug logo (~4 lines tall, ~7 cols wide).
+ * Same polished design without the REINS label, for narrow terminals.
  */
 export const LOGO_COMPACT_STANDARD: readonly string[] = [
-  "  \\ /",
-  " (O O)",
-  " /| |\\",
-  " \\___/",
-  " REINS",
+  " \\ //",
+  "( @ @ )",
+  "--(_)--",
+  " / \\\\",
 ];
 
 /**
  * Compact sad bug logo — X eyes for error states.
  */
 export const LOGO_COMPACT_SAD: readonly string[] = [
-  "  | |",
-  " (X X)",
-  " /| |\\",
-  " /---\\",
-  " REINS",
+  " \\ //",
+  "( X X )",
+  "--(_)--",
+  " / \\\\",
 ];
 
 const TAGLINE = "Your personal AI assistant";
