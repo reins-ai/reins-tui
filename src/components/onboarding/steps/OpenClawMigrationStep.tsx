@@ -88,8 +88,22 @@ interface ConversionStatusResponse {
   elapsedMs?: number;
   error?: string;
   conflict?: {
-    itemName: string;
-    category: string;
+    id: string;
+    type: "agent" | "provider" | "channel";
+    description: string;
+    strategies: ConflictStrategy[];
+  };
+}
+
+function deriveConflictDisplay(conflict: NonNullable<ConversionStatusResponse["conflict"]>): {
+  itemName: string;
+  category: string;
+} {
+  const match = /'([^']+)'/.exec(conflict.description);
+  const itemName = match?.[1] ?? conflict.description;
+  return {
+    itemName,
+    category: conflict.type,
   };
 }
 
@@ -274,8 +288,9 @@ export function OpenClawMigrationStepView({
       if (cancelled) return;
 
       if (status.status === "conflict" && status.conflict) {
-        setConflictItemName(status.conflict.itemName);
-        setConflictCategory(status.conflict.category);
+        const display = deriveConflictDisplay(status.conflict);
+        setConflictItemName(display.itemName);
+        setConflictCategory(display.category);
         setPhase("conflict");
         return;
       }
