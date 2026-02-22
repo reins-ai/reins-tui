@@ -573,7 +573,7 @@ export function ConvertFlowOverlay({ visible, onClose }: ConvertFlowOverlayProps
         </Box>
       ) : (
         /* phase === "done" */
-        <Box style={{ flexDirection: "column" }}>
+        <Box style={{ flexDirection: "column", flexGrow: 1 }}>
           <ConversionReport
             reportContent={reportContent}
             isLoading={reportLoading}

@@ -1,4 +1,4 @@
-import { Box, Text } from "../../ui";
+import { Box, ScrollBox, Text } from "../../ui";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -122,7 +122,7 @@ export function ConversionReport({
   const displayLines = truncated ? parsed.slice(0, MAX_DISPLAY_LINES) : parsed;
 
   return (
-    <Box style={{ flexDirection: "column" }}>
+    <Box style={{ flexDirection: "column", flexGrow: 1 }}>
       <Box style={{ flexDirection: "row" }}>
         <Text content="* " style={{ color: tokens["status.success"] }} />
         <Text
@@ -131,7 +131,15 @@ export function ConversionReport({
         />
       </Box>
 
-      <Box style={{ marginTop: 1, flexDirection: "column", paddingLeft: 2 }}>
+      {/* ScrollBox ensures lines are stacked correctly inside a height-bounded modal */}
+      <ScrollBox
+        style={{ flexGrow: 1, marginTop: 1 }}
+        scrollX={false}
+        scrollY={false}
+        contentOptions={{ flexDirection: "column", paddingLeft: 2 }}
+        scrollbarOptions={{ visible: false }}
+        verticalScrollbarOptions={{ visible: false }}
+      >
         {displayLines.map((line, index) => {
           if (line.kind === "h1") {
             return (
@@ -146,7 +154,7 @@ export function ConversionReport({
             return (
               <Text
                 key={index}
-                content={line.text.length > 0 ? `▸ ${line.text}` : " "}
+                content={line.text.length > 0 ? `> ${line.text}` : " "}
                 style={{ color: tokens["text.primary"] }}
               />
             );
@@ -155,7 +163,7 @@ export function ConversionReport({
             return (
               <Text
                 key={index}
-                content={line.text.length > 0 ? `  · ${line.text}` : " "}
+                content={line.text.length > 0 ? `  . ${line.text}` : " "}
                 style={{ color: tokens["text.primary"] }}
               />
             );
@@ -177,10 +185,10 @@ export function ConversionReport({
             />
           );
         })}
-      </Box>
+      </ScrollBox>
 
       {truncated ? (
-        <Box style={{ marginTop: 1, paddingLeft: 2 }}>
+        <Box style={{ paddingLeft: 2 }}>
           <Text
             content={`... ${parsed.length - MAX_DISPLAY_LINES} more lines. See full report at ~/.reins/`}
             style={{ color: tokens["text.muted"] }}
