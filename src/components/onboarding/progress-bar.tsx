@@ -21,6 +21,7 @@ const STEP_LABELS: Record<OnboardingStep, string> = {
   "welcome": "Welcome",
   "daemon-install": "Daemon",
   "provider-keys": "Providers",
+  "openclaw-migration": "Migration",
   "model-select": "Models",
   "workspace": "Workspace",
   "personality": "Personality",
