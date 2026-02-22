@@ -542,6 +542,80 @@ const CHANNELS_SPEC: CommandSpec = {
   ],
 };
 
+const AUTH_SPEC: CommandSpec = {
+  name: "auth",
+  aliases: ["authenticate"],
+  description: "Manage authorized users for a channel.",
+  usage: "/auth <channel> <userId> | /auth list <channel>",
+  root: [
+    {
+      type: "literal",
+      value: "list",
+      description: "List authorized users for a channel",
+      children: [
+        {
+          type: "argument",
+          arg: {
+            name: "channel",
+            kind: "string",
+            placeholder: "<channel>",
+            description: "Channel ID (e.g. telegram, discord)",
+          },
+        },
+      ],
+    },
+    {
+      type: "argument",
+      arg: {
+        name: "channel",
+        kind: "string",
+        placeholder: "<channel>",
+        description: "Channel ID (e.g. telegram, discord)",
+      },
+      children: [
+        {
+          type: "argument",
+          arg: {
+            name: "userId",
+            kind: "string",
+            placeholder: "<userId>",
+            description: "Platform-native user ID to authorize",
+          },
+        },
+      ],
+    },
+  ],
+};
+
+const DEAUTH_SPEC: CommandSpec = {
+  name: "deauth",
+  aliases: [],
+  description: "Remove an authorized user from a channel.",
+  usage: "/deauth <channel> <userId>",
+  root: [
+    {
+      type: "argument",
+      arg: {
+        name: "channel",
+        kind: "string",
+        placeholder: "<channel>",
+        description: "Channel ID (e.g. telegram, discord)",
+      },
+      children: [
+        {
+          type: "argument",
+          arg: {
+            name: "userId",
+            kind: "string",
+            placeholder: "<userId>",
+            description: "Platform-native user ID to deauthorize",
+          },
+        },
+      ],
+    },
+  ],
+};
+
 const INTEGRATIONS_SPEC: CommandSpec = {
   name: "integrations",
   aliases: ["int"],
@@ -609,6 +683,8 @@ const ALL_SPECS: readonly CommandSpec[] = [
   MEMORY_SPEC,
   DAEMON_SPEC,
   CHANNELS_SPEC,
+  AUTH_SPEC,
+  DEAUTH_SPEC,
   ONBOARD_SPEC,
   CONVERT_SPEC,
   SETUP_SPEC,
