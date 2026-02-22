@@ -3,6 +3,7 @@ import type { EngineState, OnboardingStep } from "@reins/core";
 import { WelcomeStepView } from "./welcome-step";
 import { DaemonInstallStepView } from "./daemon-install-step";
 import { ProviderSetupStepView } from "./provider-setup-step";
+import { OpenClawMigrationStepView } from "./OpenClawMigrationStep";
 import { ModelSelectionStepView } from "./model-selection-step";
 import { WorkspaceStepView } from "./workspace-step";
 import { PersonalityStepView } from "./personality-step";
@@ -34,6 +35,7 @@ export const STEP_VIEW_MAP: Record<OnboardingStep, StepViewComponent> = {
   "welcome": WelcomeStepView,
   "daemon-install": DaemonInstallStepView,
   "provider-keys": ProviderSetupStepView,
+  "openclaw-migration": OpenClawMigrationStepView,
   "model-select": ModelSelectionStepView,
   "workspace": WorkspaceStepView,
   "personality": PersonalityStepView,
@@ -47,6 +49,7 @@ export const STEP_VIEW_MAP: Record<OnboardingStep, StepViewComponent> = {
 export { WelcomeStepView } from "./welcome-step";
 export { DaemonInstallStepView } from "./daemon-install-step";
 export { ProviderSetupStepView } from "./provider-setup-step";
+export { OpenClawMigrationStepView } from "./OpenClawMigrationStep";
 export { ModelSelectionStepView } from "./model-selection-step";
 export { WorkspaceStepView } from "./workspace-step";
 export { PersonalityStepView } from "./personality-step";

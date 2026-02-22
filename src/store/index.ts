@@ -84,6 +84,7 @@ export type AppAction =
   | { type: "SET_BROWSER_PANEL_OPEN"; payload: boolean }
   | { type: "SET_SCHEDULE_PANEL_OPEN"; payload: boolean }
   | { type: "SET_PERSONA_EDITOR_OPEN"; payload: boolean }
+  | { type: "SET_CONVERT_FLOW_OPEN"; payload: boolean }
   | { type: "SET_CHANNEL_TOKEN_PROMPT"; payload: { open: boolean; platform?: string } }
   | { type: "SET_ONBOARDING_STATUS"; payload: OnboardingStatus }
   | { type: "SET_ONBOARDING_RERUN" }
@@ -509,6 +510,10 @@ export function appReducer(state: AppState, action: AppAction): AppState {
     case "SET_PERSONA_EDITOR_OPEN":
       return typeof action.payload === "boolean"
         ? { ...state, isPersonaEditorOpen: action.payload }
+        : state;
+    case "SET_CONVERT_FLOW_OPEN":
+      return typeof action.payload === "boolean"
+        ? { ...state, isConvertFlowOpen: action.payload }
         : state;
     case "SET_CHANNEL_TOKEN_PROMPT":
       return {

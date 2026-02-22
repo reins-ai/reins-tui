@@ -82,16 +82,16 @@ describe("handleSetupCommand", () => {
 
     expect(parsed.value.command.name).toBe("setup");
     expect(parsed.value.command.handlerKey).toBe("SETUP");
-    expect(parsed.value.command.aliases).toEqual(["onboarding", "personality"]);
+    expect(parsed.value.command.aliases).toEqual(["personality"]);
   });
 
-  it("parser resolves /onboarding alias to setup definition", () => {
+  it("parser resolves /onboarding alias to onboard definition", () => {
     const parsed = parseSlashCommand("/onboarding");
 
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
 
-    expect(parsed.value.command.name).toBe("setup");
-    expect(parsed.value.command.handlerKey).toBe("SETUP");
+    expect(parsed.value.command.name).toBe("onboard");
+    expect(parsed.value.command.handlerKey).toBe("ONBOARD");
   });
 });

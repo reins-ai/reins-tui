@@ -418,6 +418,9 @@ export function InputArea({ isFocused, onSubmit, onCancelPrompt, tokenUsage, isC
       if (signal.type === "RELAUNCH_ONBOARDING") {
         dispatch({ type: "SET_ONBOARDING_RERUN" });
       }
+      if (signal.type === "OPEN_CONVERT_FLOW") {
+        dispatch({ type: "SET_CONVERT_FLOW_OPEN", payload: true });
+      }
       if (signal.type === "ENVIRONMENT_SWITCHED" && signal.payload) {
         dispatch({ type: "SET_ENVIRONMENT", payload: signal.payload });
       }

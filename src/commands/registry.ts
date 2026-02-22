@@ -19,6 +19,7 @@ export type SlashCommandHandlerKey =
   | "MEMORY_SETUP"
   | "DAEMON"
   | "CHANNELS"
+  | "ONBOARD"
   | "SETUP"
   | "TOGGLE_THINKING"
   | "INTEGRATIONS"
@@ -31,7 +32,8 @@ export type SlashCommandHandlerKey =
   | "IMPORT_MEMORIES"
   | "EXPORT_PERSONA"
   | "IMPORT_PERSONA"
-  | "SUMMARISE_CONTEXT";
+  | "SUMMARISE_CONTEXT"
+  | "CONVERT";
 
 export interface SlashCommandDefinition {
   readonly name: string;
@@ -192,9 +194,25 @@ const COMMAND_DEFINITIONS: readonly SlashCommandDefinition[] = Object.freeze([
     handlerKey: "CHANNELS",
   }),
   Object.freeze({
+    name: "convert",
+    aliases: Object.freeze([]),
+    description: "Convert an OpenClaw installation to Reins. Use 'report' subcommand to view last report.",
+    usage: "/convert [report]",
+    category: "system",
+    handlerKey: "CONVERT",
+  }),
+  Object.freeze({
+    name: "onboard",
+    aliases: Object.freeze(["onboarding"]),
+    description: "Run the onboarding setup wizard.",
+    usage: "/onboard [reset-onboarding]",
+    category: "system",
+    handlerKey: "ONBOARD",
+  }),
+  Object.freeze({
     name: "setup",
-    aliases: Object.freeze(["onboarding", "personality"]),
-    description: "Re-run the onboarding setup wizard.",
+    aliases: Object.freeze(["personality"]),
+    description: "Alias for /onboard — re-run the onboarding setup wizard.",
     usage: "/setup [reset-onboarding]",
     category: "system",
     handlerKey: "SETUP",
