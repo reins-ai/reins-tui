@@ -4,6 +4,7 @@ import { Box, Text, useKeyboard } from "../../ui";
 import { useThemeTokens } from "../../theme";
 import { getActiveDaemonUrl } from "../../daemon/actions";
 import { logger } from "../../lib/debug-logger";
+import { ModalPanel } from "../modal-panel";
 import { ConversionProgress } from "./ConversionProgress";
 import { ConflictPrompt, type ConflictStrategy } from "./ConflictPrompt";
 import { ConversionReport } from "./ConversionReport";
@@ -417,316 +418,169 @@ export function ConvertFlowOverlay({ visible, onClose }: ConvertFlowOverlayProps
     }
   });
 
-  if (!visible) {
-    return null;
-  }
+  // Derive hint text based on current phase
+  const hintText =
+    phase === "migrating" || phase === "conflict"
+      ? ""
+      : phase === "checklist"
+        ? "Up/Down navigate  ·  Space toggle  ·  Enter start  ·  Esc cancel"
+        : phase === "not-found" || phase === "error" || phase === "done"
+          ? "Enter close"
+          : "Esc cancel";
 
-  // --- Render phases ---
-
-  if (phase === "detecting") {
-    return (
-      <Box
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: "100%",
-          height: "100%",
-          flexDirection: "column",
-          padding: 2,
-        }}
-      >
-        <Text
-          content="OpenClaw Conversion"
-          style={{ color: tokens["accent.primary"] }}
-        />
-        <Box style={{ marginTop: 1, flexDirection: "row" }}>
-          <Text content="* " style={{ color: tokens["glyph.tool.running"] }} />
-          <Text
-            content="Checking for OpenClaw installation..."
-            style={{ color: tokens["text.secondary"] }}
-          />
-        </Box>
-        <Box style={{ marginTop: 2 }}>
-          <Text
-            content="Esc to cancel"
-            style={{ color: tokens["text.muted"] }}
-          />
-        </Box>
-      </Box>
-    );
-  }
-
-  if (phase === "not-found") {
-    return (
-      <Box
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: "100%",
-          height: "100%",
-          flexDirection: "column",
-          padding: 2,
-        }}
-      >
-        <Text
-          content="OpenClaw Conversion"
-          style={{ color: tokens["accent.primary"] }}
-        />
-        <Box style={{ marginTop: 1, flexDirection: "row" }}>
-          <Text content="- " style={{ color: tokens["text.muted"] }} />
-          <Text
-            content="No OpenClaw installation found."
-            style={{ color: tokens["text.secondary"] }}
-          />
-        </Box>
-        <Box style={{ marginTop: 2 }}>
-          <Text
-            content="Press Enter to close"
-            style={{ color: tokens["text.muted"] }}
-          />
-        </Box>
-      </Box>
-    );
-  }
-
-  if (phase === "checklist") {
-    return (
-      <Box
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: "100%",
-          height: "100%",
-          flexDirection: "column",
-          padding: 2,
-        }}
-      >
-        <Text
-          content="OpenClaw Conversion"
-          style={{ color: tokens["accent.primary"] }}
-        />
-        <Box style={{ marginTop: 1, flexDirection: "column" }}>
+  return (
+    <ModalPanel
+      visible={visible}
+      title="OpenClaw Migration"
+      hint={hintText}
+      width={80}
+      height={24}
+      closeOnEscape={false}
+      onClose={onClose}
+    >
+      {phase === "detecting" ? (
+        <Box style={{ flexDirection: "column" }}>
           <Box style={{ flexDirection: "row" }}>
-            <Text content="* " style={{ color: tokens["status.success"] }} />
+            <Text content="* " style={{ color: tokens["glyph.tool.running"] }} />
             <Text
-              content="OpenClaw installation detected"
+              content="Checking for OpenClaw installation..."
+              style={{ color: tokens["text.secondary"] }}
+            />
+          </Box>
+        </Box>
+      ) : phase === "not-found" ? (
+        <Box style={{ flexDirection: "column" }}>
+          <Box style={{ flexDirection: "row" }}>
+            <Text content="- " style={{ color: tokens["text.muted"] }} />
+            <Text
+              content="No OpenClaw installation found."
+              style={{ color: tokens["text.secondary"] }}
+            />
+          </Box>
+        </Box>
+      ) : phase === "checklist" ? (
+        <Box style={{ flexDirection: "column" }}>
+          <Box style={{ flexDirection: "column" }}>
+            <Box style={{ flexDirection: "row" }}>
+              <Text content="* " style={{ color: tokens["status.success"] }} />
+              <Text
+                content="OpenClaw installation detected"
+                style={{ color: tokens["text.primary"] }}
+              />
+            </Box>
+            {detectedPath !== null ? (
+              <Box style={{ paddingLeft: 4 }}>
+                <Text
+                  content={`Path: ${detectedPath}`}
+                  style={{ color: tokens["text.muted"] }}
+                />
+              </Box>
+            ) : null}
+            {detectedVersion !== null ? (
+              <Box style={{ paddingLeft: 4 }}>
+                <Text
+                  content={`Version: ${detectedVersion}`}
+                  style={{ color: tokens["text.muted"] }}
+                />
+              </Box>
+            ) : null}
+          </Box>
+
+          <Box style={{ marginTop: 1 }}>
+            <Text
+              content="Select data to migrate:"
               style={{ color: tokens["text.primary"] }}
             />
           </Box>
-          {detectedPath !== null ? (
-            <Box style={{ paddingLeft: 4 }}>
-              <Text
-                content={`Path: ${detectedPath}`}
-                style={{ color: tokens["text.muted"] }}
-              />
-            </Box>
-          ) : null}
-          {detectedVersion !== null ? (
-            <Box style={{ paddingLeft: 4 }}>
-              <Text
-                content={`Version: ${detectedVersion}`}
-                style={{ color: tokens["text.muted"] }}
-              />
-            </Box>
-          ) : null}
-        </Box>
 
-        <Box style={{ marginTop: 2 }}>
-          <Text
-            content="Select data to migrate:"
-            style={{ color: tokens["text.primary"] }}
-          />
-        </Box>
+          <Box style={{ marginTop: 1, flexDirection: "column" }}>
+            {CONVERSION_CATEGORIES.map((category, index) => {
+              const isFocused = index === focusedIndex;
+              const isSelected = selectedCategories.has(category);
+              const label = CATEGORY_LABELS[category];
 
-        <Box style={{ marginTop: 1, flexDirection: "column" }}>
-          {CONVERSION_CATEGORIES.map((category, index) => {
-            const isFocused = index === focusedIndex;
-            const isSelected = selectedCategories.has(category);
-            const label = CATEGORY_LABELS[category];
-
-            return (
-              <Box
-                key={category}
-                style={{
-                  flexDirection: "row",
-                  paddingLeft: 1,
-                  backgroundColor: isFocused
-                    ? tokens["surface.elevated"]
-                    : "transparent",
-                }}
-              >
-                <Text
-                  content={isFocused ? "> " : "  "}
-                  style={{ color: tokens["accent.primary"] }}
-                />
-                <Text
-                  content={isSelected ? "[x] " : "[ ] "}
+              return (
+                <Box
+                  key={category}
                   style={{
-                    color: isSelected
-                      ? tokens["status.success"]
-                      : tokens["text.muted"],
+                    flexDirection: "row",
+                    paddingLeft: 1,
+                    backgroundColor: isFocused
+                      ? tokens["surface.elevated"]
+                      : "transparent",
                   }}
-                />
-                <Text
-                  content={label}
-                  style={{
-                    color: isFocused
-                      ? tokens["text.primary"]
-                      : tokens["text.secondary"],
-                  }}
-                />
-              </Box>
-            );
-          })}
-        </Box>
+                >
+                  <Text
+                    content={isFocused ? "> " : "  "}
+                    style={{ color: tokens["accent.primary"] }}
+                  />
+                  <Text
+                    content={isSelected ? "[x] " : "[ ] "}
+                    style={{
+                      color: isSelected
+                        ? tokens["status.success"]
+                        : tokens["text.muted"],
+                    }}
+                  />
+                  <Text
+                    content={label}
+                    style={{
+                      color: isFocused
+                        ? tokens["text.primary"]
+                        : tokens["text.secondary"],
+                    }}
+                  />
+                </Box>
+              );
+            })}
+          </Box>
 
-        <Box style={{ marginTop: 2 }}>
-          <Text
-            content={`${selectedCategories.size} of ${CONVERSION_CATEGORIES.length} categories selected`}
-            style={{ color: tokens["text.muted"] }}
-          />
+          <Box style={{ marginTop: 1 }}>
+            <Text
+              content={`${selectedCategories.size} of ${CONVERSION_CATEGORIES.length} categories selected`}
+              style={{ color: tokens["text.muted"] }}
+            />
+          </Box>
         </Box>
-
-        <Box style={{ marginTop: 1 }}>
-          <Text
-            content="Up/Down navigate  ·  Space toggle  ·  Enter start  ·  Esc cancel"
-            style={{ color: tokens["text.muted"] }}
-          />
-        </Box>
-      </Box>
-    );
-  }
-
-  if (phase === "migrating") {
-    return (
-      <Box
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: "100%",
-          height: "100%",
-          flexDirection: "column",
-          padding: 2,
-        }}
-      >
-        <Text
-          content="OpenClaw Conversion"
-          style={{ color: tokens["accent.primary"] }}
-        />
-        <Box style={{ marginTop: 1 }}>
-          <ConversionProgress
-            currentCategory={progressCategory}
-            processed={progressProcessed}
-            total={progressTotal}
-            elapsedMs={progressElapsedMs}
-            status="running"
-            tokens={tokens}
-          />
-        </Box>
-      </Box>
-    );
-  }
-
-  if (phase === "conflict") {
-    return (
-      <Box
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: "100%",
-          height: "100%",
-          flexDirection: "column",
-          padding: 2,
-        }}
-      >
-        <Text
-          content="OpenClaw Conversion"
-          style={{ color: tokens["accent.primary"] }}
-        />
-        <Box style={{ marginTop: 1 }}>
-          <ConflictPrompt
-            itemName={conflictItemName}
-            category={conflictCategory}
-            selectedStrategy="overwrite"
-            onStrategySelect={(strategy) => {
-              void handleConflictResolve(strategy);
-            }}
-            tokens={tokens}
-          />
-        </Box>
-      </Box>
-    );
-  }
-
-  if (phase === "error") {
-    return (
-      <Box
-        style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: "100%",
-          height: "100%",
-          flexDirection: "column",
-          padding: 2,
-        }}
-      >
-        <Text
-          content="OpenClaw Conversion"
-          style={{ color: tokens["accent.primary"] }}
-        />
-        <Box style={{ marginTop: 1, flexDirection: "row" }}>
-          <Text content="x " style={{ color: tokens["status.error"] }} />
-          <Text
-            content={errorMessage ?? "An error occurred during conversion."}
-            style={{ color: tokens["text.primary"] }}
-          />
-        </Box>
-        <Box style={{ marginTop: 2 }}>
-          <Text
-            content="Press Enter to close"
-            style={{ color: tokens["text.muted"] }}
-          />
-        </Box>
-      </Box>
-    );
-  }
-
-  // phase === "done"
-  return (
-    <Box
-      style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        width: "100%",
-        height: "100%",
-        flexDirection: "column",
-        padding: 2,
-      }}
-    >
-      <Text
-        content="OpenClaw Conversion"
-        style={{ color: tokens["accent.primary"] }}
-      />
-      <Box style={{ marginTop: 1 }}>
-        <ConversionReport
-          reportContent={reportContent}
-          isLoading={reportLoading}
+      ) : phase === "migrating" ? (
+        <ConversionProgress
+          currentCategory={progressCategory}
+          processed={progressProcessed}
+          total={progressTotal}
+          elapsedMs={progressElapsedMs}
+          status="running"
           tokens={tokens}
         />
-      </Box>
-      <Box style={{ marginTop: 2 }}>
-        <Text
-          content="Press Enter to close"
-          style={{ color: tokens["text.muted"] }}
+      ) : phase === "conflict" ? (
+        <ConflictPrompt
+          itemName={conflictItemName}
+          category={conflictCategory}
+          selectedStrategy="overwrite"
+          onStrategySelect={(strategy) => {
+            void handleConflictResolve(strategy);
+          }}
+          tokens={tokens}
         />
-      </Box>
-    </Box>
+      ) : phase === "error" ? (
+        <Box style={{ flexDirection: "column" }}>
+          <Box style={{ flexDirection: "row" }}>
+            <Text content="x " style={{ color: tokens["status.error"] }} />
+            <Text
+              content={errorMessage ?? "An error occurred during conversion."}
+              style={{ color: tokens["text.primary"] }}
+            />
+          </Box>
+        </Box>
+      ) : (
+        /* phase === "done" */
+        <Box style={{ flexDirection: "column" }}>
+          <ConversionReport
+            reportContent={reportContent}
+            isLoading={reportLoading}
+            tokens={tokens}
+          />
+        </Box>
+      )}
+    </ModalPanel>
   );
 }

@@ -67,9 +67,37 @@ const QUIT_SPEC: CommandSpec = {
   root: [],
 };
 
+const ONBOARD_SPEC: CommandSpec = {
+  name: "onboard",
+  aliases: ["onboarding"],
+  description: "Run the onboarding setup wizard.",
+  usage: "/onboard [reset-onboarding]",
+  root: [
+    {
+      type: "literal",
+      value: "reset-onboarding",
+      description: "Reset onboarding state and start fresh",
+    },
+  ],
+};
+
+const CONVERT_SPEC: CommandSpec = {
+  name: "convert",
+  aliases: [],
+  description: "Import data from an OpenClaw installation.",
+  usage: "/convert [report]",
+  root: [
+    {
+      type: "literal",
+      value: "report",
+      description: "View the last conversion report",
+    },
+  ],
+};
+
 const SETUP_SPEC: CommandSpec = {
   name: "setup",
-  aliases: ["onboarding", "personality"],
+  aliases: ["personality"],
   description: "Re-run the onboarding setup wizard.",
   usage: "/setup",
   root: [],
@@ -581,6 +609,8 @@ const ALL_SPECS: readonly CommandSpec[] = [
   MEMORY_SPEC,
   DAEMON_SPEC,
   CHANNELS_SPEC,
+  ONBOARD_SPEC,
+  CONVERT_SPEC,
   SETUP_SPEC,
   INTEGRATIONS_SPEC,
   SKILLS_SPEC,
