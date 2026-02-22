@@ -131,58 +131,39 @@ export function ConversionReport({
         />
       </Box>
 
-      {/* ScrollBox ensures lines are stacked correctly inside a height-bounded modal */}
+      {/* ScrollBox with Box-wrapped lines — bare Text elements don't get their
+          own row in OpenTUI flex layout; each line must be a Box child. */}
       <ScrollBox
         style={{ flexGrow: 1, marginTop: 1 }}
         scrollX={false}
-        scrollY={false}
+        scrollY={true}
         contentOptions={{ flexDirection: "column", paddingLeft: 2 }}
         scrollbarOptions={{ visible: false }}
         verticalScrollbarOptions={{ visible: false }}
       >
         {displayLines.map((line, index) => {
-          if (line.kind === "h1") {
-            return (
-              <Text
-                key={index}
-                content={line.text.length > 0 ? line.text : " "}
-                style={{ color: tokens["accent.primary"] }}
-              />
-            );
-          }
-          if (line.kind === "h2") {
-            return (
-              <Text
-                key={index}
-                content={line.text.length > 0 ? `> ${line.text}` : " "}
-                style={{ color: tokens["text.primary"] }}
-              />
-            );
-          }
-          if (line.kind === "h3") {
-            return (
-              <Text
-                key={index}
-                content={line.text.length > 0 ? `  . ${line.text}` : " "}
-                style={{ color: tokens["text.primary"] }}
-              />
-            );
-          }
-          if (line.kind === "separator") {
-            return (
-              <Text
-                key={index}
-                content={line.text}
-                style={{ color: tokens["text.muted"] }}
-              />
-            );
-          }
+          const color = line.kind === "h1"
+            ? tokens["accent.primary"]
+            : line.kind === "h2" || line.kind === "h3"
+              ? tokens["text.primary"]
+              : line.kind === "separator"
+                ? tokens["text.muted"]
+                : tokens["text.secondary"];
+
+          const prefix = line.kind === "h2"
+            ? "> "
+            : line.kind === "h3"
+              ? "  . "
+              : "";
+
+          const content = line.text.length > 0
+            ? `${prefix}${line.text}`
+            : " ";
+
           return (
-            <Text
-              key={index}
-              content={line.text.length > 0 ? line.text : " "}
-              style={{ color: tokens["text.secondary"] }}
-            />
+            <Box key={index} style={{ flexDirection: "row" }}>
+              <Text content={content} style={{ color }} />
+            </Box>
           );
         })}
       </ScrollBox>
